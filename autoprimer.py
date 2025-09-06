@@ -621,25 +621,24 @@ def main():
                                     if primers:
                                         st.success(f"✅ Successfully designed {len(primers)} primer pairs!")
                                         
-                                        # Show quick preview of primers
-                                        st.subheader("🎯 Primer Preview")
+                                        # Show all primers
+                                        st.subheader("🎯 All Primer Pairs")
                                         preview_data = []
-                                        for i, primer in enumerate(primers[:3]):  # Show first 3 pairs
+                                        for i, primer in enumerate(primers):  # Show all pairs
                                             preview_data.append({
                                                 'Pair': i + 1,
                                                 'Forward': primer.forward_seq,
                                                 'Reverse': primer.reverse_seq,
                                                 'Tm': f"{primer.forward_tm:.1f}°C / {primer.reverse_tm:.1f}°C",
-                                                'Size': f"{primer.product_size} bp"
+                                                'Size': f"{primer.product_size} bp",
+                                                'GC%': f"{primer.gc_content_f:.1f}% / {primer.gc_content_r:.1f}%",
+                                                'Penalty': f"{primer.penalty:.3f}"
                                             })
                                         
                                         preview_df = pd.DataFrame(preview_data)
                                         st.dataframe(preview_df, use_container_width=True)
                                         
-                                        if len(primers) > 3:
-                                            st.info(f"📊 Showing first 3 of {len(primers)} primer pairs. Go to the 'Results' tab to see all primers and detailed analysis!")
-                                        else:
-                                            st.info("📊 Go to the 'Results' tab to see detailed primer analysis and export options!")
+                                        st.info("📊 Go to the 'Results' tab for detailed primer analysis and export options!")
                                         
                                         # Clear session state after successful search
                                         if 'organism_name' in st.session_state:
@@ -1102,6 +1101,12 @@ def main():
     with tab2:
         st.header("Primer Design Results")
         
+        # Debug session state
+        st.write("🔍 Debug - Session state check:")
+        st.write(f"Primers designed: {len(st.session_state.primers_designed) if st.session_state.primers_designed else 0}")
+        st.write(f"Current sequence length: {len(st.session_state.current_sequence) if st.session_state.current_sequence else 0}")
+        st.write(f"Sequence info keys: {list(st.session_state.sequence_info.keys()) if st.session_state.sequence_info else 'None'}")
+        
         if st.session_state.primers_designed:
             primers = st.session_state.primers_designed
             
@@ -1179,6 +1184,10 @@ def main():
     
     with tab3:
         st.header("Primer Analysis")
+        
+        # Debug session state
+        st.write("🔍 Debug - Analysis tab session state:")
+        st.write(f"Primers designed: {len(st.session_state.primers_designed) if st.session_state.primers_designed else 0}")
         
         if st.session_state.primers_designed:
             primers = st.session_state.primers_designed
