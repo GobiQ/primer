@@ -387,17 +387,36 @@ def main():
     st.title("🧬 Automated Primer Design Tool")
     st.markdown("### Design PCR primers with NCBI database integration")
     
+    # Quick start guide
+    if not email:
+        st.warning("🚀 **Quick Start**: Enter an email address in the sidebar to begin searching for organisms and designing primers. NCBI requires this for database access.")
+    
     # Sidebar configuration
     st.sidebar.header("⚙️ Configuration")
     
     # NCBI Configuration
     st.sidebar.subheader("NCBI Settings")
+    
+    # Make email requirement more prominent
+    st.sidebar.info("📧 **Email Required**: NCBI requires a valid email address for database access. This is mandatory for all searches.")
+    
     email = st.sidebar.text_input("Email (required for NCBI)", 
                                  placeholder="your.email@example.com",
-                                 help="Required by NCBI for database access")
+                                 help="Required by NCBI for database access. Use any valid email address.")
+    
+    # Add a default email option for testing
+    if st.sidebar.button("🚀 Use test email (demo@example.com)", type="secondary"):
+        st.session_state.demo_email = "demo@example.com"
+        st.rerun()
+    
+    # Use demo email if set
+    if 'demo_email' in st.session_state:
+        email = st.session_state.demo_email
+        del st.session_state.demo_email
+    
     api_key = st.sidebar.text_input("NCBI API Key (optional)", 
                                    type="password",
-                                   help="For increased rate limits")
+                                   help="For increased rate limits (not required)")
     
     # Primer Design Parameters
     st.sidebar.subheader("Primer Parameters")
@@ -450,7 +469,11 @@ def main():
         
         if input_method == "Organism Name":
             st.subheader("Search by Organism")
-            st.info("💡 **Tip:** Enter the scientific name (e.g., 'Fusarium oxysporum') for best results. You can also search for specific genes within an organism using the advanced options below.")
+            
+            if not email:
+                st.error("❌ **Email Required**: Please enter an email address in the sidebar first to search for organisms.")
+            else:
+                st.info("💡 **Tip:** Enter the scientific name (e.g., 'Fusarium oxysporum') for best results. You can also search for specific genes within an organism using the advanced options below.")
             
             col1, col2 = st.columns([2, 1])
             with col1:
@@ -499,7 +522,7 @@ def main():
             
             if st.button("Search Organism Genomes", type="primary"):
                 if not email:
-                    st.error("Please provide an email address for NCBI access")
+                    st.error("❌ **Email Required**: Please enter an email address in the sidebar to access NCBI databases. You can use any valid email address or click 'Use test email' for demo purposes.")
                 elif not organism_name:
                     st.error("Please provide an organism name")
                 else:
@@ -603,7 +626,7 @@ def main():
             
             if st.button("Fetch and Design Primers", type="primary"):
                 if not email:
-                    st.error("Please provide an email address for NCBI access")
+                    st.error("❌ **Email Required**: Please enter an email address in the sidebar to access NCBI databases. You can use any valid email address or click 'Use test email' for demo purposes.")
                 elif not genbank_id:
                     st.error("Please provide a GenBank ID")
                 else:
@@ -639,7 +662,7 @@ def main():
             
             if st.button("Search and Design Primers", type="primary"):
                 if not email:
-                    st.error("Please provide an email address for NCBI access")
+                    st.error("❌ **Email Required**: Please enter an email address in the sidebar to access NCBI databases. You can use any valid email address or click 'Use test email' for demo purposes.")
                 elif not search_query:
                     st.error("Please provide a search query")
                 else:
