@@ -668,21 +668,40 @@ def main():
                                                         return
                                                 
                                                 # Fetch the sequence
-                                                st.write(f"Fetching sequence {sequence_id} from {database_used} database...")
+                                                st.write(f"🔍 Fetching sequence {sequence_id} from {database_used} database...")
                                                 
                                                 if database_used == "nucleotide":
                                                     # For nucleotide sequences, fetch directly
+                                                    st.write("📡 Using nucleotide database for direct fetch...")
                                                     sequence = ncbi.fetch_sequence(sequence_id, database="nucleotide")
                                                     seq_info = ncbi.fetch_sequence_info(sequence_id, database="nucleotide")
                                                 else:
                                                     # For genome assemblies, use the nucleotide ID we found
+                                                    st.write("📡 Using default database for genome assembly...")
                                                     sequence = ncbi.fetch_sequence(sequence_id)
                                                     seq_info = ncbi.fetch_sequence_info(sequence_id)
                                                 
                                                 if sequence:
-                                                    st.write(f"Successfully fetched sequence: {len(sequence)} bp")
+                                                    st.write(f"✅ Successfully fetched sequence: {len(sequence)} bp")
+                                                    st.write(f"📝 First 100 characters: {sequence[:100]}...")
                                                 else:
-                                                    st.write("Failed to fetch sequence")
+                                                    st.write("❌ Failed to fetch sequence")
+                                                    st.write("🔧 Trying alternative fetch method...")
+                                                    
+                                                    # Try alternative fetch method
+                                                    try:
+                                                        import requests
+                                                        url = f"https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=nucleotide&id={sequence_id}&rettype=fasta&retmode=text"
+                                                        response = requests.get(url)
+                                                        if response.status_code == 200:
+                                                            fasta_text = response.text
+                                                            lines = fasta_text.split('\n')
+                                                            sequence = ''.join(line for line in lines[1:] if not line.startswith('>'))
+                                                            st.write(f"✅ Alternative method succeeded: {len(sequence)} bp")
+                                                        else:
+                                                            st.write(f"❌ Alternative method failed: HTTP {response.status_code}")
+                                                    except Exception as alt_e:
+                                                        st.write(f"❌ Alternative method error: {alt_e}")
                                                 
                                                 if sequence:
                                                     # Clean the sequence (remove non-DNA characters)
@@ -709,19 +728,26 @@ def main():
                                                     st.session_state.sequence_info = seq_info
                                                     st.session_state.current_sequence = clean_sequence
                                                     
-                                                    st.write(f"Designing primers for {len(clean_sequence)} bp sequence...")
+                                                    st.write(f"🧬 Designing primers for {len(clean_sequence)} bp sequence...")
+                                                    st.write(f"⚙️ Using parameters: min_size={custom_params.get('PRIMER_MIN_SIZE')}, max_size={custom_params.get('PRIMER_MAX_SIZE')}, min_tm={custom_params.get('PRIMER_MIN_TM')}")
                                                     
                                                     # Design primers
-                                                    primers = designer.design_primers(clean_sequence, custom_params=custom_params)
-                                                    st.session_state.primers_designed = primers
-                                                    
-                                                    if primers:
-                                                        st.success(f"Successfully designed {len(primers)} primer pairs!")
-                                                        # Clear session state after successful search
-                                                        if 'organism_name' in st.session_state:
-                                                            del st.session_state.organism_name
-                                                    else:
-                                                        st.warning("No suitable primers found with current parameters. Try adjusting the primer parameters in the sidebar.")
+                                                    try:
+                                                        primers = designer.design_primers(clean_sequence, custom_params=custom_params)
+                                                        st.write(f"🔬 Primer design completed. Found {len(primers) if primers else 0} primer pairs.")
+                                                        
+                                                        st.session_state.primers_designed = primers
+                                                        
+                                                        if primers:
+                                                            st.success(f"✅ Successfully designed {len(primers)} primer pairs!")
+                                                            # Clear session state after successful search
+                                                            if 'organism_name' in st.session_state:
+                                                                del st.session_state.organism_name
+                                                        else:
+                                                            st.warning("⚠️ No suitable primers found with current parameters. Try adjusting the primer parameters in the sidebar.")
+                                                    except Exception as primer_e:
+                                                        st.error(f"❌ Error during primer design: {primer_e}")
+                                                        st.write("🔧 This might be due to sequence quality or primer parameters.")
                                                 else:
                                                     st.error("Failed to fetch sequence. The sequence might be too large or unavailable.")
                                                     
