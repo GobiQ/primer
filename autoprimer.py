@@ -1,156 +1,4 @@
-def suggest_application_method(pest_type: str, dsrna_length: int) -> str:
-    """Suggest application method based on pest type and dsRNA characteristics"""
-    methods = {
-        # Arthropods
-        'russet_mites': {
-            'foliar_spray': 'Fine mist foliar spray for thorough coverage',
-            'soil_drench': 'Soil drench for systemic uptake'
-        },
-        'spider_mites': {
-            'foliar_spray': 'Foliar spray targeting undersides of leaves',
-            'soil_drench': 'Soil drench for systemic protection'
-        },
-        'broad_mites': {
-            'foliar_spray': 'Fine mist application for microscopic target',
-            'greenhouse_application': 'Controlled environment application'
-        },
-        'root_aphids': {
-            'soil_drench': 'Direct soil application to root zone',
-            'hydroponic_addition': 'Add to hydroponic nutrient solution'
-        },
-        'thrips': {
-            'foliar_spray': 'Foliar spray during active feeding periods',
-            'soil_drench': 'Soil treatment for pupating stages'
-        },
-        'whiteflies': {
-            'foliar_spray': 'Foliar spray targeting flying adults',
-            'soil_drench': 'Soil treatment for systemic protection'
-        },
-        'fungus_gnats': {
-            'soil_drench': 'Soil drench targeting larvae in growing medium',
-            'media_treatment': 'Growing media pre-treatment'
-        },
-        'leaf_miners': {
-            'foliar_spray': 'Foliar spray for leaf-dwelling larvae',
-            'systemic_application': 'Systemic uptake through roots'
-        },
-        'mealybugs': {
-            'foliar_spray': 'Targeted spray application',
-            'soil_drench': 'Soil drench for systemic control'
-        },
-        
-        # Fungi
-        'fusarium_oxysporum': {
-            'soil_treatment': 'Soil treatment for root protection',
-            'seed_treatment': 'Seed treatment for prevention'
-        },
-        'fusarium_solani': {
-            'soil_application': 'Soil application at planting',
-            'root_zone_treatment': 'Direct root zone treatment'
-        },
-        'fusarium_proliferatum': {
-            'seed_treatment': 'Seed treatment to prevent infection',
-            'foliar_spray': 'Foliar application for stem protection'
-        },
-        'other_fusarium': {
-            'soil_treatment': 'Comprehensive soil treatment',
-            'preventive_application': 'Preventive application before planting'
-        },
-        'botrytis_cinerea': {
-            'foliar_spray': 'Foliar spray for flower and fruit protection',
-            'greenhouse_application': 'Controlled environment application'
-        },
-        'other_botrytis': {
-            'foliar_spray': 'Foliar spray during susceptible periods',
-            'preventive_treatment': 'Preventive treatment before flowering'
-        },
-        'golovinomyces_ambrosiae': {
-            'foliar_spray': 'Foliar spray at first sign of infection',
-            'preventive_application': 'Preventive foliar application'
-        },
-        'other_golovinomyces': {
-            'foliar_spray': 'Regular foliar spray program',
-            'greenhouse_treatment': 'Controlled environment treatment'
-        },
-        
-        # Pseudofungi
-        'pythium_myriotylum': {
-            'soil_drench': 'Soil drench for root zone protection',
-            'hydroponic_treatment': 'Hydroponic system treatment'
-        },
-        'other_pythium': {
-            'soil_treatment': 'Comprehensive soil treatment',
-            'water_management': 'Application with water management'
-        },
-        
-        # Viruses
-        'beet_curly_top_virus': {
-            'foliar_spray': 'Foliar spray for infected plants',
-            'vector_control': 'Combined with vector control measures'
-        },
-        'alfalfa_mosaic_virus': {
-            'foliar_application': 'Foliar application on symptomatic plants',
-            'seed_treatment': 'Seed treatment for prevention'
-        },
-        'arabis_mosaic_virus': {
-            'foliar_spray': 'Foliar spray application',
-            'soil_treatment': 'Soil treatment for nematode vectors'
-        },
-        'lettuce_chlorosis_virus': {
-            'foliar_spray': 'Foliar spray for infected plants',
-            'vector_management': 'Combined with whitefly control'
-        },
-        'cannabis_cryptic_virus': {
-            'foliar_application': 'Foliar application for infected plants',
-            'tissue_culture_treatment': 'Treatment of tissue culture lines'
-        },
-        'tomato_ring_spot_virus': {
-            'foliar_spray': 'Foliar spray application',
-            'soil_treatment': def export_to_excel(primers: List[PrimerPair]) -> bytes:
-    """Export primer results to Excel format"""
-    data = []
-    has_t7 = primers[0].t7_forward_seq != "" if primers else False
-    
-    for i, primer in enumerate(primers):
-        row = {
-            'Primer_Pair': i + 1,
-            'Forward_Sequence': primer.forward_seq,
-            'Reverse_Sequence': primer.reverse_seq,
-            'Forward_Tm': round(primer.forward_tm, 2),
-            'Reverse_Tm': round(primer.reverse_tm, 2),
-            'Product_Size': primer.product_size,
-            'Forward_GC%': round(primer.gc_content_f, 2),
-            'Reverse_GC%': round(primer.gc_content_r, 2),
-            'Forward_Start': primer.forward_start,
-            'Reverse_Start': primer.reverse_start,
-            'Penalty_Score': round(primer.penalty, 4)
-        }
-        
-        # Add T7-specific data
-        if has_t7:
-            row.update({
-                'T7_Forward_Sequence': primer.t7_forward_seq,
-                'T7_Reverse_Sequence': primer.t7_reverse_seq,
-                'T7_Forward_Tm': round(primer.t7_forward_tm, 2),
-                'T7_Reverse_Tm': round(primer.t7_reverse_tm, 2),
-                'dsRNA_Length': primer.dsrna_length,
-                'Target_Organism': primer.target_organism,
-                'Target_Gene': primer.target_gene,
-                'RNAi_Efficiency_Score': round(calculate_rnai_efficiency(primer), 1)
-            })
-        
-        data.append(row)
-    
-    df = pd.DataFrame(data)
-    output = io.BytesIO()
-    with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        df.to_excel(writer, sheet_name='Primer_Results', index=False)
-        
-        # Add T7 sequences sheet if applicable
-        if has_t7:
-            t7_data = []
-            for i, primer in enumerate(primers):
-                t7_data#!/usr/bin/env python3
+#!/usr/bin/env python3
 """
 Streamlit Web Application for Automated Primer Design
 ===================================================
@@ -161,7 +9,7 @@ Installation:
 pip install streamlit biopython primer3-py requests pandas openpyxl plotly
 
 Run with:
-streamlit run primer_design_app.py
+streamlit run autoprimer.py
 
 Author: Automated Primer Design System
 """
@@ -179,8 +27,7 @@ from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 from Bio import Entrez, SeqIO
 from Bio.Seq import Seq
-from Bio.SeqUtils import Tm_NN
-from Bio.SeqUtils.MeltingTemp import Tm_staluc
+from Bio.SeqUtils.MeltingTemp import Tm_NN
 import primer3
 import re
 from pathlib import Path
@@ -316,8 +163,8 @@ class PrimerDesigner:
                 product_size = primer_results[f'PRIMER_PAIR_{i}_PRODUCT_SIZE']
                 penalty = primer_results[f'PRIMER_PAIR_{i}_PENALTY']
                 
-                forward_tm = Tm_staluc(forward_seq)
-                reverse_tm = Tm_staluc(reverse_seq)
+                forward_tm = Tm_NN(forward_seq)
+                reverse_tm = Tm_NN(reverse_seq)
                 
                 primer_pair = PrimerPair(
                     forward_seq=forward_seq,
@@ -603,7 +450,6 @@ def main():
                                 
                                 if primers:
                                     st.success(f"Successfully designed {len(primers)} primer pairs!")
-                                    st.switch_page = "Results"
                                 else:
                                     st.warning("No suitable primers found with current parameters")
                             else:
@@ -987,274 +833,10 @@ def main():
         <div style='text-align: center'>
             <p>🧬 Automated Primer Design Tool | Built with Streamlit</p>
             <p><small>Powered by Primer3, Biopython, and NCBI databases</small></p>
-            <p><small>🌾 Agricultural RNAi applications for sustainable pest management</small></p>
         </div>
         """, 
         unsafe_allow_html=True
     )
-
-# Pest-specific gene target suggestions
-def get_pest_gene_suggestions(pest_type: str) -> List[str]:
-    """Get gene target suggestions for specific pests"""
-    suggestions = {
-        'asian_citrus_psyllid': [
-            'V-ATPase subunit A', 'V-ATPase subunit E', 'Chitin synthase 1',
-            'Proteasome subunit alpha', 'Ribosomal protein L17A', 
-            'Cytochrome c oxidase subunit I', 'Actin', 'Tubulin alpha'
-        ],
-        'fusarium': [
-            'Chitin synthase', 'Beta-tubulin', 'Cytochrome c oxidase',
-            'Ergosterol biosynthesis genes', 'Cell wall chitin synthesis',
-            'Mitochondrial genes', 'Ribosomal RNA genes'
-        ],
-        'viroid': [
-            'Full viroid genome', 'Central conserved region',
-            'Pathogenicity domain', 'Terminal conserved region',
-            'Variable domain', 'Secondary structure motifs'
-        ],
-        'generic_insect': [
-            'V-ATPase', 'Proteasome subunits', 'Ribosomal proteins',
-            'Actin', 'Tubulin', 'Chitin synthase', 'Juvenile hormone',
-            'Ecdysone receptor', 'Ion channels'
-        ]
-    }
-    return suggestions.get(pest_type, [])
-
-def create_rnai_efficiency_chart(primers: List[PrimerPair]):
-    """Create chart showing RNAi efficiency predictions"""
-    if not primers or not primers[0].t7_forward_seq:
-        return None
-    
-    primer_nums = list(range(1, len(primers) + 1))
-    efficiency_scores = [calculate_rnai_efficiency(p) for p in primers]
-    dsrna_lengths = [p.dsrna_length for p in primers]
-    
-    fig = make_subplots(
-        rows=1, cols=2,
-        subplot_titles=('RNAi Efficiency Prediction', 'dsRNA Length Distribution'),
-        specs=[[{"secondary_y": False}, {"secondary_y": False}]]
-    )
-    
-    # Efficiency scores
-    colors = ['green' if score >= 80 else 'orange' if score >= 60 else 'red' for score in efficiency_scores]
-    fig.add_trace(
-        go.Bar(x=primer_nums, y=efficiency_scores, name='RNAi Efficiency',
-               marker_color=colors, text=[f"{s:.1f}" for s in efficiency_scores],
-               textposition='auto'),
-        row=1, col=1
-    )
-    
-    # dsRNA lengths
-    fig.add_trace(
-        go.Scatter(x=primer_nums, y=dsrna_lengths, name='dsRNA Length',
-                  mode='lines+markers', line=dict(color='blue')),
-        row=1, col=2
-    )
-    
-    # Add optimal range shading for dsRNA length
-    fig.add_hrect(y0=200, y1=600, fillcolor="lightgreen", opacity=0.2,
-                  annotation_text="Optimal Range", row=1, col=2)
-    
-    fig.update_layout(height=400, showlegend=True, title_text="dsRNA Production Analysis")
-    fig.update_xaxes(title_text="Primer Pair Number")
-    fig.update_yaxes(title_text="Efficiency Score (%)", row=1, col=1)
-    fig.update_yaxes(title_text="dsRNA Length (bp)", row=1, col=2)
-    
-    return fig
-
-# Additional utility functions for agricultural applications
-def suggest_application_method(pest_type: str, dsrna_length: int) -> str:
-    """Suggest application method based on pest type and dsRNA characteristics"""
-    methods = {
-        'asian_citrus_psyllid': {
-            'foliar_spray': 'Foliar spray application during feeding periods',
-            'soil_drench': 'Soil drench for systemic uptake',
-            'trunk_injection': 'Trunk injection for citrus trees'
-        },
-        'fusarium': {
-            'seed_treatment': 'Seed treatment for prevention',
-            'soil_application': 'Soil application at planting',
-            'foliar_spray': 'Foliar spray for established plants'
-        },
-        'viroid': {
-            'grafting_prevention': 'Tool sterilization to prevent transmission',
-            'foliar_spray': 'Foliar application on infected plants',
-            'systemic_treatment': 'Systemic treatment through irrigation'
-        }
-    }
-    
-    pest_methods = methods.get(pest_type, {
-        'foliar_spray': 'General foliar spray application',
-        'soil_application': 'Soil application method'
-    })
-    
-    # Length-based recommendations
-    if dsrna_length < 200:
-        efficiency_note = " (Short dsRNA - may have reduced efficiency)"
-    elif dsrna_length > 600:
-        efficiency_note = " (Long dsRNA - consider fragmentation)"
-    else:
-        efficiency_note = " (Optimal length for RNAi)"
-    
-    return list(pest_methods.values())[0] + efficiency_note
-
-def generate_safety_guidelines() -> str:
-    """Generate safety guidelines for agricultural dsRNA use"""
-    return """
-    ### Safety Guidelines for Agricultural dsRNA Use
-    
-    **Environmental Safety:**
-    - dsRNA is biodegradable and breaks down naturally in the environment
-    - Target specificity reduces non-target effects
-    - No genetic modification of crops required
-    
-    **Application Safety:**
-    - Use standard PPE when handling concentrated dsRNA solutions
-    - Follow integrated pest management (IPM) principles
-    - Monitor for resistance development over time
-    
-    **Regulatory Considerations:**
-    - Check local regulations for RNAi-based pest control products
-    - Document target specificity and environmental impact assessments
-    - Consider registration requirements for commercial use
-    
-    **Best Practices:**
-    - Test on small areas before large-scale application
-    - Combine with other sustainable pest management strategies
-    - Monitor pest populations and beneficial insects
-    - Rotate with different control methods to prevent resistance
-    """
-
-# Additional utility functions for the Streamlit app
-
-def validate_sequence(sequence: str) -> Tuple[bool, str]:
-    """Validate DNA sequence input"""
-    if not sequence:
-        return False, "Sequence is empty"
-    
-    # Remove whitespace and convert to uppercase
-    clean_seq = re.sub(r'\s+', '', sequence.upper())
-    
-    # Check for invalid characters
-    invalid_chars = re.findall(r'[^ATGC]', clean_seq)
-    if invalid_chars:
-        return False, f"Invalid characters found: {set(invalid_chars)}"
-    
-    # Check minimum length
-    if len(clean_seq) < 50:
-        return False, "Sequence too short (minimum 50 bp required)"
-    
-    return True, "Valid sequence"
-
-def create_primer_report(primers: List[PrimerPair], sequence_info: Dict) -> str:
-    """Generate a comprehensive primer report"""
-    report = f"""
-# Primer Design Report
-
-## Sequence Information
-- **Description:** {sequence_info.get('description', 'N/A')}
-- **Length:** {sequence_info.get('length', 'N/A')} bp
-- **Organism:** {sequence_info.get('organism', 'N/A')}
-- **ID:** {sequence_info.get('id', 'N/A')}
-
-## Primer Pairs Designed: {len(primers)}
-
-"""
-    
-    for i, primer in enumerate(primers, 1):
-        report += f"""
-### Primer Pair {i}
-- **Forward Primer:** {primer.forward_seq}
-  - Position: {primer.forward_start}
-  - Tm: {primer.forward_tm:.2f}°C
-  - GC Content: {primer.gc_content_f:.1f}%
-  
-- **Reverse Primer:** {primer.reverse_seq}
-  - Position: {primer.reverse_start}
-  - Tm: {primer.reverse_tm:.2f}°C
-  - GC Content: {primer.gc_content_r:.1f}%
-
-- **Product Size:** {primer.product_size} bp
-- **Penalty Score:** {primer.penalty:.4f}
-
----
-"""
-    
-    return report
-
-def batch_primer_design(sequences: List[str], custom_params: Dict) -> List[List[PrimerPair]]:
-    """Design primers for multiple sequences"""
-    designer = PrimerDesigner()
-    all_results = []
-    
-    for seq in sequences:
-        primers = designer.design_primers(seq, custom_params=custom_params)
-        all_results.append(primers)
-    
-    return all_results
-
-# Advanced features for power users
-def advanced_primer_analysis(primers: List[PrimerPair]) -> Dict:
-    """Perform advanced analysis on primer pairs"""
-    if not primers:
-        return {}
-    
-    analysis = {
-        'total_pairs': len(primers),
-        'tm_stats': {
-            'forward_avg': sum(p.forward_tm for p in primers) / len(primers),
-            'reverse_avg': sum(p.reverse_tm for p in primers) / len(primers),
-            'tm_difference_avg': sum(abs(p.forward_tm - p.reverse_tm) for p in primers) / len(primers)
-        },
-        'gc_stats': {
-            'forward_avg': sum(p.gc_content_f for p in primers) / len(primers),
-            'reverse_avg': sum(p.gc_content_r for p in primers) / len(primers)
-        },
-        'product_size_stats': {
-            'min': min(p.product_size for p in primers),
-            'max': max(p.product_size for p in primers),
-            'avg': sum(p.product_size for p in primers) / len(primers)
-        },
-        'best_primer': min(primers, key=lambda p: p.penalty),
-        'primer_efficiency_score': calculate_primer_efficiency(primers)
-    }
-    
-    return analysis
-
-def calculate_primer_efficiency(primers: List[PrimerPair]) -> float:
-    """Calculate overall primer efficiency score"""
-    if not primers:
-        return 0.0
-    
-    # Simple efficiency calculation based on multiple factors
-    efficiency_scores = []
-    
-    for primer in primers:
-        # Tm difference penalty (ideally < 3°C)
-        tm_diff = abs(primer.forward_tm - primer.reverse_tm)
-        tm_score = max(0, 100 - tm_diff * 10)
-        
-        # GC content score (ideally 40-60%)
-        avg_gc = (primer.gc_content_f + primer.gc_content_r) / 2
-        if 40 <= avg_gc <= 60:
-            gc_score = 100
-        else:
-            gc_score = max(0, 100 - abs(avg_gc - 50) * 2)
-        
-        # Product size score (ideally 100-300 bp)
-        if 100 <= primer.product_size <= 300:
-            size_score = 100
-        else:
-            size_score = max(0, 100 - abs(primer.product_size - 200) / 10)
-        
-        # Penalty score (lower is better)
-        penalty_score = max(0, 100 - primer.penalty * 20)
-        
-        # Combined score
-        efficiency = (tm_score + gc_score + size_score + penalty_score) / 4
-        efficiency_scores.append(efficiency)
-    
-    return sum(efficiency_scores) / len(efficiency_scores)
 
 if __name__ == "__main__":
     main()
