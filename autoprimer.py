@@ -668,20 +668,51 @@ def main():
                                                         return
                                                 
                                                 # Fetch the sequence
-                                                sequence = ncbi.fetch_sequence(sequence_id)
+                                                st.write(f"Fetching sequence {sequence_id} from {database_used} database...")
+                                                
+                                                if database_used == "nucleotide":
+                                                    # For nucleotide sequences, fetch directly
+                                                    sequence = ncbi.fetch_sequence(sequence_id, database="nucleotide")
+                                                    seq_info = ncbi.fetch_sequence_info(sequence_id, database="nucleotide")
+                                                else:
+                                                    # For genome assemblies, use the nucleotide ID we found
+                                                    sequence = ncbi.fetch_sequence(sequence_id)
+                                                    seq_info = ncbi.fetch_sequence_info(sequence_id)
                                                 
                                                 if sequence:
-                                                    # For very large sequences, limit the length
-                                                    if len(sequence) > 1000000:  # 1MB limit
-                                                        st.warning(f"Sequence is very large ({len(sequence):,} bp). Using first 1MB for primer design.")
-                                                        sequence = sequence[:1000000]
+                                                    st.write(f"Successfully fetched sequence: {len(sequence)} bp")
+                                                else:
+                                                    st.write("Failed to fetch sequence")
+                                                
+                                                if sequence:
+                                                    # Clean the sequence (remove non-DNA characters)
+                                                    clean_sequence = re.sub(r'[^ATGCatgc]', '', sequence.upper())
                                                     
-                                                    seq_info = ncbi.fetch_sequence_info(sequence_id)
+                                                    if len(clean_sequence) < 50:
+                                                        st.error("Sequence is too short for primer design (minimum 50 bp required)")
+                                                        return
+                                                    
+                                                    # For very large sequences, limit the length
+                                                    if len(clean_sequence) > 1000000:  # 1MB limit
+                                                        st.warning(f"Sequence is very large ({len(clean_sequence):,} bp). Using first 1MB for primer design.")
+                                                        clean_sequence = clean_sequence[:1000000]
+                                                    
+                                                    # If we couldn't get detailed info, create basic info
+                                                    if not seq_info:
+                                                        seq_info = {
+                                                            "id": sequence_id,
+                                                            "description": f"Sequence {sequence_id}",
+                                                            "length": len(clean_sequence),
+                                                            "organism": organism_name
+                                                        }
+                                                    
                                                     st.session_state.sequence_info = seq_info
-                                                    st.session_state.current_sequence = sequence
+                                                    st.session_state.current_sequence = clean_sequence
+                                                    
+                                                    st.write(f"Designing primers for {len(clean_sequence)} bp sequence...")
                                                     
                                                     # Design primers
-                                                    primers = designer.design_primers(sequence, custom_params=custom_params)
+                                                    primers = designer.design_primers(clean_sequence, custom_params=custom_params)
                                                     st.session_state.primers_designed = primers
                                                     
                                                     if primers:
@@ -690,9 +721,9 @@ def main():
                                                         if 'organism_name' in st.session_state:
                                                             del st.session_state.organism_name
                                                     else:
-                                                        st.warning("No suitable primers found with current parameters")
+                                                        st.warning("No suitable primers found with current parameters. Try adjusting the primer parameters in the sidebar.")
                                                 else:
-                                                    st.error("Failed to fetch sequence")
+                                                    st.error("Failed to fetch sequence. The sequence might be too large or unavailable.")
                                                     
                                             except Exception as e:
                                                 st.error(f"Error fetching sequence: {e}")
