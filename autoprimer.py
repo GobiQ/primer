@@ -726,12 +726,14 @@ class ComprehensiveTaxonomicAnalyzer:
         
         total_regions = len(conserved_regions)
         
+        # Initialize progress bar outside the loop if no callback provided
+        if not progress_callback:
+            progress_bar = st.progress(0)
+        
         for idx, region in enumerate(conserved_regions):
             if progress_callback:
                 progress_callback(idx + 1, total_regions)
             else:
-                # Fallback to original progress bar
-                progress_bar = st.progress(0)
                 progress_bar.progress((idx + 1) / total_regions)
             
             st.write(f"Testing {test_type} specificity for region {region['start']}-{region['end']}")
@@ -764,7 +766,10 @@ class ComprehensiveTaxonomicAnalyzer:
                 else:
                     st.write(f"  ✗ Region failed {test_type} specificity test (score: {avg_specificity:.3f})")
         
-        progress_bar.progress(1.0)
+        # Complete progress bar only if we created one
+        if not progress_callback:
+            progress_bar.progress(1.0)
+        
         return specific_regions
     
     def get_related_genera(self, target_genus):
@@ -2152,20 +2157,31 @@ def main():
                                 if custom_comparison_species.strip():
                                     comparison_species = [s.strip() for s in custom_comparison_species.split(',')]
 
-                                specificity_results = analyzer.compare_against_other_taxa(
-                                    conserved_regions, 
-                                    genus,
-                                    test_genera=test_genus_specificity,
-                                    test_species=test_species_specificity,
-                                    comparison_genera=comparison_genera,
-                                    comparison_species=comparison_species,
-                                    progress_callback=lambda current, total: (
-                                        progress_bar.progress(current / total),
-                                        status_text.text(f"Testing specificity: {current}/{total} regions")
+                                try:
+                                    specificity_results = analyzer.compare_against_other_taxa(
+                                        conserved_regions, 
+                                        genus,
+                                        test_genera=test_genus_specificity,
+                                        test_species=test_species_specificity,
+                                        comparison_genera=comparison_genera,
+                                        comparison_species=comparison_species,
+                                        progress_callback=lambda current, total: (
+                                            progress_bar.progress(current / total),
+                                            status_text.text(f"Testing specificity: {current}/{total} regions")
+                                        )
                                     )
-                                )
+                                except Exception as e:
+                                    st.error(f"❌ Specificity testing failed: {e}")
+                                    st.write("This might be due to NCBI API issues or network problems.")
+                                    return
 
                                 specific_regions = specificity_results['combined_specific_regions']
+                                
+                                # Debug information
+                                st.write(f"🔍 **Debug Info:**")
+                                st.write(f"- Conserved regions found: {len(conserved_regions)}")
+                                st.write(f"- Specific regions found: {len(specific_regions)}")
+                                st.write(f"- Specificity results keys: {list(specificity_results.keys())}")
 
                                 if not specific_regions:
                                     st.warning("No regions found that pass specificity requirements")
@@ -2289,6 +2305,12 @@ def main():
                                             'primers_designed': len(all_primers)
                                         }
                                     }
+                                    
+                                    # Debug: Verify session state storage
+                                    st.write(f"🔍 **Session State Debug:**")
+                                    st.write(f"- Comprehensive analysis results stored: {hasattr(st.session_state, 'comprehensive_analysis_results')}")
+                                    st.write(f"- Primers designed: {len(st.session_state.primers_designed)}")
+                                    st.write(f"- Analysis summary: {st.session_state.comprehensive_analysis_results['analysis_summary']}")
                                     
                                     st.success(f"🎉 **Comprehensive analysis complete!** Designed {len(all_primers)} high-quality genus-specific primers for {genus}")
                                     st.info("📊 Go to the 'Results', 'Conservation', and 'Specificity' tabs to view detailed analysis and primer information!")
