@@ -249,7 +249,8 @@ class PrimerDesigner:
             'PRIMER_MAX_SELF_END': 8,
             'PRIMER_PAIR_MAX_COMPL_ANY': 12,
             'PRIMER_PAIR_MAX_COMPL_END': 8,
-            'PRIMER_PRODUCT_SIZE_RANGE': [[75, 300], [300, 600], [600, 1000]]
+            'PRIMER_PRODUCT_SIZE_RANGE': [[75, 300], [300, 600], [600, 1000]],
+            'PRIMER_NUM_RETURN': 20
         }
         
         # T7 promoter sequence for dsRNA production
@@ -673,6 +674,8 @@ def main():
         max_gc = st.slider("Maximum GC content (%)", 50.0, 80.0, 60.0, 1.0)
         max_poly_x = st.slider("Max poly-X runs", 3, 6, 4)
         salt_conc = st.slider("Salt concentration (mM)", 10.0, 100.0, 50.0, 1.0)
+        num_primers = st.number_input("Number of primer pairs to design", 1, 50, 20, 
+                                     help="Maximum number of primer pairs to return")
         
         st.write("Product size ranges:")
         min_product = st.number_input("Minimum product size", 50, 500, 75)
@@ -718,7 +721,8 @@ def main():
         'PRIMER_MAX_GC': max_gc,
         'PRIMER_MAX_POLY_X': max_poly_x,
         'PRIMER_SALT_MONOVALENT': salt_conc,
-        'PRIMER_PRODUCT_SIZE_RANGE': [[min_product, max_product]]
+        'PRIMER_PRODUCT_SIZE_RANGE': [[min_product, max_product]],
+        'PRIMER_NUM_RETURN': num_primers
     }
     
     # Main content area
