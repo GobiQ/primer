@@ -218,6 +218,10 @@ def init_session_state():
         st.session_state.current_sequence = ""
     if 'sequence_info' not in st.session_state:
         st.session_state.sequence_info = {}
+    if 'search_results' not in st.session_state:
+        st.session_state.search_results = None
+    if 'database_used' not in st.session_state:
+        st.session_state.database_used = None
 
 def get_organism_suggestions():
     """Get agricultural pest and pathogen suggestions for the search"""
@@ -501,6 +505,139 @@ def main():
             else:
                 st.info("💡 **Tip:** Enter the scientific name (e.g., 'Fusarium oxysporum') for best results. You can also search for specific genes within an organism using the advanced options below.")
             
+            # Display stored search results if they exist
+            if st.session_state.search_results:
+                st.subheader("Previous Search Results")
+                genome_df = pd.DataFrame(st.session_state.search_results)
+                st.dataframe(genome_df, use_container_width=True)
+                
+                # Let user select a sequence from stored results
+                database_used = st.session_state.database_used
+                if database_used == "genome":
+                    select_text = "Select a genome assembly to design primers for:"
+                    button_text = "Design Primers for Selected Assembly"
+                else:
+                    select_text = "Select a nucleotide sequence to design primers for:"
+                    button_text = "Design Primers for Selected Sequence"
+                
+                selected_genome = st.selectbox(
+                    select_text,
+                    range(len(st.session_state.search_results)),
+                    format_func=lambda x: f"{st.session_state.search_results[x]['ID']} - {st.session_state.search_results[x]['Description'][:100]}..."
+                )
+                
+                if st.button(button_text, type="primary"):
+                    with st.spinner("Fetching sequence and designing primers..."):
+                        sequence_id = st.session_state.search_results[selected_genome]['ID']
+                        
+                        try:
+                            if database_used == "genome":
+                                # For genome assemblies, search for nucleotide sequences
+                                assembly_query = f'"{sequence_id}"[Assembly]'
+                                nucleotide_ids = ncbi.search_sequences(assembly_query, database="nucleotide", max_results=10)
+                                
+                                if nucleotide_ids:
+                                    st.info(f"Found {len(nucleotide_ids)} sequences from this assembly. Using the first one for primer design.")
+                                    sequence_id = nucleotide_ids[0]
+                                else:
+                                    st.warning("No nucleotide sequences found for this assembly.")
+                                    return
+                            
+                            # Fetch the sequence
+                            st.write(f"🔍 Fetching sequence {sequence_id} from {database_used} database...")
+                            
+                            if database_used == "nucleotide":
+                                # For nucleotide sequences, fetch directly
+                                st.write("📡 Using nucleotide database for direct fetch...")
+                                sequence = ncbi.fetch_sequence(sequence_id, database="nucleotide")
+                                seq_info = ncbi.fetch_sequence_info(sequence_id, database="nucleotide")
+                            else:
+                                # For genome assemblies, use the nucleotide ID we found
+                                st.write("📡 Using default database for genome assembly...")
+                                sequence = ncbi.fetch_sequence(sequence_id)
+                                seq_info = ncbi.fetch_sequence_info(sequence_id)
+                            
+                            if sequence:
+                                st.write(f"✅ Successfully fetched sequence: {len(sequence)} bp")
+                                st.write(f"📝 First 100 characters: {sequence[:100]}...")
+                            else:
+                                st.write("❌ Failed to fetch sequence")
+                                st.write("🔧 Trying alternative fetch method...")
+                                
+                                # Try alternative fetch method
+                                try:
+                                    import requests
+                                    url = f"https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=nucleotide&id={sequence_id}&rettype=fasta&retmode=text"
+                                    response = requests.get(url)
+                                    if response.status_code == 200:
+                                        fasta_text = response.text
+                                        lines = fasta_text.split('\n')
+                                        sequence = ''.join(line for line in lines[1:] if not line.startswith('>'))
+                                        st.write(f"✅ Alternative method succeeded: {len(sequence)} bp")
+                                    else:
+                                        st.write(f"❌ Alternative method failed: HTTP {response.status_code}")
+                                except Exception as alt_e:
+                                    st.write(f"❌ Alternative method error: {alt_e}")
+                            
+                            if sequence:
+                                # Clean the sequence (remove non-DNA characters)
+                                clean_sequence = re.sub(r'[^ATGCatgc]', '', sequence.upper())
+                                
+                                if len(clean_sequence) < 50:
+                                    st.error("Sequence is too short for primer design (minimum 50 bp required)")
+                                    return
+                                
+                                # For very large sequences, limit the length
+                                if len(clean_sequence) > 1000000:  # 1MB limit
+                                    st.warning(f"Sequence is very large ({len(clean_sequence):,} bp). Using first 1MB for primer design.")
+                                    clean_sequence = clean_sequence[:1000000]
+                                
+                                # If we couldn't get detailed info, create basic info
+                                if not seq_info:
+                                    seq_info = {
+                                        "id": sequence_id,
+                                        "description": f"Sequence {sequence_id}",
+                                        "length": len(clean_sequence),
+                                        "organism": organism_name
+                                    }
+                                
+                                st.session_state.sequence_info = seq_info
+                                st.session_state.current_sequence = clean_sequence
+                                
+                                st.write(f"🧬 Designing primers for {len(clean_sequence)} bp sequence...")
+                                st.write(f"⚙️ Using parameters: min_size={custom_params.get('PRIMER_MIN_SIZE')}, max_size={custom_params.get('PRIMER_MAX_SIZE')}, min_tm={custom_params.get('PRIMER_MIN_TM')}")
+                                
+                                # Design primers
+                                try:
+                                    primers = designer.design_primers(clean_sequence, custom_params=custom_params)
+                                    st.write(f"🔬 Primer design completed. Found {len(primers) if primers else 0} primer pairs.")
+                                    
+                                    st.session_state.primers_designed = primers
+                                    
+                                    if primers:
+                                        st.success(f"✅ Successfully designed {len(primers)} primer pairs!")
+                                        # Clear session state after successful search
+                                        if 'organism_name' in st.session_state:
+                                            del st.session_state.organism_name
+                                    else:
+                                        st.warning("⚠️ No suitable primers found with current parameters. Try adjusting the primer parameters in the sidebar.")
+                                except Exception as primer_e:
+                                    st.error(f"❌ Error during primer design: {primer_e}")
+                                    st.write("🔧 This might be due to sequence quality or primer parameters.")
+                            else:
+                                st.error("Failed to fetch sequence. The sequence might be too large or unavailable.")
+                                
+                        except Exception as e:
+                            st.error(f"Error fetching sequence: {e}")
+                
+                # Add a button to clear search results
+                if st.button("🔄 New Search", type="secondary"):
+                    st.session_state.search_results = None
+                    st.session_state.database_used = None
+                    st.rerun()
+                
+                return  # Skip the search form if we have stored results
+            
             col1, col2 = st.columns([2, 1])
             with col1:
                 # Initialize organism name from session state if available
@@ -559,6 +696,9 @@ def main():
                 elif not organism_name:
                     st.error("❌ **Organism Name Required**: Please enter an organism name or click one of the suggested organisms above.")
                 else:
+                    # Clear previous search results when starting a new search
+                    st.session_state.search_results = None
+                    st.session_state.database_used = None
                     with st.spinner(f"Searching for {organism_name} genomes..."):
                         try:
                             ncbi = NCBIConnector(email, api_key)
@@ -598,6 +738,9 @@ def main():
                                 else:
                                     st.success(f"Found {len(genome_ids)} nucleotide sequences!")
                                 
+                                # Store search results in session state
+                                st.session_state.database_used = database_used
+                                
                                 # Display found sequences
                                 if database_used == "genome":
                                     st.subheader("Available Genome Assemblies")
@@ -633,6 +776,9 @@ def main():
                                             })
                                 
                                 if genome_info:
+                                    # Store search results in session state
+                                    st.session_state.search_results = genome_info
+                                    
                                     genome_df = pd.DataFrame(genome_info)
                                     st.dataframe(genome_df, use_container_width=True)
                                     
