@@ -1172,7 +1172,7 @@ def main():
                     - Verify PCR amplification across multiple target samples
                     - Test dsRNA efficacy on representative target populations
                     - Monitor for potential off-target effects
-                    """))
+                    """)
     
     with tab3:
         st.header("Primer Analysis")
