@@ -223,12 +223,12 @@ class ComprehensiveTaxonomicAnalyzer:
         self.min_sequences_per_subspecies = 50
         self.max_sequences_per_subspecies = 100
         self.conservation_threshold = 0.90  # 90% conservation across subspecies
-        self.specificity_threshold = 0.75   # <75% similarity to other genera
+        self.specificity_threshold = 0.75   # <75% similarity to other taxa
         
     def discover_subspecies(self, genus_name, max_subspecies=20):
         """Comprehensively discover all subspecies/species within a genus"""
         try:
-            st.info(f"Discovering subspecies within genus {genus_name}...")
+            st.info(f"🔍 **Step 1: Discovering subspecies within genus {genus_name}**")
             
             # Multiple search strategies to capture all variants
             search_queries = [
@@ -340,6 +340,7 @@ class ComprehensiveTaxonomicAnalyzer:
     
     def fetch_representative_sequences(self, subspecies_data, target_count=75):
         """Fetch representative sequences for each subspecies with geographic diversity"""
+        st.info(f"🧬 **Step 2: Collecting sequences from {len(subspecies_data)} subspecies**")
         results = {}
         
         for subspecies, data in subspecies_data.items():
@@ -404,7 +405,7 @@ class ComprehensiveTaxonomicAnalyzer:
     
     def perform_multiple_sequence_alignment(self, subspecies_sequences):
         """Align sequences across all subspecies to find conserved regions"""
-        st.info("Performing multiple sequence alignment analysis...")
+        st.info("🧮 **Step 3: Analyzing sequence conservation across subspecies**")
         
         # Combine all sequences from all subspecies
         all_sequences = []
@@ -595,59 +596,185 @@ class ComprehensiveTaxonomicAnalyzer:
         
         return merged
     
-    def compare_against_other_genera(self, conserved_regions, target_genus, comparison_genera=None):
-        """Compare conserved regions against other genera for specificity"""
-        st.info("Analyzing specificity against related genera...")
+    def compare_against_other_taxa(self, conserved_regions, target_genus, 
+                                  test_genera=True, test_species=True, 
+                                  comparison_genera=None, comparison_species=None):
+        """Compare conserved regions against other genera and/or species for specificity"""
         
-        if not comparison_genera:
-            # Auto-select related genera for common agricultural pathogens
-            comparison_genera = self.get_related_genera(target_genus)
+        st.info("🎯 **Step 4: Testing specificity against related organisms**")
         
+        specificity_results = {
+            'genus_results': {},
+            'species_results': {},
+            'combined_specific_regions': []
+        }
+        
+        # Test against genera if requested
+        if test_genera:
+            st.write("**Step 4a: Genus-Level Specificity Testing**")
+            if not comparison_genera:
+                comparison_genera = self.get_related_genera(target_genus)
+            
+            st.write(f"Testing against genera: {', '.join(comparison_genera)}")
+            genus_specific_regions = self._test_specificity_against_taxa(
+                conserved_regions, comparison_genera, "genus"
+            )
+            specificity_results['genus_results'] = {
+                'tested_against': comparison_genera,
+                'specific_regions': genus_specific_regions
+            }
+            
+            st.write(f"Genus-specific regions found: {len(genus_specific_regions)}")
+        
+        # Test against species if requested
+        if test_species:
+            st.write("**Step 4b: Species-Level Specificity Testing**")
+            if not comparison_species:
+                comparison_species = self.get_related_species(target_genus)
+            
+            st.write(f"Testing against species: {', '.join(comparison_species)}")
+            species_specific_regions = self._test_specificity_against_taxa(
+                conserved_regions, comparison_species, "species"
+            )
+            specificity_results['species_results'] = {
+                'tested_against': comparison_species,
+                'specific_regions': species_specific_regions
+            }
+            
+            st.write(f"Species-specific regions found: {len(species_specific_regions)}")
+        
+        # Combine results based on what was tested
+        if test_genera and test_species:
+            # Regions must pass both genus and species specificity
+            genus_positions = {(r['start'], r['end']) for r in genus_specific_regions}
+            species_positions = {(r['start'], r['end']) for r in species_specific_regions}
+            common_positions = genus_positions.intersection(species_positions)
+            
+            combined_regions = []
+            for region in genus_specific_regions:
+                if (region['start'], region['end']) in common_positions:
+                    # Find corresponding species result
+                    species_region = next(
+                        (r for r in species_specific_regions 
+                         if r['start'] == region['start'] and r['end'] == region['end']), 
+                        None
+                    )
+                    if species_region:
+                        # Combine specificity scores
+                        combined_region = region.copy()
+                        combined_region['genus_specificity'] = region['specificity_score']
+                        combined_region['species_specificity'] = species_region['specificity_score']
+                        combined_region['combined_specificity'] = min(
+                            region['specificity_score'], 
+                            species_region['specificity_score']
+                        )
+                        combined_region['specificity_score'] = combined_region['combined_specificity']
+                        combined_regions.append(combined_region)
+            
+            specificity_results['combined_specific_regions'] = combined_regions
+            st.write(f"Final regions passing both tests: {len(combined_regions)}")
+            
+        elif test_genera:
+            specificity_results['combined_specific_regions'] = genus_specific_regions
+        elif test_species:
+            specificity_results['combined_specific_regions'] = species_specific_regions
+        else:
+            specificity_results['combined_specific_regions'] = conserved_regions
+        
+        return specificity_results
+    
+    def _test_specificity_against_taxa(self, conserved_regions, comparison_taxa, test_type):
+        """Helper method to test specificity against a list of taxa"""
         specific_regions = []
         
-        for region in conserved_regions:
-            st.write(f"Testing specificity for region {region['start']}-{region['end']}")
+        progress_bar = st.progress(0)
+        total_regions = len(conserved_regions)
+        
+        for idx, region in enumerate(conserved_regions):
+            progress_bar.progress((idx + 1) / total_regions)
             
-            # Test against each comparison genus
+            st.write(f"Testing {test_type} specificity for region {region['start']}-{region['end']}")
+            
+            # Test against each comparison taxon
             specificity_scores = []
             
-            for comparison_genus in comparison_genera:
+            for taxon in comparison_taxa:
                 try:
                     specificity = self.test_region_specificity(
                         region['sequence'], 
-                        comparison_genus
+                        taxon
                     )
                     specificity_scores.append(specificity)
                     
                 except Exception as e:
-                    st.warning(f"Could not test against {comparison_genus}: {e}")
+                    st.warning(f"Could not test against {taxon}: {e}")
                     continue
             
             if specificity_scores:
                 avg_specificity = 1.0 - np.mean(specificity_scores)  # Convert to specificity
                 
                 if avg_specificity >= self.specificity_threshold:
-                    region['specificity_score'] = avg_specificity
-                    region['tested_against'] = comparison_genera
-                    specific_regions.append(region)
-                    st.write(f"  ✓ Region passed specificity test (score: {avg_specificity:.3f})")
+                    region_copy = region.copy()
+                    region_copy['specificity_score'] = avg_specificity
+                    region_copy['tested_against'] = comparison_taxa
+                    region_copy['test_type'] = test_type
+                    specific_regions.append(region_copy)
+                    st.write(f"  ✓ Region passed {test_type} specificity test (score: {avg_specificity:.3f})")
                 else:
-                    st.write(f"  ✗ Region failed specificity test (score: {avg_specificity:.3f})")
+                    st.write(f"  ✗ Region failed {test_type} specificity test (score: {avg_specificity:.3f})")
         
-        st.write(f"Final count: {len(specific_regions)} genus-specific conserved regions")
+        progress_bar.progress(1.0)
         return specific_regions
     
     def get_related_genera(self, target_genus):
-        """Get related genera for specificity testing"""
+        """Get related genera for specificity testing - expanded for agricultural pathogens"""
         related_genera_map = {
-            'Fusarium': ['Trichoderma', 'Aspergillus', 'Penicillium', 'Verticillium'],
-            'Botrytis': ['Sclerotinia', 'Monilinia', 'Alternaria'],
-            'Pythium': ['Phytophthora', 'Peronospora', 'Saprolegnia'],
-            'Alternaria': ['Stemphylium', 'Ulocladium', 'Botrytis'],
-            'Rhizoctonia': ['Thanatephorus', 'Ceratobasidium', 'Sclerotium']
+            'Fusarium': ['Trichoderma', 'Aspergillus', 'Penicillium', 'Verticillium', 'Rhizoctonia', 'Pythium', 'Alternaria', 'Botrytis'],
+            'Botrytis': ['Sclerotinia', 'Monilinia', 'Alternaria', 'Fusarium', 'Rhizoctonia'],
+            'Pythium': ['Phytophthora', 'Peronospora', 'Saprolegnia', 'Fusarium', 'Rhizoctonia'],
+            'Alternaria': ['Stemphylium', 'Ulocladium', 'Botrytis', 'Fusarium', 'Cladosporium'],
+            'Rhizoctonia': ['Thanatephorus', 'Ceratobasidium', 'Sclerotium', 'Fusarium', 'Pythium'],
+            'Aspergillus': ['Penicillium', 'Trichoderma', 'Fusarium', 'Alternaria'],
+            'Trichoderma': ['Aspergillus', 'Penicillium', 'Fusarium'],
+            'Phytophthora': ['Pythium', 'Peronospora', 'Fusarium', 'Alternaria']
         }
         
-        return related_genera_map.get(target_genus, ['Aspergillus', 'Penicillium', 'Trichoderma'])
+        return related_genera_map.get(target_genus, ['Aspergillus', 'Penicillium', 'Trichoderma', 'Fusarium', 'Alternaria'])
+    
+    def get_related_species(self, target_genus):
+        """Get related species for specificity testing"""
+        related_species_map = {
+            'Fusarium': [
+                'Alternaria alternata', 'Botrytis cinerea', 'Rhizoctonia solani',
+                'Pythium ultimum', 'Sclerotinia sclerotiorum', 'Verticillium dahliae',
+                'Colletotrichum gloeosporioides', 'Phytophthora infestans'
+            ],
+            'Botrytis': [
+                'Sclerotinia sclerotiorum', 'Alternaria alternata', 'Fusarium oxysporum',
+                'Rhizoctonia solani', 'Colletotrichum gloeosporioides'
+            ],
+            'Pythium': [
+                'Phytophthora infestans', 'Fusarium oxysporum', 'Rhizoctonia solani',
+                'Alternaria alternata', 'Verticillium dahliae'
+            ],
+            'Alternaria': [
+                'Fusarium oxysporum', 'Botrytis cinerea', 'Stemphylium vesicarium',
+                'Cladosporium cladosporioides', 'Rhizoctonia solani'
+            ],
+            'Rhizoctonia': [
+                'Fusarium oxysporum', 'Pythium ultimum', 'Sclerotinia sclerotiorum',
+                'Alternaria alternata', 'Botrytis cinerea'
+            ],
+            'Phytophthora': [
+                'Pythium ultimum', 'Fusarium oxysporum', 'Alternaria alternata',
+                'Rhizoctonia solani', 'Verticillium dahliae'
+            ]
+        }
+        
+        return related_species_map.get(target_genus, [
+            'Fusarium oxysporum', 'Alternaria alternata', 'Botrytis cinerea',
+            'Rhizoctonia solani', 'Pythium ultimum'
+        ])
     
     def test_region_specificity(self, target_sequence, comparison_genus, sample_size=20):
         """Test a region's specificity against another genus"""
@@ -1173,6 +1300,144 @@ def create_t7_construct_diagram(sequence, t7_results):
     
     return fig
 
+def create_conservation_heatmap(conserved_regions, subspecies_data):
+    """Create heatmap showing conservation across subspecies"""
+    if not conserved_regions:
+        return None
+    
+    import plotly.express as px
+    
+    # Prepare data for heatmap
+    heatmap_data = []
+    for i, region in enumerate(conserved_regions[:20]):  # Limit to top 20 regions
+        row = {
+            'Region': f"Region {i+1}\n({region['start']}-{region['end']})",
+            'Conservation Score': region['conservation_score'],
+            'Subspecies Coverage': region['subspecies_coverage'],
+            'GC Content': region['gc_content'] / 100,  # Normalize to 0-1
+            'Complexity': region['complexity_score']
+        }
+        heatmap_data.append(row)
+    
+    df = pd.DataFrame(heatmap_data)
+    
+    if df.empty:
+        return None
+    
+    fig = px.imshow(
+        df.set_index('Region').T,
+        aspect="auto",
+        color_continuous_scale="RdYlBu_r",
+        title="Conservation Metrics Across Top Regions"
+    )
+    
+    fig.update_layout(
+        height=400,
+        xaxis_title="Genomic Regions",
+        yaxis_title="Conservation Metrics"
+    )
+    
+    return fig
+
+def create_specificity_comparison_chart(specificity_results):
+    """Create chart comparing genus vs species specificity"""
+    if not specificity_results:
+        return None
+    
+    genus_results = specificity_results.get('genus_results', {})
+    species_results = specificity_results.get('species_results', {})
+    
+    if not genus_results and not species_results:
+        return None
+    
+    fig = go.Figure()
+    
+    # Create comparison data
+    regions = specificity_results['combined_specific_regions']
+    
+    if not regions:
+        return None
+    
+    x_labels = [f"Region {i+1}" for i in range(len(regions))]
+    
+    if 'genus_specificity' in regions[0]:
+        genus_scores = [r['genus_specificity'] for r in regions]
+        fig.add_trace(go.Bar(
+            name='Genus Specificity',
+            x=x_labels,
+            y=genus_scores,
+            marker_color='lightblue'
+        ))
+    
+    if 'species_specificity' in regions[0]:
+        species_scores = [r['species_specificity'] for r in regions]
+        fig.add_trace(go.Bar(
+            name='Species Specificity', 
+            x=x_labels,
+            y=species_scores,
+            marker_color='lightcoral'
+        ))
+    
+    fig.update_layout(
+        title='Specificity Comparison: Genus vs Species Level',
+        xaxis_title='Genomic Regions',
+        yaxis_title='Specificity Score',
+        barmode='group',
+        height=400
+    )
+    
+    return fig
+
+def create_analysis_workflow_diagram():
+    """Create a diagram showing the analysis workflow"""
+    fig = go.Figure()
+    
+    # Workflow steps
+    steps = [
+        "1. Subspecies\nDiscovery",
+        "2. Sequence\nCollection", 
+        "3. Conservation\nAnalysis",
+        "4a. Genus\nSpecificity",
+        "4b. Species\nSpecificity",
+        "5. Primer\nDesign"
+    ]
+    
+    colors = ['lightblue', 'lightgreen', 'lightyellow', 'lightcoral', 'lightpink', 'lightgray']
+    
+    for i, (step, color) in enumerate(zip(steps, colors)):
+        fig.add_shape(
+            type="rect",
+            x0=i, y0=0, x1=i+0.8, y1=1,
+            fillcolor=color,
+            line=dict(color="black", width=2)
+        )
+        
+        fig.add_annotation(
+            x=i+0.4, y=0.5,
+            text=step,
+            showarrow=False,
+            font=dict(size=10)
+        )
+        
+        # Add arrows between steps
+        if i < len(steps) - 1:
+            fig.add_annotation(
+                x=i+0.9, y=0.5,
+                text="→",
+                showarrow=False,
+                font=dict(size=20)
+            )
+    
+    fig.update_layout(
+        title="Comprehensive Taxonomic Analysis Workflow",
+        xaxis=dict(range=[-0.2, len(steps)-0.2], showticklabels=False),
+        yaxis=dict(range=[-0.2, 1.2], showticklabels=False),
+        height=150,
+        showlegend=False
+    )
+    
+    return fig
+
 def main():
     """Main Streamlit application"""
     
@@ -1271,13 +1536,36 @@ def main():
             specificity_threshold = st.slider(
                 "Specificity threshold (%):", 
                 70, 90, 75,
-                help="Minimum specificity against other genera"
+                help="Minimum specificity against other taxa"
             ) / 100
+            
+            st.subheader("Specificity Testing Options")
+            test_genus_specificity = st.checkbox(
+                "Test genus-level specificity",
+                value=True,
+                help="Test against related genera (e.g., Fusarium vs Aspergillus)"
+            )
+            
+            test_species_specificity = st.checkbox(
+                "Test species-level specificity", 
+                value=True,
+                help="Test against related species (e.g., Fusarium vs Alternaria alternata)"
+            )
+            
+            if not test_genus_specificity and not test_species_specificity:
+                st.warning("⚠️ At least one specificity test should be enabled")
+                test_genus_specificity = True  # Force at least one to be true
             
             custom_comparison_genera = st.text_input(
                 "Custom comparison genera (comma-separated):",
                 placeholder="Trichoderma, Aspergillus, Penicillium",
-                help="Leave empty for automatic selection"
+                help="Leave empty for automatic selection based on target genus"
+            )
+            
+            custom_comparison_species = st.text_input(
+                "Custom comparison species (comma-separated):",
+                placeholder="Alternaria alternata, Botrytis cinerea",
+                help="Leave empty for automatic selection based on target genus"
             )
     
     # T7 Expression System
@@ -1348,7 +1636,14 @@ def main():
     }
     
     # Main content area
-    tab1, tab2, tab3, tab4 = st.tabs(["📝 Input", "🔬 Results", "📊 Analysis", "💾 Export"])
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+        "📝 Input", 
+        "🔬 Results", 
+        "📊 Analysis", 
+        "🧬 Conservation", 
+        "🎯 Specificity", 
+        "💾 Export"
+    ])
     
     with tab1:
         st.header("Sequence Input")
@@ -1687,7 +1982,7 @@ def main():
                     if not email:
                         st.error("Email required for NCBI access")
                     elif not organism_name:
-                        st.error("Please enter a genus name")
+                        st.error("Please enter a genus name (e.g., 'Botrytis', 'Fusarium')")
                     else:
                         with st.spinner("Performing comprehensive taxonomic analysis..."):
                             try:
@@ -1700,7 +1995,6 @@ def main():
                                 analyzer.specificity_threshold = specificity_threshold
                                 
                                 # Step 1: Discover subspecies
-                                st.subheader("Step 1: Subspecies Discovery")
                                 subspecies_data = analyzer.discover_subspecies(genus, max_subspecies)
                                 
                                 if not subspecies_data:
@@ -1718,10 +2012,9 @@ def main():
                                 ])
                                 
                                 st.dataframe(subspecies_df, use_container_width=True)
-                                st.write(f"Total subspecies for analysis: {len(subspecies_data)}")
+                                st.success(f"✅ Discovered {len(subspecies_data)} subspecies for analysis")
                                 
                                 # Step 2: Fetch representative sequences
-                                st.subheader("Step 2: Sequence Collection")
                                 subspecies_sequences = analyzer.fetch_representative_sequences(
                                     subspecies_data, 
                                     sequences_per_subspecies
@@ -1736,7 +2029,7 @@ def main():
                                     {
                                         'Subspecies': subspecies,
                                         'Sequences Retrieved': data['count'],
-                                        'Average Length': np.mean([s['length'] for s in data['sequences']])
+                                        'Average Length': int(np.mean([s['length'] for s in data['sequences']]))
                                     }
                                     for subspecies, data in subspecies_sequences.items()
                                 ])
@@ -1744,14 +2037,14 @@ def main():
                                 st.dataframe(collection_df, use_container_width=True)
                                 
                                 total_sequences = sum(data['count'] for data in subspecies_sequences.values())
-                                st.write(f"Total sequences for analysis: {total_sequences}")
+                                st.success(f"✅ Collected {total_sequences} sequences for conservation analysis")
                                 
                                 # Step 3: Multiple sequence alignment and conservation analysis
-                                st.subheader("Step 3: Conservation Analysis")
                                 conserved_regions = analyzer.perform_multiple_sequence_alignment(subspecies_sequences)
                                 
                                 if not conserved_regions:
                                     st.warning("No conserved regions found with current thresholds")
+                                    st.info("Try lowering the conservation threshold or increasing the number of subspecies")
                                     return
                                 
                                 # Display conserved regions
@@ -1770,43 +2063,74 @@ def main():
                                 ])
                                 
                                 st.dataframe(conservation_df, use_container_width=True)
-                                st.write(f"Conserved regions found: {len(conserved_regions)}")
+                                st.success(f"✅ Found {len(conserved_regions)} highly conserved regions")
                                 
-                                # Step 4: Specificity testing against other genera
-                                st.subheader("Step 4: Specificity Testing")
-                                
+                                # Step 4: Specificity testing against other taxa
                                 comparison_genera = None
                                 if custom_comparison_genera.strip():
                                     comparison_genera = [g.strip() for g in custom_comparison_genera.split(',')]
-                                
-                                specific_regions = analyzer.compare_against_other_genera(
+
+                                comparison_species = None  
+                                if custom_comparison_species.strip():
+                                    comparison_species = [s.strip() for s in custom_comparison_species.split(',')]
+
+                                specificity_results = analyzer.compare_against_other_taxa(
                                     conserved_regions, 
                                     genus,
-                                    comparison_genera
+                                    test_genera=test_genus_specificity,
+                                    test_species=test_species_specificity,
+                                    comparison_genera=comparison_genera,
+                                    comparison_species=comparison_species
                                 )
-                                
+
+                                specific_regions = specificity_results['combined_specific_regions']
+
                                 if not specific_regions:
-                                    st.warning("No genus-specific regions found")
+                                    st.warning("No regions found that pass specificity requirements")
+                                    st.info("Try lowering the specificity threshold or adjusting comparison organisms")
                                     return
-                                
-                                # Display final specific regions
-                                specificity_df = pd.DataFrame([
-                                    {
+
+                                # Display detailed specificity results
+                                if test_genus_specificity and specificity_results['genus_results']:
+                                    genus_results = specificity_results['genus_results']
+                                    st.write(f"**Genus-level tested against:** {', '.join(genus_results['tested_against'])}")
+                                    st.write(f"**Regions passing genus test:** {len(genus_results['specific_regions'])}")
+
+                                if test_species_specificity and specificity_results['species_results']:
+                                    species_results = specificity_results['species_results']
+                                    st.write(f"**Species-level tested against:** {', '.join(species_results['tested_against'])}")
+                                    st.write(f"**Regions passing species test:** {len(species_results['specific_regions'])}")
+
+                                # Display final specific regions with enhanced information
+                                specificity_df_data = []
+                                for i, region in enumerate(specific_regions):
+                                    row = {
                                         'Region': i + 1,
                                         'Position': f"{region['start']}-{region['end']}",
                                         'Length': region['end'] - region['start'],
                                         'Conservation': f"{region['conservation_score']:.1%}",
-                                        'Specificity': f"{region['specificity_score']:.1%}",
-                                        'Quality Score': region['conservation_score'] * region['specificity_score']
+                                        'Subspecies Coverage': f"{region['subspecies_coverage']:.1%}",
                                     }
-                                    for i, region in enumerate(specific_regions)
-                                ])
-                                
+                                    
+                                    # Add specificity columns based on what was tested
+                                    if 'genus_specificity' in region:
+                                        row['Genus Specificity'] = f"{region['genus_specificity']:.1%}"
+                                    if 'species_specificity' in region:
+                                        row['Species Specificity'] = f"{region['species_specificity']:.1%}"
+                                    if 'combined_specificity' in region:
+                                        row['Combined Specificity'] = f"{region['combined_specificity']:.1%}"
+                                    else:
+                                        row['Overall Specificity'] = f"{region['specificity_score']:.1%}"
+                                    
+                                    row['Quality Score'] = f"{region['conservation_score'] * region['specificity_score']:.3f}"
+                                    specificity_df_data.append(row)
+
+                                specificity_df = pd.DataFrame(specificity_df_data)
                                 st.dataframe(specificity_df, use_container_width=True)
-                                st.success(f"Final genus-specific regions: {len(specific_regions)}")
+                                st.success(f"✅ Final high-quality regions: {len(specific_regions)}")
                                 
                                 # Step 5: Design primers for best regions
-                                st.subheader("Step 5: Primer Design")
+                                st.info("🧬 **Step 5: Designing genus-specific primers**")
                                 
                                 # Select top regions for primer design
                                 top_regions = sorted(
@@ -1821,8 +2145,10 @@ def main():
                                 # Use the first sequence as template (they should be similar in conserved regions)
                                 template_sequence = list(subspecies_sequences.values())[0]['sequences'][0]['sequence']
                                 
+                                st.write(f"Designing primers for top {len(top_regions)} regions...")
+                                
                                 for i, region in enumerate(top_regions):
-                                    st.write(f"Designing primers for region {i+1}...")
+                                    st.write(f"Designing primers for region {i+1}: {region['start']}-{region['end']}")
                                     
                                     try:
                                         region_primers = designer.design_primers(
@@ -1842,26 +2168,61 @@ def main():
                                                 }
                                             
                                             all_primers.extend(region_primers[:2])  # Top 2 from each region
+                                            st.write(f"  ✅ Designed {len(region_primers[:2])} primer pairs")
+                                        else:
+                                            st.write(f"  ⚠️ No primers found for this region")
                                     
                                     except Exception as e:
                                         st.warning(f"Primer design failed for region {i+1}: {e}")
-                                
+
                                 if all_primers:
+                                    # Store results in session state for other tabs
                                     st.session_state.primers_designed = all_primers
+                                    st.session_state.current_sequence = template_sequence
+                                    st.session_state.sequence_info = {
+                                        "description": f"Comprehensive analysis: {genus} genus",
+                                        "length": len(template_sequence),
+                                        "organism": genus,
+                                        "id": f"{genus}_comprehensive_analysis"
+                                    }
+                                    
+                                    # Store comprehensive analysis results
                                     st.session_state.comprehensive_analysis_results = {
                                         'subspecies_data': subspecies_data,
                                         'conserved_regions': conserved_regions,
                                         'specific_regions': specific_regions,
+                                        'specificity_results': specificity_results,
                                         'analysis_summary': {
                                             'total_subspecies': len(subspecies_data),
                                             'total_sequences': total_sequences,
                                             'conserved_regions_found': len(conserved_regions),
                                             'specific_regions_found': len(specific_regions),
+                                            'genus_specificity_tested': test_genus_specificity,
+                                            'species_specificity_tested': test_species_specificity,
                                             'primers_designed': len(all_primers)
                                         }
                                     }
                                     
-                                    st.success(f"Comprehensive analysis complete! Designed {len(all_primers)} high-quality genus-specific primers.")
+                                    st.success(f"🎉 **Comprehensive analysis complete!** Designed {len(all_primers)} high-quality genus-specific primers for {genus}")
+                                    st.info("📊 Go to the 'Results', 'Conservation', and 'Specificity' tabs to view detailed analysis and primer information!")
+                                    
+                                    # Show quick preview of results
+                                    preview_data = []
+                                    for i, primer in enumerate(all_primers):
+                                        preview_data.append({
+                                            'Pair': i + 1,
+                                            'Region': primer.region_info['region_number'],
+                                            'Forward': primer.forward_seq,
+                                            'Reverse': primer.reverse_seq,
+                                            'Quality': f"{primer.region_info['quality_score']:.3f}"
+                                        })
+                                    
+                                    preview_df = pd.DataFrame(preview_data)
+                                    st.dataframe(preview_df, use_container_width=True)
+                                    
+                                else:
+                                    st.error("No primers could be designed from the identified regions")
+                                    st.info("Try adjusting primer parameters or specificity thresholds")
                                 
                             except Exception as e:
                                 st.error(f"Comprehensive analysis failed: {e}")
@@ -2255,14 +2616,24 @@ def main():
     with tab2:
         st.header("Primer Design Results")
         
-        # Debug session state
-        st.write("🔍 Debug - Session state check:")
-        st.write(f"Primers designed: {len(st.session_state.primers_designed) if st.session_state.primers_designed else 0}")
-        st.write(f"Current sequence length: {len(st.session_state.current_sequence) if st.session_state.current_sequence else 0}")
-        st.write(f"Sequence info keys: {list(st.session_state.sequence_info.keys()) if st.session_state.sequence_info else 'None'}")
-        
         if st.session_state.primers_designed:
             primers = st.session_state.primers_designed
+            
+            # Show analysis type
+            if hasattr(st.session_state, 'comprehensive_analysis_results'):
+                st.info("🧬 These primers were designed using **Comprehensive Taxonomic Analysis** with enhanced specificity testing")
+                
+                # Show analysis summary
+                analysis_summary = st.session_state.comprehensive_analysis_results['analysis_summary']
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    st.metric("Subspecies Analyzed", analysis_summary['total_subspecies'])
+                with col2:
+                    st.metric("Total Sequences", analysis_summary['total_sequences'])
+                with col3:
+                    st.metric("Conserved Regions", analysis_summary['conserved_regions_found'])
+                with col4:
+                    st.metric("Final Specific Regions", analysis_summary['specific_regions_found'])
             
             # Sequence information
             if st.session_state.sequence_info:
@@ -2289,7 +2660,7 @@ def main():
             # Create DataFrame for display
             data = []
             for i, primer in enumerate(primers):
-                data.append({
+                row = {
                     'Pair': i + 1,
                     'Forward Sequence': primer.forward_seq,
                     'Reverse Sequence': primer.reverse_seq,
@@ -2299,7 +2670,14 @@ def main():
                     'Forward GC%': f"{primer.gc_content_f:.1f}%",
                     'Reverse GC%': f"{primer.gc_content_r:.1f}%",
                     'Penalty': f"{primer.penalty:.3f}"
-                })
+                }
+                
+                # Add quality information if available from comprehensive analysis
+                if hasattr(primer, 'region_info'):
+                    row['Region'] = primer.region_info['region_number']
+                    row['Quality Score'] = f"{primer.region_info['quality_score']:.3f}"
+                
+                data.append(row)
             
             df = pd.DataFrame(data)
             st.dataframe(df, use_container_width=True)
@@ -2529,7 +2907,139 @@ def main():
         else:
             st.info("No primers designed yet. Please use the Input tab to design primers.")
     
-    with tab4:
+    with tab4:  # Conservation tab
+        st.header("Conservation Analysis")
+        
+        if hasattr(st.session_state, 'comprehensive_analysis_results') and st.session_state.comprehensive_analysis_results:
+            analysis_results = st.session_state.comprehensive_analysis_results
+            
+            # Workflow diagram
+            workflow_fig = create_analysis_workflow_diagram()
+            if workflow_fig:
+                st.plotly_chart(workflow_fig, use_container_width=True)
+            
+            # Conservation overview
+            st.subheader("Conservation Overview")
+            conserved_regions = analysis_results.get('conserved_regions', [])
+            
+            if conserved_regions:
+                # Conservation heatmap
+                heatmap_fig = create_conservation_heatmap(
+                    conserved_regions, 
+                    analysis_results['subspecies_data']
+                )
+                if heatmap_fig:
+                    st.plotly_chart(heatmap_fig, use_container_width=True)
+                
+                # Conservation statistics
+                st.subheader("Conservation Statistics")
+                col1, col2, col3, col4 = st.columns(4)
+                
+                conservation_scores = [r['conservation_score'] for r in conserved_regions]
+                subspecies_coverage = [r['subspecies_coverage'] for r in conserved_regions]
+                
+                with col1:
+                    st.metric("Average Conservation", f"{np.mean(conservation_scores):.1%}")
+                with col2:
+                    st.metric("Max Conservation", f"{np.max(conservation_scores):.1%}")
+                with col3:
+                    st.metric("Average Subspecies Coverage", f"{np.mean(subspecies_coverage):.1%}")
+                with col4:
+                    st.metric("Regions Found", len(conserved_regions))
+                
+                # Detailed conservation table
+                st.subheader("Detailed Conservation Results")
+                conservation_df = pd.DataFrame([
+                    {
+                        'Region': i + 1,
+                        'Position': f"{region['start']}-{region['end']}",
+                        'Length': region['end'] - region['start'],
+                        'Conservation Score': f"{region['conservation_score']:.1%}",
+                        'Subspecies Coverage': f"{region['subspecies_coverage']:.1%}",
+                        'GC Content': f"{region['gc_content']:.1f}%",
+                        'Complexity Score': f"{region['complexity_score']:.3f}",
+                        'Sequence Count': region['sequence_count']
+                    }
+                    for i, region in enumerate(conserved_regions)
+                ])
+                
+                st.dataframe(conservation_df, use_container_width=True)
+        else:
+            st.info("No conservation analysis results available. Run comprehensive analysis first.")
+
+    with tab5:  # Specificity tab
+        st.header("Specificity Analysis")
+        
+        if hasattr(st.session_state, 'comprehensive_analysis_results') and st.session_state.comprehensive_analysis_results:
+            analysis_results = st.session_state.comprehensive_analysis_results
+            specificity_results = analysis_results.get('specificity_results', {})
+            
+            if specificity_results:
+                # Specificity comparison chart
+                specificity_fig = create_specificity_comparison_chart(specificity_results)
+                if specificity_fig:
+                    st.plotly_chart(specificity_fig, use_container_width=True)
+                
+                # Specificity overview
+                st.subheader("Specificity Test Results")
+                
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    if 'genus_results' in specificity_results and specificity_results['genus_results']:
+                        st.subheader("Genus-Level Testing")
+                        genus_data = specificity_results['genus_results']
+                        st.write(f"**Tested Against:** {', '.join(genus_data['tested_against'])}")
+                        st.write(f"**Regions Passing:** {len(genus_data['specific_regions'])}")
+                        
+                        if genus_data['specific_regions']:
+                            avg_genus_spec = np.mean([r['specificity_score'] for r in genus_data['specific_regions']])
+                            st.metric("Average Genus Specificity", f"{avg_genus_spec:.1%}")
+                
+                with col2:
+                    if 'species_results' in specificity_results and specificity_results['species_results']:
+                        st.subheader("Species-Level Testing")
+                        species_data = specificity_results['species_results']
+                        st.write(f"**Tested Against:** {', '.join(species_data['tested_against'])}")
+                        st.write(f"**Regions Passing:** {len(species_data['specific_regions'])}")
+                        
+                        if species_data['specific_regions']:
+                            avg_species_spec = np.mean([r['specificity_score'] for r in species_data['specific_regions']])
+                            st.metric("Average Species Specificity", f"{avg_species_spec:.1%}")
+                
+                # Final regions summary
+                final_regions = specificity_results['combined_specific_regions']
+                if final_regions:
+                    st.subheader("Final Specific Regions")
+                    st.write(f"Regions passing all specificity tests: **{len(final_regions)}**")
+                    
+                    # Create detailed specificity table
+                    specificity_table_data = []
+                    for i, region in enumerate(final_regions):
+                        row = {
+                            'Region': i + 1,
+                            'Position': f"{region['start']}-{region['end']}",
+                            'Conservation': f"{region['conservation_score']:.1%}",
+                        }
+                        
+                        if 'genus_specificity' in region:
+                            row['Genus Specificity'] = f"{region['genus_specificity']:.1%}"
+                        if 'species_specificity' in region:
+                            row['Species Specificity'] = f"{region['species_specificity']:.1%}"
+                        if 'combined_specificity' in region:
+                            row['Combined Specificity'] = f"{region['combined_specificity']:.1%}"
+                        else:
+                            row['Overall Specificity'] = f"{region['specificity_score']:.1%}"
+                        
+                        row['Quality Score'] = f"{region['conservation_score'] * region['specificity_score']:.3f}"
+                        specificity_table_data.append(row)
+                    
+                    specificity_df = pd.DataFrame(specificity_table_data)
+                    st.dataframe(specificity_df, use_container_width=True)
+        else:
+            st.info("No specificity analysis results available. Run comprehensive analysis first.")
+
+    with tab6:  # Export tab (moved from tab4)
         st.header("Export Results")
         
         if st.session_state.primers_designed:
