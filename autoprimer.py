@@ -103,7 +103,7 @@ class NCBIConnector:
                 "sequence": str(record.seq)
             }
         except Exception as e:
-            st.error(f"Error fetching sequence info for {seq_id}: {e}")
+            # Don't show error for every failed sequence, just log it
             return {}
     
     def fetch_genome_assembly_info(self, assembly_id: str) -> Dict:
@@ -126,7 +126,7 @@ class NCBIConnector:
                 }
             return {}
         except Exception as e:
-            st.error(f"Error fetching assembly info for {assembly_id}: {e}")
+            # Don't show error for every failed assembly, just log it
             return {}
 
 class PrimerDesigner:
@@ -593,17 +593,28 @@ def main():
                                 database_used = "genome"
                             
                             if genome_ids:
-                                st.success(f"Found {len(genome_ids)} genome entries!")
+                                if database_used == "genome":
+                                    st.success(f"Found {len(genome_ids)} genome assemblies!")
+                                else:
+                                    st.success(f"Found {len(genome_ids)} nucleotide sequences!")
                                 
-                                # Display found genomes
-                                st.subheader("Available Genomes")
+                                # Display found sequences
+                                if database_used == "genome":
+                                    st.subheader("Available Genome Assemblies")
+                                else:
+                                    st.subheader("Available Nucleotide Sequences")
                                 genome_info = []
                                 
                                 for i, genome_id in enumerate(genome_ids):
-                                    with st.spinner(f"Fetching genome {i+1}/{len(genome_ids)}..."):
+                                    with st.spinner(f"Fetching info {i+1}/{len(genome_ids)}..."):
                                         try:
-                                            # For genome database, we need to get assembly info differently
-                                            info = ncbi.fetch_genome_assembly_info(genome_id)
+                                            if database_used == "genome":
+                                                # For genome database, get assembly info
+                                                info = ncbi.fetch_genome_assembly_info(genome_id)
+                                            else:
+                                                # For nucleotide database, get sequence info
+                                                info = ncbi.fetch_sequence_info(genome_id, database="nucleotide")
+                                            
                                             if info:
                                                 genome_info.append({
                                                     'ID': genome_id,
@@ -612,11 +623,11 @@ def main():
                                                     'Organism': info.get('organism', 'N/A')
                                                 })
                                         except Exception as e:
-                                            st.warning(f"Could not fetch info for genome {genome_id}: {e}")
+                                            st.warning(f"Could not fetch info for {genome_id}: {e}")
                                             # Add basic info even if detailed fetch fails
                                             genome_info.append({
                                                 'ID': genome_id,
-                                                'Description': f'Genome Assembly {genome_id}',
+                                                'Description': f'Sequence {genome_id}' if database_used == "nucleotide" else f'Genome Assembly {genome_id}',
                                                 'Length': 'N/A',
                                                 'Organism': organism_name
                                             })
@@ -625,14 +636,21 @@ def main():
                                     genome_df = pd.DataFrame(genome_info)
                                     st.dataframe(genome_df, use_container_width=True)
                                     
-                                    # Let user select a genome
+                                    # Let user select a sequence
+                                    if database_used == "genome":
+                                        select_text = "Select a genome assembly to design primers for:"
+                                        button_text = "Design Primers for Selected Assembly"
+                                    else:
+                                        select_text = "Select a nucleotide sequence to design primers for:"
+                                        button_text = "Design Primers for Selected Sequence"
+                                    
                                     selected_genome = st.selectbox(
-                                        "Select a genome to design primers for:",
+                                        select_text,
                                         range(len(genome_info)),
                                         format_func=lambda x: f"{genome_info[x]['ID']} - {genome_info[x]['Description'][:100]}..."
                                     )
                                     
-                                    if st.button("Design Primers for Selected Genome", type="primary"):
+                                    if st.button(button_text, type="primary"):
                                         with st.spinner("Fetching sequence and designing primers..."):
                                             sequence_id = genome_info[selected_genome]['ID']
                                             
