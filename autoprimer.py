@@ -1,4 +1,34 @@
-#!/usr/bin/env python3
+def get_related_organisms(target_organism):
+    """Get related organisms for specificity testing"""
+    organism_lower = target_organism.lower()
+    
+    # Agricultural pathogen relationships
+    related_map = {
+        'fusarium': ['Trichoderma harzianum', 'Aspergillus niger', 'Penicillium chrysogenum', 'Alternaria alternata'],
+        'botrytis': ['Sclerotinia sclerotiorum', 'Alternaria alternata', 'Fusarium oxysporum', 'Rhizoctonia solani'],
+        'pythium': ['Phytophthora infestans', 'Fusarium oxysporum', 'Rhizoctonia solani'],
+        'alternaria': ['Stemphylium vesicarium', 'Botrytis cinerea', 'Fusarium oxysporum'],
+        'rhizoctonia': ['Fusarium oxysporum', 'Pythium ultimum', 'Sclerotinia sclerotiorum'],
+        'aspergillus': ['Penicillium chrysogenum', 'Trichoderma harzianum', 'Fusarium oxysporum'],
+        'penicillium': ['Aspergillus niger', 'Trichoderma harzianum', 'Fusarium oxysporum'],
+        'tetranychus': ['Panonychus ulmi', 'Oligonychus ilicis', 'Aculops lycopersici'],
+        'bemisia': ['Trialeurodes vaporariorum', 'Aphis gossypii', 'Myzus persicae'],
+        'thrips': ['Frankliniella occidentalis', 'Thrips palmi', 'Scirtothrips dorsalis']
+    }
+    
+    # Find matching genus
+    for genus, related in related_map.items():
+        if genus in organism_lower:
+            return related
+    
+    # Default related organisms for general testing
+    return ['Aspergillus niger', 'Penicillium chrysogenum', 'Trichoderma harzianum', 'Fusarium oxysporum']
+
+def check_session_state_validity():
+    """Check if session state has valid data"""
+    has_primers = bool(st.session_state.get('primers_designed'))
+    has_sequence = bool(st.session_state.get('current_sequence'))
+    has_seq_info = bool(st.session_state.get('sequence_info'))#!/usr/bin/env python3
 """
 Streamlit Web Application for Automated Primer Design - COMPLETE FIXED VERSION
 ============================================================================
@@ -832,6 +862,27 @@ def main():
         if t7_enabled:
             st.info("🧬 **T7 dsRNA Mode Active** - Primers include T7 promoter sequences for double-stranded RNA production")
         
+        # Check if this is conservation-based analysis
+        analysis_metadata = st.session_state.get('analysis_metadata', {})
+        is_conservation_based = analysis_metadata.get('type') == 'conservation_based'
+        
+        if is_conservation_based:
+            st.success("🧬 **Conservation-Based Design** - Primers designed from conserved regions across multiple sequences")
+            
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("Sequences Analyzed", analysis_metadata.get('sequences_analyzed', 'N/A'))
+            with col2:
+                conservation_thresh = analysis_metadata.get('conservation_threshold', 0)
+                st.metric("Conservation Threshold", f"{conservation_thresh:.0%}")
+            with col3:
+                specificity_tested = analysis_metadata.get('specificity_tested', False)
+                st.metric("Specificity Tested", "Yes" if specificity_tested else "No")
+            with col4:
+                if specificity_tested:
+                    spec_thresh = analysis_metadata.get('specificity_threshold', 0)
+                    st.metric("Specificity Threshold", f"{spec_thresh:.0%}")
+        
         # Sequence information
         if st.session_state.sequence_info:
             st.subheader("Sequence Information")
@@ -847,6 +898,61 @@ def main():
             
             if 'description' in info:
                 st.write(f"**Description:** {info['description']}")
+            
+            # Show conservation information if available
+            if 'conservation_score' in info:
+                st.metric("Conservation Score", f"{info['conservation_score']:.1%}")
+        
+        # Show conserved regions if available
+        if hasattr(st.session_state, 'conserved_regions') and st.session_state.conserved_regions:
+            st.subheader("Conserved Regions Analysis")
+            
+            conserved_regions = st.session_state.conserved_regions
+            conservation_data = []
+            
+            for i, region in enumerate(conserved_regions):
+                conservation_data.append({
+                    'Region': i + 1,
+                    'Position': f"{region['start']}-{region['end']}",
+                    'Length': f"{region['length']} bp",
+                    'Conservation': f"{region['conservation_score']:.1%}",
+                    'Sequences': region['sequence_count']
+                })
+            
+            conservation_df = pd.DataFrame(conservation_data)
+            st.dataframe(conservation_df, use_container_width=True)
+        
+        # Show specificity results if available
+        if hasattr(st.session_state, 'specificity_results') and st.session_state.specificity_results:
+            st.subheader("Specificity Testing Results")
+            
+            specificity_results = st.session_state.specificity_results
+            specificity_data = []
+            
+            for organism, result in specificity_results.items():
+                if 'error' not in result:
+                    specificity_data.append({
+                        'Organism': organism,
+                        'Max Similarity': f"{result['max_similarity']:.1%}",
+                        'Specific': '✅ Yes' if result['is_specific'] else '❌ No',
+                        'Sequences Tested': result['sequences_tested']
+                    })
+            
+            if specificity_data:
+                specificity_df = pd.DataFrame(specificity_data)
+                st.dataframe(specificity_df, use_container_width=True)
+                
+                # Summary
+                total_orgs = len(specificity_data)
+                specific_orgs = sum(1 for row in specificity_data if row['Specific'] == '✅ Yes')
+                specificity_percentage = (specific_orgs / total_orgs) * 100 if total_orgs > 0 else 0
+                
+                if specificity_percentage >= 80:
+                    st.success(f"🎯 Excellent specificity: {specific_orgs}/{total_orgs} organisms ({specificity_percentage:.0f}%)")
+                elif specificity_percentage >= 60:
+                    st.info(f"🎯 Good specificity: {specific_orgs}/{total_orgs} organisms ({specificity_percentage:.0f}%)")
+                else:
+                    st.warning(f"⚠️ Moderate specificity: {specific_orgs}/{total_orgs} organisms ({specificity_percentage:.0f}%)")
         
         # Primer results table
         st.subheader("Primer Pairs")
@@ -978,6 +1084,25 @@ def main():
             
             st.write(f"**Penalty Score:** {primer.penalty:.4f}")
         
+        # Conservation and Specificity Summary
+        if is_conservation_based:
+            with st.expander("Analysis Summary", expanded=False):
+                st.write("**Conservation-Based Primer Design Summary:**")
+                st.write(f"- Analyzed {analysis_metadata.get('sequences_analyzed', 'N/A')} sequences from {st.session_state.get('target_organism', 'target organism')}")
+                st.write(f"- Used {analysis_metadata.get('conservation_threshold', 0):.0%} conservation threshold")
+                
+                if analysis_metadata.get('specificity_tested'):
+                    st.write(f"- Tested specificity against related organisms")
+                    st.write(f"- Used {analysis_metadata.get('specificity_threshold', 0):.0%} specificity threshold")
+                    
+                    if hasattr(st.session_state, 'specificity_results'):
+                        total_tested = len(st.session_state.specificity_results)
+                        specific_count = sum(1 for result in st.session_state.specificity_results.values() 
+                                           if result.get('is_specific', False))
+                        st.write(f"- Specificity results: {specific_count}/{total_tested} organisms passed")
+                
+                st.write(f"- Final result: {len(primers)} primer pairs designed")
+        
         # dsRNA Production Protocol
         if t7_enabled and primers:
             st.subheader("dsRNA Production Protocol")
@@ -1028,6 +1153,26 @@ def main():
                 2. Quantify using spectrophotometer
                 3. Store at -80°C
                 """)
+            
+            # Tips for conservation-based dsRNA
+            if is_conservation_based:
+                with st.expander("Conservation-Based dsRNA Tips", expanded=False):
+                    st.markdown("""
+                    **Advantages of Conservation-Based dsRNA:**
+                    - Higher likelihood of success across different strains/populations
+                    - Reduced chance of resistance development
+                    - More robust RNAi response
+                    
+                    **Additional Considerations:**
+                    - Test dsRNA against multiple target populations when possible
+                    - Monitor for potential cross-reactivity with beneficial organisms
+                    - Consider seasonal/geographical variations in target populations
+                    
+                    **Quality Control for Conservation-Based Primers:**
+                    - Verify PCR amplification across multiple target samples
+                    - Test dsRNA efficacy on representative target populations
+                    - Monitor for potential off-target effects
+                    """))
     
     with tab3:
         st.header("Primer Analysis")
