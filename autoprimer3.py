@@ -1515,11 +1515,22 @@ def create_sequence_diagram(sequence: str, primers: List[PrimerPair], selected_p
 def export_to_excel(primers: List[PrimerPair]) -> bytes:
     """Export primer results to Excel format"""
     try:
+        # Get gene target information
+        gene_target_info = ""
+        if 'selected_gene_targets' in st.session_state:
+            target_info = st.session_state.selected_gene_targets
+            selected_categories = target_info.get('selected_categories', [])
+            if selected_categories:
+                gene_target_info = f"Targeting: {', '.join(selected_categories[:2])}"
+                if len(selected_categories) > 2:
+                    gene_target_info += f" (+{len(selected_categories)-2} more)"
+        
         data = []
         for i, primer in enumerate(primers):
             if hasattr(primer, 'has_t7_promoter') and primer.has_t7_promoter:
                 data.append({
                     'Primer_Pair': i + 1,
+                    'Gene_Target': gene_target_info if gene_target_info else "Standard Design",
                     'Forward_T7_Sequence': primer.forward_seq,
                     'Reverse_T7_Sequence': primer.reverse_seq,
                     'Forward_Core_Sequence': primer.core_forward_seq,
@@ -1538,6 +1549,7 @@ def export_to_excel(primers: List[PrimerPair]) -> bytes:
             else:
                 data.append({
                     'Primer_Pair': i + 1,
+                    'Gene_Target': gene_target_info if gene_target_info else "Standard Design",
                     'Forward_Sequence': primer.forward_seq,
                     'Reverse_Sequence': primer.reverse_seq,
                     'Forward_Tm': round(primer.forward_tm, 2),
@@ -2413,6 +2425,20 @@ def main():
     with tab2:
         st.header("Primer Design Results")
         
+        # Debug information
+        with st.expander("🔍 Debug Information", expanded=False):
+            st.write("**Session State Check:**")
+            st.write(f"- Has primers: {state_check['has_primers']}")
+            st.write(f"- Has sequence: {state_check['has_sequence']}")
+            st.write(f"- Has sequence info: {state_check['has_seq_info']}")
+            st.write(f"- Primer count: {state_check['primer_count']}")
+            st.write(f"- Sequence length: {state_check['sequence_length']}")
+            
+            if 'primers_designed' in st.session_state:
+                st.write(f"- Primers in session state: {len(st.session_state['primers_designed'])}")
+            else:
+                st.write("- No primers in session state")
+        
         if not state_check['has_primers']:
             st.info("No primers designed yet. Please use the Input tab to design primers.")
             return
@@ -2525,11 +2551,22 @@ def main():
         # Primer results table
         st.subheader("Primer Pairs")
         
+        # Get gene target information
+        gene_target_info = ""
+        if 'selected_gene_targets' in st.session_state:
+            target_info = st.session_state.selected_gene_targets
+            selected_categories = target_info.get('selected_categories', [])
+            if selected_categories:
+                gene_target_info = f"Targeting: {', '.join(selected_categories[:2])}"  # Show first 2 categories
+                if len(selected_categories) > 2:
+                    gene_target_info += f" (+{len(selected_categories)-2} more)"
+        
         data = []
         for i, primer in enumerate(primers):
             if hasattr(primer, 'has_t7_promoter') and primer.has_t7_promoter:
                 row = {
                     'Pair': i + 1,
+                    'Gene Target': gene_target_info if gene_target_info else "Standard Design",
                     'Forward (with T7)': primer.forward_seq,
                     'Reverse (with T7)': primer.reverse_seq,
                     'Core Forward': primer.core_forward_seq,
@@ -2542,6 +2579,7 @@ def main():
             else:
                 row = {
                     'Pair': i + 1,
+                    'Gene Target': gene_target_info if gene_target_info else "Standard Design",
                     'Forward Sequence': primer.forward_seq,
                     'Reverse Sequence': primer.reverse_seq,
                     'Forward Tm': f"{primer.forward_tm:.1f}°C",
@@ -2962,11 +3000,22 @@ def main():
         
         with col2:
             try:
+                # Get gene target information
+                gene_target_info = ""
+                if 'selected_gene_targets' in st.session_state:
+                    target_info = st.session_state.selected_gene_targets
+                    selected_categories = target_info.get('selected_categories', [])
+                    if selected_categories:
+                        gene_target_info = f"Targeting: {', '.join(selected_categories[:2])}"
+                        if len(selected_categories) > 2:
+                            gene_target_info += f" (+{len(selected_categories)-2} more)"
+                
                 data = []
                 for i, primer in enumerate(primers):
                     if hasattr(primer, 'has_t7_promoter') and primer.has_t7_promoter:
                         row = {
                             'Primer_Pair': i + 1,
+                            'Gene_Target': gene_target_info if gene_target_info else "Standard Design",
                             'Forward_T7_Sequence': primer.forward_seq,
                             'Reverse_T7_Sequence': primer.reverse_seq,
                             'Forward_Core_Sequence': primer.core_forward_seq,
@@ -2985,6 +3034,7 @@ def main():
                     else:
                         row = {
                             'Primer_Pair': i + 1,
+                            'Gene_Target': gene_target_info if gene_target_info else "Standard Design",
                             'Forward_Sequence': primer.forward_seq,
                             'Reverse_Sequence': primer.reverse_seq,
                             'Forward_Tm': round(primer.forward_tm, 2),
