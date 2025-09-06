@@ -1940,7 +1940,15 @@ def main():
                                     design_progress_bar.progress(1.0)
                                     st.write(f"🔬 Primer design completed. Found {len(primers) if primers else 0} primer pairs.")
                                     
+                                    # SET ALL REQUIRED SESSION STATE
                                     st.session_state.primers_designed = primers
+                                    st.session_state.current_sequence = clean_sequence  # ADD THIS LINE
+                                    
+                                    # DEBUG OUTPUT
+                                    st.success(f"✅ **Session state set successfully:**")
+                                    st.write(f"- Primers designed: {len(primers) if primers else 0}")
+                                    st.write(f"- Sequence length: {len(st.session_state.current_sequence)}")
+                                    st.write(f"- Sequence info: {st.session_state.sequence_info}")
                                     
                                     if primers:
                                         st.success(f"✅ Successfully designed {len(primers)} primer pairs!")
@@ -2582,8 +2590,15 @@ def main():
                                 primers = designer.design_primers(sequence, custom_params=custom_params)
                                 st.session_state.primers_designed = primers
                                 
+                                # DEBUG OUTPUT
+                                st.success(f"✅ **Session state set successfully:**")
+                                st.write(f"- Primers designed: {len(primers) if primers else 0}")
+                                st.write(f"- Sequence length: {len(st.session_state.current_sequence)}")
+                                st.write(f"- Sequence info: {st.session_state.sequence_info}")
+                                
                                 if primers:
                                     st.success(f"Successfully designed {len(primers)} primer pairs!")
+                                    st.info("📊 Go to the 'Results', 'Analysis', and 'Export' tabs to view detailed primer information!")
                                 else:
                                     st.warning("No suitable primers found with current parameters")
                             else:
@@ -2627,9 +2642,17 @@ def main():
                                 
                                 st.session_state.primers_designed = all_primers
                                 st.session_state.sequence_info = {"multiple": all_info}
+                                # Note: current_sequence not set for multiple sequences
+                                
+                                # DEBUG OUTPUT
+                                st.success(f"✅ **Session state set successfully:**")
+                                st.write(f"- Primers designed: {len(all_primers) if all_primers else 0}")
+                                st.write(f"- Sequences processed: {len(all_info)}")
+                                st.write(f"- Sequence info: {st.session_state.sequence_info}")
                                 
                                 if all_primers:
                                     st.success(f"Found {len(all_primers)} primer pairs from {len(all_info)} sequences!")
+                                    st.info("📊 Go to the 'Results', 'Analysis', and 'Export' tabs to view detailed primer information!")
                                 else:
                                     st.warning("No suitable primers found")
                             else:
@@ -2671,6 +2694,7 @@ def main():
                                 custom_params=custom_params
                             )
                             
+                            # SET ALL REQUIRED SESSION STATE
                             st.session_state.primers_designed = primers
                             st.session_state.current_sequence = clean_seq
                             st.session_state.sequence_info = {
@@ -2678,8 +2702,16 @@ def main():
                                 "description": "User-provided sequence"
                             }
                             
+                            # DEBUG OUTPUT
+                            st.success(f"✅ **Session state set successfully:**")
+                            st.write(f"- Primers designed: {len(primers) if primers else 0}")
+                            st.write(f"- Sequence length: {len(st.session_state.current_sequence)}")
+                            st.write(f"- Sequence info: {st.session_state.sequence_info}")
+                            st.write(f"- Session state keys: {list(st.session_state.keys())}")
+                            
                             if primers:
                                 st.success(f"Successfully designed {len(primers)} primer pairs!")
+                                st.info("📊 Go to the 'Results', 'Analysis', and 'Export' tabs to view detailed primer information!")
                             else:
                                 st.warning("No suitable primers found with current parameters")
                         except Exception as e:
@@ -2708,6 +2740,7 @@ def main():
                             designer = PrimerDesigner()
                             primers = designer.design_primers(clean_seq, custom_params=custom_params)
                             
+                            # SET ALL REQUIRED SESSION STATE
                             st.session_state.primers_designed = primers
                             st.session_state.current_sequence = clean_seq
                             st.session_state.sequence_info = {
@@ -2715,8 +2748,15 @@ def main():
                                 "description": f"Uploaded file: {uploaded_file.name}"
                             }
                             
+                            # DEBUG OUTPUT
+                            st.success(f"✅ **Session state set successfully:**")
+                            st.write(f"- Primers designed: {len(primers) if primers else 0}")
+                            st.write(f"- Sequence length: {len(st.session_state.current_sequence)}")
+                            st.write(f"- Sequence info: {st.session_state.sequence_info}")
+                            
                             if primers:
                                 st.success(f"Successfully designed {len(primers)} primer pairs!")
+                                st.info("📊 Go to the 'Results', 'Analysis', and 'Export' tabs to view detailed primer information!")
                             else:
                                 st.warning("No suitable primers found")
                         except Exception as e:
