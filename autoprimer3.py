@@ -81,6 +81,50 @@ def check_session_state_validity():
         'sequence_length': len(st.session_state.get('current_sequence', ''))
     }
 
+def get_gene_priority(category):
+    """Get priority level for gene category"""
+    category_lower = category.lower()
+    
+    # High priority categories
+    if any(keyword in category_lower for keyword in ['essential', 'housekeeping', 'actin', 'tubulin', 'rna polymerase', 'ribosomal']):
+        return "High"
+    
+    # Medium priority categories
+    elif any(keyword in category_lower for keyword in ['pathogenicity', 'virulence', 'effector', 'resistance', 'detoxification']):
+        return "Medium"
+    
+    # Low priority categories
+    else:
+        return "Low"
+
+def get_gene_use_recommendation(category):
+    """Get usage recommendation for gene category"""
+    category_lower = category.lower()
+    
+    if 'essential' in category_lower or 'housekeeping' in category_lower:
+        return "Recommended for reliable detection and quantification. These genes are highly conserved and expressed constitutively."
+    
+    elif 'pathogenicity' in category_lower or 'virulence' in category_lower:
+        return "Useful for detecting pathogenic strains and studying disease mechanisms. May not be present in all isolates."
+    
+    elif 'resistance' in category_lower:
+        return "Important for monitoring resistance development and screening for resistant strains. Critical for management decisions."
+    
+    elif 'detoxification' in category_lower:
+        return "Useful for studying pesticide resistance and detoxification mechanisms. Important for resistance management."
+    
+    elif 'secondary metabolite' in category_lower:
+        return "Useful for detecting toxin-producing strains and studying secondary metabolism. May be strain-specific."
+    
+    elif 'cell wall' in category_lower:
+        return "Good for structural studies and cell wall targeting. Generally well-conserved across strains."
+    
+    elif 'development' in category_lower:
+        return "Useful for studying life cycle stages and development processes. May be stage-specific."
+    
+    else:
+        return "General purpose gene category. Consider specific research objectives when selecting targets."
+
 def get_organism_suggestions_with_gene_targets():
     """Get agricultural pest and pathogen suggestions organized by category with comprehensive gene targets"""
     return {
@@ -2105,7 +2149,7 @@ def main():
                         if organism_targets:
                             gene_targets_selected = display_gene_targets_interface(organism_targets)
                             
-                            # Only show the design button if gene targets are selected
+                            # Always show the design button, but with different states
                             if gene_targets_selected and 'selected_gene_targets' in st.session_state:
                                 st.success("✅ Gene targets selected. Ready to design primers!")
                                 if st.button("🎯 Design Gene-Targeted Primers", type="primary", use_container_width=True):
@@ -2119,8 +2163,77 @@ def main():
                                 st.button("🎯 Design Gene-Targeted Primers", disabled=True, help="Select gene targets first")
                         else:
                             st.info("📝 No specific gene targets available for this organism. Consider using Conservation-Based or Standard Design.")
+                            # Show a fallback button for organisms without specific gene targets
+                            if st.button("🎯 Design Primers (Standard Mode)", type="secondary", use_container_width=True):
+                                if not email or not organism_name:
+                                    st.error("❌ Please provide email and organism name.")
+                                else:
+                                    # Fall back to standard design
+                                    with st.spinner(f"Designing primers for {organism_name}..."):
+                                        try:
+                                            ncbi = NCBIConnector(email, api_key)
+                                            designer = PrimerDesigner()
+                                            
+                                            search_query = f'"{organism_name}"[organism]'
+                                            seq_ids = ncbi.search_sequences(search_query, database="nucleotide", max_results=max_sequences)
+                                            
+                                            if seq_ids:
+                                                st.success(f"Found {len(seq_ids)} sequences!")
+                                                seq_id = seq_ids[0]
+                                                sequence = ncbi.fetch_sequence(seq_id)
+                                                seq_info = ncbi.fetch_sequence_info(seq_id)
+                                                
+                                                if sequence:
+                                                    clean_sequence = re.sub(r'[^ATGCatgc]', '', sequence.upper())
+                                                    if len(clean_sequence) < 50:
+                                                        st.error("Sequence too short for primer design")
+                                                    else:
+                                                        if len(clean_sequence) > 100000:
+                                                            st.warning(f"Large sequence ({len(clean_sequence):,} bp). Using first 100kb.")
+                                                            clean_sequence = clean_sequence[:100000]
+                                                        
+                                                        st.session_state.current_sequence = clean_sequence
+                                                        st.session_state.sequence_info = seq_info or {
+                                                            "id": seq_id,
+                                                            "description": f"Sequence {seq_id}",
+                                                            "length": len(clean_sequence),
+                                                            "organism": organism_name,
+                                                            "design_mode": "gene_targeted_fallback"
+                                                        }
+                                                        
+                                                        primers = designer.design_primers(
+                                                            clean_sequence, 
+                                                            custom_params=custom_params,
+                                                            add_t7_promoter=enable_t7_dsrna
+                                                        )
+                                                        st.session_state.primers_designed = primers
+                                                        
+                                                        if enable_t7_dsrna:
+                                                            st.session_state.t7_dsrna_enabled = True
+                                                            st.session_state.t7_settings = {
+                                                                'optimal_length': optimal_dsrna_length,
+                                                                'check_efficiency': check_transcription_efficiency
+                                                            }
+                                                        else:
+                                                            st.session_state.t7_dsrna_enabled = False
+                                                        
+                                                        if primers:
+                                                            st.success(f"✅ Successfully designed {len(primers)} primer pairs!")
+                                                            st.info("📊 Go to Results tab to view detailed analysis!")
+                                                        else:
+                                                            st.warning("No suitable primers found. Try adjusting parameters.")
+                                                else:
+                                                    st.error("Failed to fetch sequence")
+                                            else:
+                                                st.warning(f"No sequences found for {organism_name}")
+                                        except Exception as e:
+                                            st.error(f"Error: {e}")
                     except Exception as e:
                         st.warning(f"Gene target information not available: {e}")
+                        # Show a fallback button even if there's an error
+                        if st.button("🎯 Design Primers (Standard Mode)", type="secondary", use_container_width=True):
+                            st.info("Using standard primer design mode...")
+                            # You can add the same fallback logic here if needed
                 else:
                     st.info("👆 Enter an organism name above to see available gene targets.")
             
@@ -2312,6 +2425,7 @@ def main():
             display_results_with_gene_context()
         except Exception as e:
             st.warning(f"Gene target context display unavailable: {e}")
+            # Continue with basic results display even if gene context fails
         
         if t7_enabled:
             st.info("🧬 **T7 dsRNA Mode Active** - Primers include T7 promoter sequences for double-stranded RNA production")
