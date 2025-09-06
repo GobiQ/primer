@@ -897,6 +897,7 @@ class PrimerPair:
     forward_start: int
     reverse_start: int
     penalty: float = 0.0
+    gene_target: str = "Standard Design"  # Specific gene target for this primer pair
 
 class NCBIConnector:
     """Handles all NCBI database connections and queries"""
@@ -985,7 +986,8 @@ class PrimerDesigner:
         return "".join(complement.get(base, base) for base in reversed(sequence.upper()))
     
     def design_primers(self, sequence: str, target_region: Optional[Tuple[int, int]] = None,
-                      custom_params: Optional[Dict] = None, add_t7_promoter: bool = False) -> List[PrimerPair]:
+                      custom_params: Optional[Dict] = None, add_t7_promoter: bool = False, 
+                      gene_target: str = "Standard Design") -> List[PrimerPair]:
         """Design primers with optional T7 promoter for dsRNA production"""
         params = self.default_params.copy()
         if custom_params:
@@ -1035,7 +1037,8 @@ class PrimerDesigner:
                         gc_content_r=self.calculate_gc_content(reverse_seq),  # GC of core primer
                         forward_start=forward_start,
                         reverse_start=reverse_start,
-                        penalty=penalty
+                        penalty=penalty,
+                        gene_target=gene_target
                     )
                     
                     # Store additional T7 information
@@ -1059,7 +1062,8 @@ class PrimerDesigner:
                         gc_content_r=self.calculate_gc_content(reverse_seq),
                         forward_start=forward_start,
                         reverse_start=reverse_start,
-                        penalty=penalty
+                        penalty=penalty,
+                        gene_target=gene_target
                     )
                     
                     primer_pair.has_t7_promoter = False
@@ -1515,37 +1519,12 @@ def create_sequence_diagram(sequence: str, primers: List[PrimerPair], selected_p
 def export_to_excel(primers: List[PrimerPair]) -> bytes:
     """Export primer results to Excel format"""
     try:
-        # Get gene target information - show specific gene names instead of categories
-        gene_target_info = ""
-        if 'selected_gene_targets' in st.session_state:
-            target_info = st.session_state.selected_gene_targets
-            selected_genes = target_info.get('selected_genes', [])
-            if selected_genes:
-                # Extract just the gene names (remove category prefixes)
-                gene_names = []
-                for gene_info in selected_genes:
-                    if ': ' in gene_info:
-                        # Format: "Category: Gene name (description)"
-                        gene_name = gene_info.split(': ', 1)[1]
-                        # Remove description in parentheses if present
-                        if ' (' in gene_name:
-                            gene_name = gene_name.split(' (')[0]
-                        gene_names.append(gene_name.strip())
-                    else:
-                        gene_names.append(gene_info.strip())
-                
-                # Show first 3 specific gene names
-                if len(gene_names) <= 3:
-                    gene_target_info = f"Targeting: {', '.join(gene_names)}"
-                else:
-                    gene_target_info = f"Targeting: {', '.join(gene_names[:3])} (+{len(gene_names)-3} more)"
-        
         data = []
         for i, primer in enumerate(primers):
             if hasattr(primer, 'has_t7_promoter') and primer.has_t7_promoter:
                 data.append({
                     'Primer_Pair': i + 1,
-                    'Gene_Target': gene_target_info if gene_target_info else "Standard Design",
+                    'Gene_Target': primer.gene_target,
                     'Forward_T7_Sequence': primer.forward_seq,
                     'Reverse_T7_Sequence': primer.reverse_seq,
                     'Forward_Core_Sequence': primer.core_forward_seq,
@@ -1564,7 +1543,7 @@ def export_to_excel(primers: List[PrimerPair]) -> bytes:
             else:
                 data.append({
                     'Primer_Pair': i + 1,
-                    'Gene_Target': gene_target_info if gene_target_info else "Standard Design",
+                    'Gene_Target': primer.gene_target,
                     'Forward_Sequence': primer.forward_seq,
                     'Reverse_Sequence': primer.reverse_seq,
                     'Forward_Tm': round(primer.forward_tm, 2),
@@ -1700,23 +1679,65 @@ def perform_gene_targeted_design(organism_name, email, api_key, max_sequences, c
             
             st.write("🧬 **Step 2: Designing primers...**")
             
-            # Store sequence and design primers
-            st.session_state.current_sequence = selected_sequence
-            st.session_state.sequence_info = {
-                "id": gene_sequences[0]['id'] if gene_sequences else seq_ids[0],
-                "description": sequence_source,
-                "length": len(selected_sequence),
-                "organism": organism_name,
-                "design_mode": "gene_targeted"
-            }
+            # Design primers for each gene separately
+            all_primers = []
             
-            primers = designer.design_primers(
-                selected_sequence, 
-                custom_params=custom_params,
-                add_t7_promoter=enable_t7_dsrna
-            )
+            if gene_sequences:
+                # Design primers for each gene
+                for gene_seq in gene_sequences:
+                    clean_sequence = re.sub(r'[^ATGCatgc]', '', gene_seq['sequence'].upper())
+                    if len(clean_sequence) > 10000:
+                        clean_sequence = clean_sequence[:10000]
+                    
+                    # Extract clean gene name for display
+                    gene_name = gene_seq['gene']
+                    if ' (' in gene_name:
+                        gene_name = gene_name.split(' (')[0]
+                    
+                    # Design primers for this specific gene
+                    gene_primers = designer.design_primers(
+                        clean_sequence, 
+                        custom_params=custom_params,
+                        add_t7_promoter=enable_t7_dsrna,
+                        gene_target=gene_name
+                    )
+                    
+                    all_primers.extend(gene_primers)
+                
+                # Store the first gene sequence as the main sequence for display
+                best_gene = max(gene_sequences, key=lambda x: len(x['sequence']))
+                selected_sequence = re.sub(r'[^ATGCatgc]', '', best_gene['sequence'].upper())
+                if len(selected_sequence) > 10000:
+                    selected_sequence = selected_sequence[:10000]
+                
+                st.session_state.current_sequence = selected_sequence
+                st.session_state.sequence_info = {
+                    "id": best_gene['id'],
+                    "description": f"Gene-targeted design from {len(gene_sequences)} genes",
+                    "length": len(selected_sequence),
+                    "organism": organism_name,
+                    "design_mode": "gene_targeted"
+                }
+            else:
+                # Fallback to standard design
+                primers = designer.design_primers(
+                    selected_sequence, 
+                    custom_params=custom_params,
+                    add_t7_promoter=enable_t7_dsrna,
+                    gene_target="Standard Design"
+                )
+                all_primers = primers
+                
+                st.session_state.current_sequence = selected_sequence
+                st.session_state.sequence_info = {
+                    "id": seq_ids[0],
+                    "description": sequence_source,
+                    "length": len(selected_sequence),
+                    "organism": organism_name,
+                    "design_mode": "gene_targeted_fallback"
+                }
             
-            st.session_state.primers_designed = primers
+            st.session_state.primers_designed = all_primers
             
             if enable_t7_dsrna:
                 st.session_state.t7_dsrna_enabled = True
@@ -1725,21 +1746,22 @@ def perform_gene_targeted_design(organism_name, email, api_key, max_sequences, c
                     'check_efficiency': check_transcription_efficiency
                 }
             
-            if primers:
-                st.success(f"✅ Successfully designed {len(primers)} gene-targeted primer pairs!")
+            if all_primers:
+                st.success(f"✅ Successfully designed {len(all_primers)} gene-targeted primer pairs!")
                 
-                # Preview
+                # Preview with gene targets
                 preview_data = []
-                for i, primer in enumerate(primers[:3]):
+                for i, primer in enumerate(all_primers[:5]):
                     preview_data.append({
                         'Pair': i + 1,
+                        'Gene Target': primer.gene_target,
                         'Forward': primer.forward_seq[:30] + '...' if len(primer.forward_seq) > 30 else primer.forward_seq,
                         'Reverse': primer.reverse_seq[:30] + '...' if len(primer.reverse_seq) > 30 else primer.reverse_seq,
                         'Product Size': f"{primer.product_size} bp"
                     })
                 
                 st.dataframe(pd.DataFrame(preview_data), use_container_width=True)
-                st.info("📊 Go to Results tab to view detailed analysis!")
+                st.info("📊 Go to Results tab to view detailed analysis with specific gene targets!")
             else:
                 st.warning("No suitable primers found. Try adjusting parameters.")
                 
@@ -1886,7 +1908,8 @@ def perform_conservation_based_design(organism_name, email, api_key, max_sequenc
             primers = designer.design_primers(
                 consensus_seq,
                 custom_params=custom_params,
-                add_t7_promoter=enable_t7_dsrna
+                add_t7_promoter=enable_t7_dsrna,
+                gene_target="Conservation-Based Design"
             )
             
             st.session_state.primers_designed = primers
@@ -1964,7 +1987,8 @@ def perform_standard_design(organism_name, email, api_key, max_sequences, custom
                         primers = designer.design_primers(
                             clean_sequence, 
                             custom_params=custom_params,
-                            add_t7_promoter=enable_t7_dsrna
+                            add_t7_promoter=enable_t7_dsrna,
+                            gene_target="Standard Design"
                         )
                         st.session_state.primers_designed = primers
                         
@@ -2231,7 +2255,8 @@ def main():
                                                         primers = designer.design_primers(
                                                             clean_sequence, 
                                                             custom_params=custom_params,
-                                                            add_t7_promoter=enable_t7_dsrna
+                                                            add_t7_promoter=enable_t7_dsrna,
+                                                            gene_target="Standard Design (Fallback)"
                                                         )
                                                         st.session_state.primers_designed = primers
                                                         
@@ -2416,7 +2441,8 @@ def main():
                             primers = designer.design_primers(
                                 clean_seq, 
                                 custom_params=custom_params,
-                                add_t7_promoter=enable_t7_dsrna
+                                add_t7_promoter=enable_t7_dsrna,
+                                gene_target="User Input Sequence"
                             )
                             st.session_state.primers_designed = primers
                             
@@ -2566,37 +2592,12 @@ def main():
         # Primer results table
         st.subheader("Primer Pairs")
         
-        # Get gene target information - show specific gene names instead of categories
-        gene_target_info = ""
-        if 'selected_gene_targets' in st.session_state:
-            target_info = st.session_state.selected_gene_targets
-            selected_genes = target_info.get('selected_genes', [])
-            if selected_genes:
-                # Extract just the gene names (remove category prefixes)
-                gene_names = []
-                for gene_info in selected_genes:
-                    if ': ' in gene_info:
-                        # Format: "Category: Gene name (description)"
-                        gene_name = gene_info.split(': ', 1)[1]
-                        # Remove description in parentheses if present
-                        if ' (' in gene_name:
-                            gene_name = gene_name.split(' (')[0]
-                        gene_names.append(gene_name.strip())
-                    else:
-                        gene_names.append(gene_info.strip())
-                
-                # Show first 3 specific gene names
-                if len(gene_names) <= 3:
-                    gene_target_info = f"Targeting: {', '.join(gene_names)}"
-                else:
-                    gene_target_info = f"Targeting: {', '.join(gene_names[:3])} (+{len(gene_names)-3} more)"
-        
         data = []
         for i, primer in enumerate(primers):
             if hasattr(primer, 'has_t7_promoter') and primer.has_t7_promoter:
                 row = {
                     'Pair': i + 1,
-                    'Gene Target': gene_target_info if gene_target_info else "Standard Design",
+                    'Gene Target': primer.gene_target,
                     'Forward (with T7)': primer.forward_seq,
                     'Reverse (with T7)': primer.reverse_seq,
                     'Core Forward': primer.core_forward_seq,
@@ -2609,7 +2610,7 @@ def main():
             else:
                 row = {
                     'Pair': i + 1,
-                    'Gene Target': gene_target_info if gene_target_info else "Standard Design",
+                    'Gene Target': primer.gene_target,
                     'Forward Sequence': primer.forward_seq,
                     'Reverse Sequence': primer.reverse_seq,
                     'Forward Tm': f"{primer.forward_tm:.1f}°C",
@@ -3030,37 +3031,12 @@ def main():
         
         with col2:
             try:
-                # Get gene target information - show specific gene names instead of categories
-                gene_target_info = ""
-                if 'selected_gene_targets' in st.session_state:
-                    target_info = st.session_state.selected_gene_targets
-                    selected_genes = target_info.get('selected_genes', [])
-                    if selected_genes:
-                        # Extract just the gene names (remove category prefixes)
-                        gene_names = []
-                        for gene_info in selected_genes:
-                            if ': ' in gene_info:
-                                # Format: "Category: Gene name (description)"
-                                gene_name = gene_info.split(': ', 1)[1]
-                                # Remove description in parentheses if present
-                                if ' (' in gene_name:
-                                    gene_name = gene_name.split(' (')[0]
-                                gene_names.append(gene_name.strip())
-                            else:
-                                gene_names.append(gene_info.strip())
-                        
-                        # Show first 3 specific gene names
-                        if len(gene_names) <= 3:
-                            gene_target_info = f"Targeting: {', '.join(gene_names)}"
-                        else:
-                            gene_target_info = f"Targeting: {', '.join(gene_names[:3])} (+{len(gene_names)-3} more)"
-                
                 data = []
                 for i, primer in enumerate(primers):
                     if hasattr(primer, 'has_t7_promoter') and primer.has_t7_promoter:
                         row = {
                             'Primer_Pair': i + 1,
-                            'Gene_Target': gene_target_info if gene_target_info else "Standard Design",
+                            'Gene_Target': primer.gene_target,
                             'Forward_T7_Sequence': primer.forward_seq,
                             'Reverse_T7_Sequence': primer.reverse_seq,
                             'Forward_Core_Sequence': primer.core_forward_seq,
@@ -3079,7 +3055,7 @@ def main():
                     else:
                         row = {
                             'Primer_Pair': i + 1,
-                            'Gene_Target': gene_target_info if gene_target_info else "Standard Design",
+                            'Gene_Target': primer.gene_target,
                             'Forward_Sequence': primer.forward_seq,
                             'Reverse_Sequence': primer.reverse_seq,
                             'Forward_Tm': round(primer.forward_tm, 2),
