@@ -620,6 +620,27 @@ def main():
                                     
                                     if primers:
                                         st.success(f"✅ Successfully designed {len(primers)} primer pairs!")
+                                        
+                                        # Show quick preview of primers
+                                        st.subheader("🎯 Primer Preview")
+                                        preview_data = []
+                                        for i, primer in enumerate(primers[:3]):  # Show first 3 pairs
+                                            preview_data.append({
+                                                'Pair': i + 1,
+                                                'Forward': primer.forward_seq,
+                                                'Reverse': primer.reverse_seq,
+                                                'Tm': f"{primer.forward_tm:.1f}°C / {primer.reverse_tm:.1f}°C",
+                                                'Size': f"{primer.product_size} bp"
+                                            })
+                                        
+                                        preview_df = pd.DataFrame(preview_data)
+                                        st.dataframe(preview_df, use_container_width=True)
+                                        
+                                        if len(primers) > 3:
+                                            st.info(f"📊 Showing first 3 of {len(primers)} primer pairs. Go to the 'Results' tab to see all primers and detailed analysis!")
+                                        else:
+                                            st.info("📊 Go to the 'Results' tab to see detailed primer analysis and export options!")
+                                        
                                         # Clear session state after successful search
                                         if 'organism_name' in st.session_state:
                                             del st.session_state.organism_name
