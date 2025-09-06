@@ -41,46 +41,71 @@ def check_session_state_validity():
 def get_organism_suggestions():
     """Get agricultural pest and pathogen suggestions organized by category"""
     return {
-        "Fungal Pathogens": {
+        "🍄 Fungal Pathogens": {
             "Fusarium species": [
                 ("Fusarium wilt", "Fusarium oxysporum"),
                 ("Fusarium head blight", "Fusarium graminearum"),
-                ("Fusarium crown rot", "Fusarium culmorum")
-            ],
-            "Botrytis species": [
-                ("Gray mold", "Botrytis cinerea"),
-                ("Botrytis blight", "Botrytis elliptica")
+                ("Fusarium crown rot", "Fusarium culmorum"),
+                ("Fusarium root rot", "Fusarium solani"),
+                ("Fusarium ear rot", "Fusarium proliferatum")
             ],
             "Other fungi": [
+                ("Gray mold", "Botrytis cinerea"),
+                ("White mold", "Sclerotinia sclerotiorum"),
                 ("Late blight", "Phytophthora infestans"),
                 ("Powdery mildew", "Erysiphe necator"),
                 ("Rust disease", "Puccinia graminis"),
                 ("Smut disease", "Ustilago maydis")
             ]
         },
-        "Insect Pests": {
+        "🐛 Insect Pests": {
             "Mites": [
                 ("Two-spotted spider mite", "Tetranychus urticae"),
-                ("European red mite", "Panonychus ulmi")
+                ("European red mite", "Panonychus ulmi"),
+                ("Broad mite", "Polyphagotarsonemus latus"),
+                ("Russet mite", "Aculops lycopersici")
             ],
-            "Whiteflies": [
+            "Sucking insects": [
                 ("Silverleaf whitefly", "Bemisia tabaci"),
-                ("Greenhouse whitefly", "Trialeurodes vaporariorum")
+                ("Greenhouse whitefly", "Trialeurodes vaporariorum"),
+                ("Green peach aphid", "Myzus persicae"),
+                ("Cotton aphid", "Aphis gossypii"),
+                ("Asian citrus psyllid", "Diaphorina citri")
             ],
             "Thrips": [
                 ("Western flower thrips", "Frankliniella occidentalis"),
                 ("Onion thrips", "Thrips tabaci")
-            ],
-            "Aphids": [
-                ("Green peach aphid", "Myzus persicae"),
-                ("Cotton aphid", "Aphis gossypii")
             ]
         },
-        "Bacterial Pathogens": {
+        "🦠 Oomycetes": {
+            "Water molds": [
+                ("Pythium root rot", "Pythium"),
+                ("Pythium damping-off", "Pythium myriotylum")
+            ]
+        },
+        "🦠 Bacterial Pathogens": {
             "Common bacteria": [
                 ("Bacterial wilt", "Ralstonia solanacearum"),
                 ("Fire blight", "Erwinia amylovora"),
                 ("Crown gall", "Agrobacterium tumefaciens")
+            ]
+        },
+        "🦠 Plant Viruses": {
+            "Tobamoviruses": [
+                ("Tobacco mosaic virus", "Tobacco mosaic virus"),
+                ("Tomato mosaic virus", "Tomato mosaic virus")
+            ],
+            "Other viruses": [
+                ("Beet curly top virus", "Beet curly top virus"),
+                ("Arabis mosaic virus", "Arabis mosaic virus"),
+                ("Alfalfa mosaic virus", "Alfalfa mosaic virus"),
+                ("Cannabis cryptic virus", "Cannabis cryptic virus"),
+                ("Lettuce chlorosis virus", "Lettuce chlorosis virus")
+            ]
+        },
+        "🧬 Viroids": {
+            "RNA pathogens": [
+                ("Hop latent viroid", "Hop latent viroid")
             ]
         }
     }
@@ -818,26 +843,42 @@ def main():
                         except Exception as e:
                             st.error(f"Error: {e}")
             
-            # Agricultural Pests & Pathogens section with functional buttons
-            st.write("**Agricultural Pests & Pathogens:**")
+            # Agricultural Pests & Pathogens section with improved layout
+            st.markdown("---")
+            st.markdown("### 🎯 Quick Select: Agricultural Pests & Pathogens")
+            st.markdown("*Click any button below to automatically search for that organism*")
             
             suggestions = get_organism_suggestions()
             
+            # Show summary of available organisms
+            total_organisms = sum(len(orgs) for subcats in suggestions.values() for orgs in subcats.values())
+            st.info(f"📊 **{total_organisms} organisms** available across {len(suggestions)} categories")
+            
+            # Create expandable sections for better organization
             for category, subcategories in suggestions.items():
-                st.write(f"**{category}**")
-                
-                for subcategory, organisms in subcategories.items():
-                    st.write(f"*{subcategory}*")
-                    
-                    # Use more columns to reduce spacing
-                    cols = st.columns(min(len(organisms), 6))
-                    for i, (common_name, latin_name) in enumerate(organisms):
-                        with cols[i % 6]:
-                            if st.button(common_name, key=f"suggest_{category}_{subcategory}_{i}", 
-                                       help=f"Click to search for {latin_name}"):
-                                # Set the organism name and trigger search
-                                st.session_state.selected_organism = latin_name
-                                st.rerun()
+                with st.expander(f"{category} ({sum(len(orgs) for orgs in subcategories.values())} organisms)", expanded=False):
+                    for subcategory, organisms in subcategories.items():
+                        st.markdown(f"**{subcategory}**")
+                        
+                        # Use a more compact grid layout
+                        num_cols = min(len(organisms), 4)  # Max 4 columns for better readability
+                        cols = st.columns(num_cols)
+                        
+                        for i, (common_name, latin_name) in enumerate(organisms):
+                            with cols[i % num_cols]:
+                                if st.button(
+                                    common_name, 
+                                    key=f"suggest_{category}_{subcategory}_{i}", 
+                                    help=f"Search for {latin_name}",
+                                    use_container_width=True
+                                ):
+                                    # Set the organism name and trigger search
+                                    st.session_state.selected_organism = latin_name
+                                    st.rerun()
+                        
+                        # Add small spacing between subcategories
+                        if subcategory != list(subcategories.keys())[-1]:  # Not the last subcategory
+                            st.markdown("")
             
             # Handle organism selection from buttons
             if 'selected_organism' in st.session_state:
