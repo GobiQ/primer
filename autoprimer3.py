@@ -1862,6 +1862,10 @@ def main():
         help="Adds T7 promoter sequences to both primers for bidirectional transcription and dsRNA synthesis"
     )
     
+    # Initialize T7 dsRNA parameters with default values
+    optimal_dsrna_length = False
+    check_transcription_efficiency = False
+    
     if enable_t7_dsrna:
         with st.sidebar.expander("dsRNA Parameters", expanded=True):
             st.info("**T7 dsRNA Production**\nAdds T7 promoter (TAATACGACTCACTATAGGG) to both forward and reverse primers. This enables:\n\n• Bidirectional transcription\n• Double-stranded RNA synthesis\n• RNAi applications\n• Pest management research")
