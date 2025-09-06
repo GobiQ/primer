@@ -28,10 +28,16 @@ from dataclasses import dataclass
 from Bio import Entrez, SeqIO
 from Bio.Seq import Seq
 from Bio.SeqUtils.MeltingTemp import Tm_NN
+from Bio.Align import PairwiseAligner
+from Bio.Blast import NCBIWWW, NCBIXML
 import primer3
 import re
 from pathlib import Path
 import base64
+import numpy as np
+from collections import defaultdict
+import warnings
+warnings.filterwarnings("ignore")
 
 # Configure Streamlit page
 st.set_page_config(
@@ -208,6 +214,634 @@ class PrimerDesigner:
         except Exception as e:
             st.error(f"Error in primer design: {e}")
             return []
+
+class ComprehensiveTaxonomicAnalyzer:
+    """Advanced taxonomic analysis for genus-level primer design"""
+    
+    def __init__(self, ncbi_connector):
+        self.ncbi = ncbi_connector
+        self.min_sequences_per_subspecies = 50
+        self.max_sequences_per_subspecies = 100
+        self.conservation_threshold = 0.90  # 90% conservation across subspecies
+        self.specificity_threshold = 0.75   # <75% similarity to other genera
+        
+    def discover_subspecies(self, genus_name, max_subspecies=20):
+        """Comprehensively discover all subspecies/species within a genus"""
+        try:
+            st.info(f"Discovering subspecies within genus {genus_name}...")
+            
+            # Multiple search strategies to capture all variants
+            search_queries = [
+                f'"{genus_name}"[organism]',
+                f'{genus_name}[organism] AND (subspecies OR subsp OR strain OR isolate)',
+                f'{genus_name}[organism] AND (f. sp. OR forma OR variety OR var)',
+                f'{genus_name}[organism] AND complete[title]'
+            ]
+            
+            all_species_data = {}
+            
+            for query in search_queries:
+                try:
+                    st.write(f"Searching: {query}")
+                    seq_ids = self.ncbi.search_sequences(
+                        query, 
+                        database="nucleotide", 
+                        max_results=500  # Cast wider net
+                    )
+                    
+                    st.write(f"Found {len(seq_ids)} sequences for this query")
+                    
+                    # Sample sequences to extract organism names
+                    sample_size = min(100, len(seq_ids))
+                    for seq_id in seq_ids[:sample_size]:
+                        try:
+                            seq_info = self.ncbi.fetch_sequence_info(seq_id)
+                            if seq_info and seq_info.get('organism'):
+                                organism = seq_info['organism']
+                                
+                                # Clean and standardize organism name
+                                clean_organism = self.standardize_organism_name(organism, genus_name)
+                                
+                                if clean_organism:
+                                    if clean_organism not in all_species_data:
+                                        all_species_data[clean_organism] = {
+                                            'sequence_ids': [],
+                                            'sample_info': seq_info
+                                        }
+                                    all_species_data[clean_organism]['sequence_ids'].append(seq_id)
+                        
+                        except Exception as e:
+                            continue  # Skip problematic sequences
+                            
+                except Exception as e:
+                    st.warning(f"Search query failed: {query} - {e}")
+                    continue
+            
+            # Filter and rank subspecies by available sequence count
+            filtered_subspecies = {}
+            for organism, data in all_species_data.items():
+                seq_count = len(data['sequence_ids'])
+                if seq_count >= 5:  # Minimum threshold for inclusion
+                    filtered_subspecies[organism] = {
+                        'sequence_count': seq_count,
+                        'sample_info': data['sample_info'],
+                        'sequence_ids': data['sequence_ids'][:self.max_sequences_per_subspecies]
+                    }
+            
+            # Sort by sequence availability
+            sorted_subspecies = dict(sorted(
+                filtered_subspecies.items(), 
+                key=lambda x: x[1]['sequence_count'], 
+                reverse=True
+            ))
+            
+            return dict(list(sorted_subspecies.items())[:max_subspecies])
+            
+        except Exception as e:
+            st.error(f"Error discovering subspecies: {e}")
+            return {}
+    
+    def standardize_organism_name(self, organism_name, genus_name):
+        """Standardize organism names and filter for the target genus"""
+        if not organism_name or genus_name.lower() not in organism_name.lower():
+            return None
+        
+        # Remove common suffixes and standardize
+        organism = organism_name.strip()
+        
+        # Remove strain identifiers but keep subspecies info
+        import re
+        
+        # Patterns to preserve subspecies information
+        subspecies_patterns = [
+            r'f\.\s*sp\.\s*\w+',  # forma specialis
+            r'subsp\.\s*\w+',     # subspecies
+            r'var\.\s*\w+',       # variety
+            r'pv\.\s*\w+'         # pathovar
+        ]
+        
+        clean_name = organism
+        
+        # Extract subspecies information
+        subspecies_info = ""
+        for pattern in subspecies_patterns:
+            match = re.search(pattern, organism, re.IGNORECASE)
+            if match:
+                subspecies_info = " " + match.group()
+                break
+        
+        # Get base species name (first two words)
+        words = organism.split()
+        if len(words) >= 2 and words[0].lower() == genus_name.lower():
+            base_name = f"{words[0]} {words[1]}"
+            return base_name + subspecies_info
+        
+        return None
+    
+    def fetch_representative_sequences(self, subspecies_data, target_count=75):
+        """Fetch representative sequences for each subspecies with geographic diversity"""
+        results = {}
+        
+        for subspecies, data in subspecies_data.items():
+            st.write(f"Fetching sequences for {subspecies}...")
+            
+            sequence_ids = data['sequence_ids']
+            target_fetch = min(target_count, len(sequence_ids))
+            
+            # Implement sampling strategy for diversity
+            sampled_ids = self.diverse_sampling(sequence_ids, target_fetch)
+            
+            sequences = []
+            fetch_count = 0
+            
+            for seq_id in sampled_ids:
+                if fetch_count >= target_fetch:
+                    break
+                    
+                try:
+                    sequence = self.ncbi.fetch_sequence(seq_id)
+                    if sequence and len(sequence) > 200:  # Minimum sequence length
+                        # Clean sequence
+                        clean_seq = re.sub(r'[^ATGCatgc]', '', sequence.upper())
+                        if len(clean_seq) > 200:
+                            sequences.append({
+                                'id': seq_id,
+                                'sequence': clean_seq[:5000],  # Limit to 5kb for performance
+                                'length': len(clean_seq)
+                            })
+                            fetch_count += 1
+                
+                except Exception as e:
+                    continue
+            
+            if sequences:
+                results[subspecies] = {
+                    'sequences': sequences,
+                    'count': len(sequences),
+                    'metadata': data
+                }
+                st.write(f"  Retrieved {len(sequences)} sequences")
+            else:
+                st.warning(f"  No valid sequences retrieved for {subspecies}")
+        
+        return results
+    
+    def diverse_sampling(self, sequence_ids, target_count):
+        """Sample sequence IDs to maximize diversity"""
+        if len(sequence_ids) <= target_count:
+            return sequence_ids
+        
+        # Simple strategy: take evenly spaced samples
+        step = len(sequence_ids) // target_count
+        sampled = []
+        
+        for i in range(0, len(sequence_ids), step):
+            sampled.append(sequence_ids[i])
+            if len(sampled) >= target_count:
+                break
+        
+        return sampled
+    
+    def perform_multiple_sequence_alignment(self, subspecies_sequences):
+        """Align sequences across all subspecies to find conserved regions"""
+        st.info("Performing multiple sequence alignment analysis...")
+        
+        # Combine all sequences from all subspecies
+        all_sequences = []
+        sequence_metadata = []
+        
+        for subspecies, data in subspecies_sequences.items():
+            for seq_data in data['sequences']:
+                all_sequences.append(seq_data['sequence'])
+                sequence_metadata.append({
+                    'subspecies': subspecies,
+                    'seq_id': seq_data['id'],
+                    'length': seq_data['length']
+                })
+        
+        if len(all_sequences) < 10:
+            st.warning("Insufficient sequences for robust alignment analysis")
+            return {}
+        
+        st.write(f"Analyzing {len(all_sequences)} sequences across {len(subspecies_sequences)} subspecies")
+        
+        # Find conserved regions using sliding window approach
+        conserved_regions = self.find_conserved_regions_advanced(
+            all_sequences, 
+            sequence_metadata, 
+            subspecies_sequences
+        )
+        
+        return conserved_regions
+    
+    def find_conserved_regions_advanced(self, sequences, metadata, subspecies_data):
+        """Advanced conserved region analysis with subspecies representation"""
+        
+        # Find the minimum length across all sequences
+        min_length = min(len(seq) for seq in sequences)
+        window_size = 150
+        step_size = 25
+        
+        conserved_regions = []
+        positions = range(0, min_length - window_size, step_size)
+        
+        st.write(f"Analyzing {len(positions)} windows of size {window_size} bp")
+        
+        progress_bar = st.progress(0)
+        
+        for i, start_pos in enumerate(positions):
+            progress_bar.progress((i + 1) / len(positions))
+            
+            end_pos = start_pos + window_size
+            window_sequences = [seq[start_pos:end_pos] for seq in sequences]
+            
+            # Calculate conservation metrics
+            conservation_metrics = self.calculate_conservation_metrics(
+                window_sequences, 
+                metadata, 
+                subspecies_data
+            )
+            
+            # Check if this region meets conservation criteria
+            if (conservation_metrics['overall_conservation'] >= self.conservation_threshold and
+                conservation_metrics['subspecies_representation'] >= 0.8):  # 80% of subspecies represented
+                
+                conserved_regions.append({
+                    'start': start_pos,
+                    'end': end_pos,
+                    'sequence': window_sequences[0],  # Representative sequence
+                    'conservation_score': conservation_metrics['overall_conservation'],
+                    'subspecies_coverage': conservation_metrics['subspecies_representation'],
+                    'sequence_count': len(window_sequences),
+                    'gc_content': self.calculate_gc_content(window_sequences[0]),
+                    'complexity_score': conservation_metrics['complexity_score']
+                })
+        
+        progress_bar.progress(1.0)
+        
+        # Merge overlapping regions
+        merged_regions = self.merge_overlapping_regions_advanced(conserved_regions)
+        
+        st.write(f"Found {len(merged_regions)} conserved regions after merging")
+        
+        return merged_regions
+    
+    def calculate_conservation_metrics(self, window_sequences, metadata, subspecies_data):
+        """Calculate comprehensive conservation metrics"""
+        
+        # Overall sequence conservation
+        conservation_scores = []
+        for i in range(len(window_sequences)):
+            for j in range(i + 1, len(window_sequences)):
+                similarity = self.calculate_sequence_similarity(
+                    window_sequences[i], 
+                    window_sequences[j]
+                )
+                conservation_scores.append(similarity)
+        
+        overall_conservation = np.mean(conservation_scores) if conservation_scores else 0
+        
+        # Subspecies representation analysis
+        represented_subspecies = set()
+        for i, seq_meta in enumerate(metadata):
+            if i < len(window_sequences):
+                represented_subspecies.add(seq_meta['subspecies'])
+        
+        subspecies_representation = len(represented_subspecies) / len(subspecies_data)
+        
+        # Sequence complexity (avoid low-complexity regions)
+        representative_seq = window_sequences[0]
+        complexity_score = self.calculate_sequence_complexity(representative_seq)
+        
+        return {
+            'overall_conservation': overall_conservation,
+            'subspecies_representation': subspecies_representation,
+            'complexity_score': complexity_score,
+            'represented_subspecies': list(represented_subspecies)
+        }
+    
+    def calculate_sequence_similarity(self, seq1, seq2):
+        """Calculate pairwise sequence similarity"""
+        if len(seq1) != len(seq2):
+            return 0.0
+        
+        matches = sum(1 for a, b in zip(seq1.upper(), seq2.upper()) if a == b)
+        return matches / len(seq1)
+    
+    def calculate_sequence_complexity(self, sequence):
+        """Calculate sequence complexity to avoid low-complexity regions"""
+        if not sequence:
+            return 0
+        
+        # Count unique dinucleotides
+        dinucleotides = set()
+        for i in range(len(sequence) - 1):
+            dinucleotides.add(sequence[i:i+2])
+        
+        # Complexity score based on dinucleotide diversity
+        max_possible = min(16, len(sequence) - 1)  # 16 possible dinucleotides
+        complexity = len(dinucleotides) / max_possible if max_possible > 0 else 0
+        
+        return complexity
+    
+    def calculate_gc_content(self, sequence):
+        """Calculate GC content of sequence"""
+        if not sequence:
+            return 0
+        gc_count = sequence.upper().count('G') + sequence.upper().count('C')
+        return (gc_count / len(sequence)) * 100
+    
+    def merge_overlapping_regions_advanced(self, regions, min_gap=50):
+        """Merge overlapping conserved regions with quality scoring"""
+        if not regions:
+            return []
+        
+        # Sort by position
+        sorted_regions = sorted(regions, key=lambda x: x['start'])
+        merged = []
+        
+        current_region = sorted_regions[0].copy()
+        
+        for next_region in sorted_regions[1:]:
+            # If regions overlap or are close
+            gap = next_region['start'] - current_region['end']
+            
+            if gap <= min_gap:
+                # Merge regions - take best metrics
+                current_region['end'] = next_region['end']
+                current_region['conservation_score'] = max(
+                    current_region['conservation_score'],
+                    next_region['conservation_score']
+                )
+                current_region['subspecies_coverage'] = max(
+                    current_region['subspecies_coverage'],
+                    next_region['subspecies_coverage']
+                )
+                current_region['sequence_count'] = max(
+                    current_region['sequence_count'],
+                    next_region['sequence_count']
+                )
+            else:
+                # Add current region if it meets quality thresholds
+                if (current_region['end'] - current_region['start'] >= 100 and
+                    current_region['complexity_score'] >= 0.3):
+                    merged.append(current_region)
+                current_region = next_region.copy()
+        
+        # Add final region
+        if (current_region['end'] - current_region['start'] >= 100 and
+            current_region['complexity_score'] >= 0.3):
+            merged.append(current_region)
+        
+        return merged
+    
+    def compare_against_other_genera(self, conserved_regions, target_genus, comparison_genera=None):
+        """Compare conserved regions against other genera for specificity"""
+        st.info("Analyzing specificity against related genera...")
+        
+        if not comparison_genera:
+            # Auto-select related genera for common agricultural pathogens
+            comparison_genera = self.get_related_genera(target_genus)
+        
+        specific_regions = []
+        
+        for region in conserved_regions:
+            st.write(f"Testing specificity for region {region['start']}-{region['end']}")
+            
+            # Test against each comparison genus
+            specificity_scores = []
+            
+            for comparison_genus in comparison_genera:
+                try:
+                    specificity = self.test_region_specificity(
+                        region['sequence'], 
+                        comparison_genus
+                    )
+                    specificity_scores.append(specificity)
+                    
+                except Exception as e:
+                    st.warning(f"Could not test against {comparison_genus}: {e}")
+                    continue
+            
+            if specificity_scores:
+                avg_specificity = 1.0 - np.mean(specificity_scores)  # Convert to specificity
+                
+                if avg_specificity >= self.specificity_threshold:
+                    region['specificity_score'] = avg_specificity
+                    region['tested_against'] = comparison_genera
+                    specific_regions.append(region)
+                    st.write(f"  ✓ Region passed specificity test (score: {avg_specificity:.3f})")
+                else:
+                    st.write(f"  ✗ Region failed specificity test (score: {avg_specificity:.3f})")
+        
+        st.write(f"Final count: {len(specific_regions)} genus-specific conserved regions")
+        return specific_regions
+    
+    def get_related_genera(self, target_genus):
+        """Get related genera for specificity testing"""
+        related_genera_map = {
+            'Fusarium': ['Trichoderma', 'Aspergillus', 'Penicillium', 'Verticillium'],
+            'Botrytis': ['Sclerotinia', 'Monilinia', 'Alternaria'],
+            'Pythium': ['Phytophthora', 'Peronospora', 'Saprolegnia'],
+            'Alternaria': ['Stemphylium', 'Ulocladium', 'Botrytis'],
+            'Rhizoctonia': ['Thanatephorus', 'Ceratobasidium', 'Sclerotium']
+        }
+        
+        return related_genera_map.get(target_genus, ['Aspergillus', 'Penicillium', 'Trichoderma'])
+    
+    def test_region_specificity(self, target_sequence, comparison_genus, sample_size=20):
+        """Test a region's specificity against another genus"""
+        try:
+            # Search for sequences from comparison genus
+            query = f'"{comparison_genus}"[organism]'
+            comparison_ids = self.ncbi.search_sequences(
+                query, 
+                database="nucleotide", 
+                max_results=sample_size
+            )
+            
+            if not comparison_ids:
+                return 0.5  # Neutral score if no sequences found
+            
+            similarity_scores = []
+            
+            # Test against a sample of comparison sequences
+            for seq_id in comparison_ids[:sample_size]:
+                try:
+                    comparison_seq = self.ncbi.fetch_sequence(seq_id)
+                    if comparison_seq and len(comparison_seq) > len(target_sequence):
+                        # Find best local alignment (simplified)
+                        best_similarity = self.find_best_local_similarity(
+                            target_sequence, 
+                            comparison_seq
+                        )
+                        similarity_scores.append(best_similarity)
+                        
+                except Exception:
+                    continue
+            
+            return np.mean(similarity_scores) if similarity_scores else 0.5
+            
+        except Exception as e:
+            return 0.5  # Default neutral score
+    
+    def find_best_local_similarity(self, query_seq, target_seq):
+        """Find best local similarity between sequences"""
+        query_len = len(query_seq)
+        best_similarity = 0
+        
+        # Slide query across target sequence
+        for i in range(len(target_seq) - query_len + 1):
+            window = target_seq[i:i + query_len]
+            similarity = self.calculate_sequence_similarity(query_seq, window)
+            best_similarity = max(best_similarity, similarity)
+        
+        return best_similarity
+
+class T7PrimerDesigner:
+    """Handles T7 promoter integration for expression primers"""
+    
+    def __init__(self):
+        self.t7_promoter = "TAATACGACTCACTATAGGG"
+        self.t7_terminator = "GCTAGTTATTGCTCAGCGG"
+        self.kozak_sequences = {
+            "optimal": "GCCACC",
+            "strong": "GCCGCC", 
+            "moderate": "ACCACC"
+        }
+        self.start_codons = ["ATG", "GTG", "TTG"]
+        self.stop_codons = ["TAA", "TAG", "TGA"]
+    
+    def find_orfs(self, sequence, min_length=150):
+        """Find open reading frames in the sequence"""
+        orfs = []
+        
+        for frame in range(3):
+            for start_codon in self.start_codons:
+                start_pos = frame
+                while start_pos < len(sequence) - 3:
+                    codon = sequence[start_pos:start_pos + 3]
+                    if codon == start_codon:
+                        # Look for stop codon
+                        for stop_pos in range(start_pos + 3, len(sequence) - 2, 3):
+                            stop_codon = sequence[stop_pos:stop_pos + 3]
+                            if stop_codon in self.stop_codons:
+                                orf_length = stop_pos - start_pos + 3
+                                if orf_length >= min_length:
+                                    orfs.append({
+                                        'start': start_pos,
+                                        'end': stop_pos + 3,
+                                        'length': orf_length,
+                                        'frame': frame,
+                                        'sequence': sequence[start_pos:stop_pos + 3]
+                                    })
+                                break
+                    start_pos = sequence.find(start_codon, start_pos + 1)
+                    if start_pos == -1:
+                        break
+        
+        return sorted(orfs, key=lambda x: x['length'], reverse=True)
+    
+    def design_t7_expression_primers(self, sequence, target_orf=None, 
+                                   kozak_type="optimal", add_his_tag=False,
+                                   restriction_sites=None):
+        """Design primers for T7 expression with promoter integration"""
+        
+        if target_orf is None:
+            # Find the longest ORF
+            orfs = self.find_orfs(sequence)
+            if not orfs:
+                return None, "No suitable ORFs found"
+            target_orf = orfs[0]
+        
+        # Design forward primer with T7 promoter
+        kozak = self.kozak_sequences.get(kozak_type, self.kozak_sequences["optimal"])
+        
+        # Start primer components
+        forward_components = [self.t7_promoter]
+        
+        # Add restriction site if specified
+        if restriction_sites and 'forward' in restriction_sites:
+            forward_components.append(restriction_sites['forward'])
+        
+        # Add Kozak sequence
+        forward_components.append(kozak)
+        
+        # Add start of ORF (usually includes ATG)
+        orf_start = max(0, target_orf['start'] - 20)  # Include some upstream context
+        orf_binding = sequence[orf_start:target_orf['start'] + 20]
+        forward_components.append(orf_binding)
+        
+        forward_primer = "".join(forward_components)
+        
+        # Design reverse primer
+        reverse_components = []
+        
+        # Add restriction site if specified
+        if restriction_sites and 'reverse' in restriction_sites:
+            reverse_components.append(restriction_sites['reverse'])
+        
+        # Add His tag if requested
+        if add_his_tag:
+            his_tag_reverse = "GTGATGGTGATGGTG"  # Reverse complement of His6 tag
+            reverse_components.append(his_tag_reverse)
+        
+        # Add end of ORF
+        orf_end_start = max(target_orf['end'] - 20, target_orf['start'])
+        orf_end = min(target_orf['end'] + 20, len(sequence))
+        orf_binding_rev = self.reverse_complement(sequence[orf_end_start:orf_end])
+        reverse_components.append(orf_binding_rev)
+        
+        reverse_primer = "".join(reverse_components)
+        
+        return {
+            'forward_primer': forward_primer,
+            'reverse_primer': reverse_primer,
+            'target_orf': target_orf,
+            'expression_features': {
+                't7_promoter': True,
+                'kozak_sequence': kozak_type,
+                'his_tag': add_his_tag,
+                'restriction_sites': restriction_sites or {}
+            }
+        }, None
+    
+    def reverse_complement(self, sequence):
+        """Get reverse complement of DNA sequence"""
+        complement = {'A': 'T', 'T': 'A', 'G': 'C', 'C': 'G'}
+        return "".join(complement.get(base, base) for base in reversed(sequence.upper()))
+    
+    def validate_expression_construct(self, forward_primer, reverse_primer, template):
+        """Validate that the expression construct will work"""
+        issues = []
+        
+        # Check for T7 promoter
+        if self.t7_promoter not in forward_primer:
+            issues.append("T7 promoter not found in forward primer")
+        
+        # Check for start codon after Kozak
+        kozak_pos = -1
+        for kozak in self.kozak_sequences.values():
+            if kozak in forward_primer:
+                kozak_pos = forward_primer.find(kozak)
+                break
+        
+        if kozak_pos >= 0:
+            remaining_seq = forward_primer[kozak_pos + 6:]  # After Kozak
+            if not any(start in remaining_seq[:10] for start in self.start_codons):
+                issues.append("No start codon found near Kozak sequence")
+        
+        # Check primer lengths
+        if len(forward_primer) > 80:
+            issues.append("Forward primer very long (>80 bp) - may have synthesis issues")
+        if len(reverse_primer) > 80:
+            issues.append("Reverse primer very long (>80 bp) - may have synthesis issues")
+        
+        return {
+            'valid': len(issues) == 0,
+            'issues': issues,
+            'warnings': []
+        }
 
 # Streamlit App Functions
 def init_session_state():
@@ -404,6 +1038,141 @@ def export_to_excel(primers: List[PrimerPair]) -> bytes:
     
     return output.getvalue()
 
+def create_species_specific_visualization(sequence, conserved_regions, primers=None):
+    """Create visualization showing species-specific regions and primer locations"""
+    if not conserved_regions:
+        return None
+    
+    fig = go.Figure()
+    
+    seq_len = len(sequence)
+    
+    # Add sequence background
+    fig.add_shape(
+        type="rect",
+        x0=0, y0=0.3, x1=seq_len, y1=0.7,
+        fillcolor="lightgray",
+        line=dict(color="black", width=1),
+    )
+    
+    # Add conserved regions
+    for i, region in enumerate(conserved_regions):
+        fig.add_shape(
+            type="rect",
+            x0=region['start'], y0=0.25, 
+            x1=region['end'], y1=0.75,
+            fillcolor="green",
+            opacity=0.6,
+            line=dict(color="darkgreen", width=2),
+        )
+        
+        # Add region annotation
+        fig.add_annotation(
+            x=(region['start'] + region['end']) / 2, y=0.8,
+            text=f"Region {i+1}<br>Cons: {region['conservation_score']:.1%}<br>Spec: {region['specificity_score']:.1%}",
+            showarrow=True, arrowhead=2, arrowcolor="green"
+        )
+    
+    # Add primers if provided
+    if primers:
+        for i, primer in enumerate(primers[:3]):  # Show first 3 primers
+            # Forward primer
+            fig.add_shape(
+                type="rect",
+                x0=primer.forward_start, y0=0.75, 
+                x1=primer.forward_start + len(primer.forward_seq), y1=0.9,
+                fillcolor="blue",
+                opacity=0.8,
+                line=dict(color="darkblue", width=1),
+            )
+            
+            # Reverse primer
+            fig.add_shape(
+                type="rect",
+                x0=primer.reverse_start - len(primer.reverse_seq) + 1, y0=0.1,
+                x1=primer.reverse_start + 1, y1=0.25,
+                fillcolor="red",
+                opacity=0.8,
+                line=dict(color="darkred", width=1),
+            )
+    
+    fig.update_layout(
+        title="Species-Specific Regions and Primer Locations",
+        xaxis_title="Sequence Position (bp)",
+        yaxis=dict(range=[0, 1], showticklabels=False),
+        height=400,
+        showlegend=False
+    )
+    
+    return fig
+
+def create_t7_construct_diagram(sequence, t7_results):
+    """Create diagram showing T7 expression construct"""
+    if not t7_results:
+        return None
+    
+    fig = go.Figure()
+    
+    target_orf = t7_results['target_orf']
+    features = t7_results['expression_features']
+    
+    # Sequence background
+    seq_len = len(sequence)
+    fig.add_shape(
+        type="rect",
+        x0=0, y0=0.4, x1=seq_len, y1=0.6,
+        fillcolor="lightgray",
+        line=dict(color="black", width=1),
+    )
+    
+    # Target ORF
+    fig.add_shape(
+        type="rect",
+        x0=target_orf['start'], y0=0.35, 
+        x1=target_orf['end'], y1=0.65,
+        fillcolor="green",
+        line=dict(color="darkgreen", width=2),
+    )
+    
+    # T7 promoter (conceptual position)
+    fig.add_shape(
+        type="rect",
+        x0=max(0, target_orf['start'] - 30), y0=0.7, 
+        x1=target_orf['start'], y1=0.8,
+        fillcolor="blue",
+        line=dict(color="darkblue", width=2),
+    )
+    
+    # Add annotations
+    fig.add_annotation(
+        x=target_orf['start'] - 15, y=0.75,
+        text="T7 Promoter",
+        showarrow=True, arrowhead=2, arrowcolor="blue"
+    )
+    
+    fig.add_annotation(
+        x=(target_orf['start'] + target_orf['end']) / 2, y=0.5,
+        text=f"Target ORF<br>{target_orf['length']} bp",
+        showarrow=False
+    )
+    
+    if features.get('his_tag'):
+        fig.add_annotation(
+            x=target_orf['end'] + 10, y=0.3,
+            text="His6 Tag",
+            showarrow=True, arrowhead=2, arrowcolor="orange"
+        )
+    
+    fig.update_layout(
+        title="T7 Expression Construct Design",
+        xaxis_title="Sequence Position (bp)",
+        yaxis=dict(range=[0, 1], showticklabels=False),
+        height=300,
+        showlegend=False
+    )
+    
+    return fig
+
 def main():
     """Main Streamlit application"""
     
@@ -470,6 +1239,98 @@ def main():
         st.write("Product size ranges:")
         min_product = st.number_input("Minimum product size", 50, 500, 75)
         max_product = st.number_input("Maximum product size", 200, 2000, 1000)
+    
+    # Comprehensive Taxonomic Analysis
+    st.sidebar.subheader("Comprehensive Analysis")
+    enable_comprehensive = st.sidebar.checkbox(
+        "Enable comprehensive genus analysis", 
+        value=False,
+        help="Discover all subspecies and design genus-specific primers"
+    )
+
+    if enable_comprehensive:
+        with st.sidebar.expander("Comprehensive Analysis Parameters", expanded=True):
+            max_subspecies = st.slider(
+                "Maximum subspecies to analyze:", 
+                5, 50, 15,
+                help="Number of subspecies/species to include in analysis"
+            )
+            
+            sequences_per_subspecies = st.slider(
+                "Target sequences per subspecies:", 
+                20, 150, 75,
+                help="Number of sequences to fetch for each subspecies"
+            )
+            
+            conservation_threshold = st.slider(
+                "Conservation threshold (%):", 
+                85, 98, 90,
+                help="Minimum conservation across subspecies"
+            ) / 100
+            
+            specificity_threshold = st.slider(
+                "Specificity threshold (%):", 
+                70, 90, 75,
+                help="Minimum specificity against other genera"
+            ) / 100
+            
+            custom_comparison_genera = st.text_input(
+                "Custom comparison genera (comma-separated):",
+                placeholder="Trichoderma, Aspergillus, Penicillium",
+                help="Leave empty for automatic selection"
+            )
+    
+    # T7 Expression System
+    st.sidebar.subheader("T7 Expression System")
+    enable_t7_design = st.sidebar.checkbox(
+        "Design for T7 expression", 
+        value=False,
+        help="Add T7 promoter and expression elements to primers"
+    )
+
+    if enable_t7_design:
+        with st.sidebar.expander("T7 Expression Parameters", expanded=True):
+            kozak_type = st.selectbox(
+                "Kozak sequence strength:",
+                ["optimal", "strong", "moderate"],
+                help="Affects translation efficiency"
+            )
+            
+            add_his_tag = st.checkbox(
+                "Add His6 tag",
+                value=True,
+                help="Add C-terminal His6 tag for purification"
+            )
+            
+            add_restriction_sites = st.checkbox(
+                "Add restriction sites",
+                value=False,
+                help="Add sites for cloning into vectors"
+            )
+            
+            if add_restriction_sites:
+                forward_site = st.text_input(
+                    "Forward restriction site:",
+                    value="GAATTC",  # EcoRI
+                    help="Restriction site for 5' end"
+                )
+                reverse_site = st.text_input(
+                    "Reverse restriction site:",
+                    value="AAGCTT",  # HindIII
+                    help="Restriction site for 3' end"
+                )
+            
+            min_orf_length = st.slider(
+                "Minimum ORF length (bp):",
+                100, 1000, 150, 50,
+                help="Minimum size for open reading frames"
+            )
+            
+            auto_select_orf = st.checkbox(
+                "Auto-select longest ORF",
+                value=True,
+                help="Automatically target the longest open reading frame"
+            )
     
     # Create custom parameters
     custom_params = {
@@ -608,12 +1469,119 @@ def main():
                                 st.session_state.sequence_info = seq_info
                                 st.session_state.current_sequence = clean_sequence
                                 
+                                # Note: Species-specific analysis is now handled in comprehensive analysis
+                                # Standard primer design will proceed unless comprehensive analysis is enabled
+                                target_regions = None
+                                
                                 st.write(f"🧬 Designing primers for {len(clean_sequence)} bp sequence...")
-                                st.write(f"⚙️ Using parameters: min_size={custom_params.get('PRIMER_MIN_SIZE')}, max_size={custom_params.get('PRIMER_MAX_SIZE')}, min_tm={custom_params.get('PRIMER_MIN_TM')}")
                                 
                                 # Design primers
                                 try:
-                                    primers = designer.design_primers(clean_sequence, custom_params=custom_params)
+                                    primers = []
+                                    t7_results = None
+                                    
+                                    if enable_t7_design:
+                                        # T7 expression primer design
+                                        st.write("🧬 Designing T7 expression primers...")
+                                        
+                                        t7_designer = T7PrimerDesigner()
+                                        
+                                        # Find ORFs first
+                                        orfs = t7_designer.find_orfs(clean_sequence, min_length=min_orf_length)
+                                        
+                                        if orfs:
+                                            st.write(f"Found {len(orfs)} potential ORFs")
+                                            
+                                            # Show ORF selection if not auto-selecting
+                                            target_orf = None
+                                            if auto_select_orf:
+                                                target_orf = orfs[0]  # Longest ORF
+                                                st.info(f"Auto-selected ORF: {target_orf['start']}-{target_orf['end']} ({target_orf['length']} bp)")
+                                            else:
+                                                orf_options = [f"ORF {i+1}: {orf['start']}-{orf['end']} ({orf['length']} bp)" 
+                                                              for i, orf in enumerate(orfs[:10])]  # Show top 10
+                                                selected_orf_idx = st.selectbox("Select ORF for expression:", range(len(orf_options)), 
+                                                                               format_func=lambda x: orf_options[x])
+                                                target_orf = orfs[selected_orf_idx]
+                                            
+                                            # Prepare restriction sites
+                                            restriction_sites = None
+                                            if add_restriction_sites:
+                                                restriction_sites = {
+                                                    'forward': forward_site,
+                                                    'reverse': reverse_site
+                                                }
+                                            
+                                            # Design T7 primers
+                                            t7_results, error = t7_designer.design_t7_expression_primers(
+                                                clean_sequence,
+                                                target_orf=target_orf,
+                                                kozak_type=kozak_type,
+                                                add_his_tag=add_his_tag,
+                                                restriction_sites=restriction_sites
+                                            )
+                                            
+                                            if t7_results:
+                                                st.success("T7 expression primers designed!")
+                                                
+                                                # Validate the construct
+                                                validation = t7_designer.validate_expression_construct(
+                                                    t7_results['forward_primer'],
+                                                    t7_results['reverse_primer'],
+                                                    clean_sequence
+                                                )
+                                                
+                                                if validation['valid']:
+                                                    st.success("Expression construct validation passed!")
+                                                else:
+                                                    st.warning("Validation issues found:")
+                                                    for issue in validation['issues']:
+                                                        st.write(f"- {issue}")
+                                                
+                                                # Store T7 results
+                                                st.session_state.t7_results = t7_results
+                                                
+                                                # Convert to PrimerPair format for compatibility
+                                                from Bio.SeqUtils.MeltingTemp import Tm_NN
+                                                
+                                                forward_tm = Tm_NN(t7_results['forward_primer'][-20:])  # Use last 20bp for Tm calc
+                                                reverse_tm = Tm_NN(t7_results['reverse_primer'][-20:])
+                                                
+                                                t7_primer = PrimerPair(
+                                                    forward_seq=t7_results['forward_primer'],
+                                                    reverse_seq=t7_results['reverse_primer'],
+                                                    forward_tm=forward_tm,
+                                                    reverse_tm=reverse_tm,
+                                                    product_size=target_orf['length'] + len(t7_results['forward_primer']) + len(t7_results['reverse_primer']),
+                                                    gc_content_f=designer.calculate_gc_content(t7_results['forward_primer']),
+                                                    gc_content_r=designer.calculate_gc_content(t7_results['reverse_primer']),
+                                                    forward_start=target_orf['start'],
+                                                    reverse_start=target_orf['end'],
+                                                    penalty=0.0
+                                                )
+                                                
+                                                primers.append(t7_primer)
+                                                
+                                            else:
+                                                st.error(f"T7 primer design failed: {error}")
+                                        else:
+                                            st.warning("No suitable ORFs found for T7 expression")
+                                    
+                                    if target_regions:
+                                        # Design primers for each target region
+                                        for i, (start, end) in enumerate(target_regions):
+                                            st.write(f"Designing primers for region {i+1}: {start}-{end}")
+                                            region_primers = designer.design_primers(
+                                                clean_sequence, 
+                                                target_region=(start, end),
+                                                custom_params=custom_params
+                                            )
+                                            if region_primers:
+                                                primers.extend(region_primers[:3])  # Take top 3 from each region
+                                    elif not enable_t7_design:  # Only do standard design if T7 is not enabled
+                                        # Standard primer design
+                                        primers = designer.design_primers(clean_sequence, custom_params=custom_params)
+                                    
                                     st.write(f"🔬 Primer design completed. Found {len(primers) if primers else 0} primer pairs.")
                                     
                                     st.session_state.primers_designed = primers
@@ -714,223 +1682,409 @@ def main():
                 gene_name = st.text_input("Optional: Search for specific gene (e.g., BRCA1, COI, 16S):", 
                                         placeholder="Leave empty to search entire genome")
             
-            if st.button("Search Organism Genomes", type="primary"):
-                if not email:
-                    st.error("❌ **Email Required**: Please enter an email address in the sidebar to access NCBI databases. You can use any valid email address or click 'Use test email' for demo purposes.")
-                elif not organism_name:
-                    st.error("❌ **Organism Name Required**: Please enter an organism name or click one of the suggested organisms above.")
-                else:
-                    # Clear previous search results when starting a new search
-                    st.session_state.search_results = None
-                    st.session_state.database_used = None
-                    with st.spinner(f"Searching for {organism_name} genomes..."):
-                        try:
-                            ncbi = NCBIConnector(email, api_key)
-                            designer = PrimerDesigner()
-                            
-                            # Build search query
-                            query_parts = [f'"{organism_name}"[organism]']
-                            
-                            if gene_name:
-                                query_parts.append(f'"{gene_name}"[gene]')
-                            
-                            if genome_type != "Any":
-                                query_parts.append(f'"{genome_type}"[title]')
-                            
-                            if assembly_level != "Any":
-                                query_parts.append(f'"{assembly_level}"[assembly_level]')
-                            
-                            search_query = " AND ".join(query_parts)
-                            
-                            # Search for genome sequences
-                            st.write(f"Searching with query: `{search_query}`")
-                            
-                            # Search in genome database first
-                            genome_ids = ncbi.search_sequences(search_query, database="genome", max_results=max_genomes)
-                            
-                            # If no genomes found, try nucleotide database
-                            if not genome_ids:
-                                st.info("No genomes found, searching nucleotide database...")
-                                genome_ids = ncbi.search_sequences(search_query, database="nucleotide", max_results=max_genomes)
-                                database_used = "nucleotide"
-                            else:
-                                database_used = "genome"
-                            
-                            if genome_ids:
-                                if database_used == "genome":
-                                    st.success(f"Found {len(genome_ids)} genome assemblies!")
-                                else:
-                                    st.success(f"Found {len(genome_ids)} nucleotide sequences!")
+            if enable_comprehensive:
+                if st.button("Comprehensive Genus Analysis", type="primary"):
+                    if not email:
+                        st.error("Email required for NCBI access")
+                    elif not organism_name:
+                        st.error("Please enter a genus name")
+                    else:
+                        with st.spinner("Performing comprehensive taxonomic analysis..."):
+                            try:
+                                # Extract genus name
+                                genus = organism_name.split()[0]
                                 
-                                # Store search results in session state
-                                st.session_state.database_used = database_used
+                                # Initialize comprehensive analyzer
+                                analyzer = ComprehensiveTaxonomicAnalyzer(NCBIConnector(email, api_key))
+                                analyzer.conservation_threshold = conservation_threshold
+                                analyzer.specificity_threshold = specificity_threshold
                                 
-                                # Display found sequences
-                                if database_used == "genome":
-                                    st.subheader("Available Genome Assemblies")
-                                else:
-                                    st.subheader("Available Nucleotide Sequences")
-                                genome_info = []
+                                # Step 1: Discover subspecies
+                                st.subheader("Step 1: Subspecies Discovery")
+                                subspecies_data = analyzer.discover_subspecies(genus, max_subspecies)
                                 
-                                for i, genome_id in enumerate(genome_ids):
-                                    with st.spinner(f"Fetching info {i+1}/{len(genome_ids)}..."):
-                                        try:
-                                            if database_used == "genome":
-                                                # For genome database, get assembly info
-                                                info = ncbi.fetch_genome_assembly_info(genome_id)
-                                            else:
-                                                # For nucleotide database, get sequence info
-                                                info = ncbi.fetch_sequence_info(genome_id, database="nucleotide")
+                                if not subspecies_data:
+                                    st.error("No subspecies found for analysis")
+                                    return
+                                
+                                # Display discovered subspecies
+                                subspecies_df = pd.DataFrame([
+                                    {
+                                        'Subspecies': subspecies,
+                                        'Available Sequences': data['sequence_count'],
+                                        'Organism': data['sample_info'].get('organism', 'Unknown')
+                                    }
+                                    for subspecies, data in subspecies_data.items()
+                                ])
+                                
+                                st.dataframe(subspecies_df, use_container_width=True)
+                                st.write(f"Total subspecies for analysis: {len(subspecies_data)}")
+                                
+                                # Step 2: Fetch representative sequences
+                                st.subheader("Step 2: Sequence Collection")
+                                subspecies_sequences = analyzer.fetch_representative_sequences(
+                                    subspecies_data, 
+                                    sequences_per_subspecies
+                                )
+                                
+                                if not subspecies_sequences:
+                                    st.error("No sequences retrieved for analysis")
+                                    return
+                                
+                                # Display sequence collection summary
+                                collection_df = pd.DataFrame([
+                                    {
+                                        'Subspecies': subspecies,
+                                        'Sequences Retrieved': data['count'],
+                                        'Average Length': np.mean([s['length'] for s in data['sequences']])
+                                    }
+                                    for subspecies, data in subspecies_sequences.items()
+                                ])
+                                
+                                st.dataframe(collection_df, use_container_width=True)
+                                
+                                total_sequences = sum(data['count'] for data in subspecies_sequences.values())
+                                st.write(f"Total sequences for analysis: {total_sequences}")
+                                
+                                # Step 3: Multiple sequence alignment and conservation analysis
+                                st.subheader("Step 3: Conservation Analysis")
+                                conserved_regions = analyzer.perform_multiple_sequence_alignment(subspecies_sequences)
+                                
+                                if not conserved_regions:
+                                    st.warning("No conserved regions found with current thresholds")
+                                    return
+                                
+                                # Display conserved regions
+                                conservation_df = pd.DataFrame([
+                                    {
+                                        'Region': i + 1,
+                                        'Start': region['start'],
+                                        'End': region['end'],
+                                        'Length': region['end'] - region['start'],
+                                        'Conservation': f"{region['conservation_score']:.1%}",
+                                        'Subspecies Coverage': f"{region['subspecies_coverage']:.1%}",
+                                        'GC Content': f"{region['gc_content']:.1f}%",
+                                        'Complexity': f"{region['complexity_score']:.3f}"
+                                    }
+                                    for i, region in enumerate(conserved_regions)
+                                ])
+                                
+                                st.dataframe(conservation_df, use_container_width=True)
+                                st.write(f"Conserved regions found: {len(conserved_regions)}")
+                                
+                                # Step 4: Specificity testing against other genera
+                                st.subheader("Step 4: Specificity Testing")
+                                
+                                comparison_genera = None
+                                if custom_comparison_genera.strip():
+                                    comparison_genera = [g.strip() for g in custom_comparison_genera.split(',')]
+                                
+                                specific_regions = analyzer.compare_against_other_genera(
+                                    conserved_regions, 
+                                    genus,
+                                    comparison_genera
+                                )
+                                
+                                if not specific_regions:
+                                    st.warning("No genus-specific regions found")
+                                    return
+                                
+                                # Display final specific regions
+                                specificity_df = pd.DataFrame([
+                                    {
+                                        'Region': i + 1,
+                                        'Position': f"{region['start']}-{region['end']}",
+                                        'Length': region['end'] - region['start'],
+                                        'Conservation': f"{region['conservation_score']:.1%}",
+                                        'Specificity': f"{region['specificity_score']:.1%}",
+                                        'Quality Score': region['conservation_score'] * region['specificity_score']
+                                    }
+                                    for i, region in enumerate(specific_regions)
+                                ])
+                                
+                                st.dataframe(specificity_df, use_container_width=True)
+                                st.success(f"Final genus-specific regions: {len(specific_regions)}")
+                                
+                                # Step 5: Design primers for best regions
+                                st.subheader("Step 5: Primer Design")
+                                
+                                # Select top regions for primer design
+                                top_regions = sorted(
+                                    specific_regions, 
+                                    key=lambda x: x['conservation_score'] * x['specificity_score'], 
+                                    reverse=True
+                                )[:5]  # Top 5 regions
+                                
+                                all_primers = []
+                                designer = PrimerDesigner()
+                                
+                                # Use the first sequence as template (they should be similar in conserved regions)
+                                template_sequence = list(subspecies_sequences.values())[0]['sequences'][0]['sequence']
+                                
+                                for i, region in enumerate(top_regions):
+                                    st.write(f"Designing primers for region {i+1}...")
+                                    
+                                    try:
+                                        region_primers = designer.design_primers(
+                                            template_sequence,
+                                            target_region=(region['start'], region['end']),
+                                            custom_params=custom_params
+                                        )
+                                        
+                                        if region_primers:
+                                            # Add metadata to primers
+                                            for primer in region_primers:
+                                                primer.region_info = {
+                                                    'conservation_score': region['conservation_score'],
+                                                    'specificity_score': region['specificity_score'],
+                                                    'quality_score': region['conservation_score'] * region['specificity_score'],
+                                                    'region_number': i + 1
+                                                }
                                             
-                                            if info:
-                                                genome_info.append({
-                                                    'ID': genome_id,
-                                                    'Description': info.get('description', 'N/A'),
-                                                    'Length': info.get('length', 'N/A'),
-                                                    'Organism': info.get('organism', 'N/A')
-                                                })
-                                        except Exception as e:
-                                            st.warning(f"Could not fetch info for {genome_id}: {e}")
-                                            # Add basic info even if detailed fetch fails
-                                            genome_info.append({
-                                                'ID': genome_id,
-                                                'Description': f'Sequence {genome_id}' if database_used == "nucleotide" else f'Genome Assembly {genome_id}',
-                                                'Length': 'N/A',
-                                                'Organism': organism_name
-                                            })
+                                            all_primers.extend(region_primers[:2])  # Top 2 from each region
+                                    
+                                    except Exception as e:
+                                        st.warning(f"Primer design failed for region {i+1}: {e}")
                                 
-                                if genome_info:
-                                    # Store search results in session state
-                                    st.session_state.search_results = genome_info
+                                if all_primers:
+                                    st.session_state.primers_designed = all_primers
+                                    st.session_state.comprehensive_analysis_results = {
+                                        'subspecies_data': subspecies_data,
+                                        'conserved_regions': conserved_regions,
+                                        'specific_regions': specific_regions,
+                                        'analysis_summary': {
+                                            'total_subspecies': len(subspecies_data),
+                                            'total_sequences': total_sequences,
+                                            'conserved_regions_found': len(conserved_regions),
+                                            'specific_regions_found': len(specific_regions),
+                                            'primers_designed': len(all_primers)
+                                        }
+                                    }
                                     
-                                    genome_df = pd.DataFrame(genome_info)
-                                    st.dataframe(genome_df, use_container_width=True)
-                                    
-                                    # Let user select a sequence
+                                    st.success(f"Comprehensive analysis complete! Designed {len(all_primers)} high-quality genus-specific primers.")
+                                
+                            except Exception as e:
+                                st.error(f"Comprehensive analysis failed: {e}")
+                                import traceback
+                                st.code(traceback.format_exc())
+            else:
+                if st.button("Search Organism Genomes", type="primary"):
+                    if not email:
+                        st.error("❌ **Email Required**: Please enter an email address in the sidebar to access NCBI databases. You can use any valid email address or click 'Use test email' for demo purposes.")
+                    elif not organism_name:
+                        st.error("❌ **Organism Name Required**: Please enter an organism name or click one of the suggested organisms above.")
+                    else:
+                        # Clear previous search results when starting a new search
+                        st.session_state.search_results = None
+                        st.session_state.database_used = None
+                        with st.spinner(f"Searching for {organism_name} genomes..."):
+                            try:
+                                ncbi = NCBIConnector(email, api_key)
+                                designer = PrimerDesigner()
+                                
+                                # Build search query
+                                query_parts = [f'"{organism_name}"[organism]']
+                                
+                                if gene_name:
+                                    query_parts.append(f'"{gene_name}"[gene]')
+                                
+                                if genome_type != "Any":
+                                    query_parts.append(f'"{genome_type}"[title]')
+                                
+                                if assembly_level != "Any":
+                                    query_parts.append(f'"{assembly_level}"[assembly_level]')
+                                
+                                search_query = " AND ".join(query_parts)
+                                
+                                # Search for genome sequences
+                                st.write(f"Searching with query: `{search_query}`")
+                                
+                                # Search in genome database first
+                                genome_ids = ncbi.search_sequences(search_query, database="genome", max_results=max_genomes)
+                                
+                                # If no genomes found, try nucleotide database
+                                if not genome_ids:
+                                    st.info("No genomes found, searching nucleotide database...")
+                                    genome_ids = ncbi.search_sequences(search_query, database="nucleotide", max_results=max_genomes)
+                                    database_used = "nucleotide"
+                                else:
+                                    database_used = "genome"
+                                
+                                if genome_ids:
                                     if database_used == "genome":
-                                        select_text = "Select a genome assembly to design primers for:"
-                                        button_text = "Design Primers for Selected Assembly"
+                                        st.success(f"Found {len(genome_ids)} genome assemblies!")
                                     else:
-                                        select_text = "Select a nucleotide sequence to design primers for:"
-                                        button_text = "Design Primers for Selected Sequence"
+                                        st.success(f"Found {len(genome_ids)} nucleotide sequences!")
                                     
-                                    selected_genome = st.selectbox(
-                                        select_text,
-                                        range(len(genome_info)),
-                                        format_func=lambda x: f"{genome_info[x]['ID']} - {genome_info[x]['Description'][:100]}..."
-                                    )
+                                    # Store search results in session state
+                                    st.session_state.database_used = database_used
                                     
-                                    if st.button(button_text, type="primary"):
-                                        with st.spinner("Fetching sequence and designing primers..."):
-                                            sequence_id = genome_info[selected_genome]['ID']
-                                            
+                                    # Display found sequences
+                                    if database_used == "genome":
+                                        st.subheader("Available Genome Assemblies")
+                                    else:
+                                        st.subheader("Available Nucleotide Sequences")
+                                    genome_info = []
+                                    
+                                    for i, genome_id in enumerate(genome_ids):
+                                        with st.spinner(f"Fetching info {i+1}/{len(genome_ids)}..."):
                                             try:
                                                 if database_used == "genome":
-                                                    # For genome assemblies, search for nucleotide sequences
-                                                    assembly_query = f'"{sequence_id}"[Assembly]'
-                                                    nucleotide_ids = ncbi.search_sequences(assembly_query, database="nucleotide", max_results=10)
-                                                    
-                                                    if nucleotide_ids:
-                                                        st.info(f"Found {len(nucleotide_ids)} sequences from this assembly. Using the first one for primer design.")
-                                                        sequence_id = nucleotide_ids[0]
-                                                    else:
-                                                        st.warning("No nucleotide sequences found for this assembly.")
-                                                        return
-                                                
-                                                # Fetch the sequence
-                                                st.write(f"🔍 Fetching sequence {sequence_id} from {database_used} database...")
-                                                
-                                                if database_used == "nucleotide":
-                                                    # For nucleotide sequences, fetch directly
-                                                    st.write("📡 Using nucleotide database for direct fetch...")
-                                                    sequence = ncbi.fetch_sequence(sequence_id, database="nucleotide")
-                                                    seq_info = ncbi.fetch_sequence_info(sequence_id, database="nucleotide")
+                                                    # For genome database, get assembly info
+                                                    info = ncbi.fetch_genome_assembly_info(genome_id)
                                                 else:
-                                                    # For genome assemblies, use the nucleotide ID we found
-                                                    st.write("📡 Using default database for genome assembly...")
-                                                    sequence = ncbi.fetch_sequence(sequence_id)
-                                                    seq_info = ncbi.fetch_sequence_info(sequence_id)
+                                                    # For nucleotide database, get sequence info
+                                                    info = ncbi.fetch_sequence_info(genome_id, database="nucleotide")
                                                 
-                                                if sequence:
-                                                    st.write(f"✅ Successfully fetched sequence: {len(sequence)} bp")
-                                                    st.write(f"📝 First 100 characters: {sequence[:100]}...")
-                                                else:
-                                                    st.write("❌ Failed to fetch sequence")
-                                                    st.write("🔧 Trying alternative fetch method...")
-                                                    
-                                                    # Try alternative fetch method
-                                                    try:
-                                                        import requests
-                                                        url = f"https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=nucleotide&id={sequence_id}&rettype=fasta&retmode=text"
-                                                        response = requests.get(url)
-                                                        if response.status_code == 200:
-                                                            fasta_text = response.text
-                                                            lines = fasta_text.split('\n')
-                                                            sequence = ''.join(line for line in lines[1:] if not line.startswith('>'))
-                                                            st.write(f"✅ Alternative method succeeded: {len(sequence)} bp")
-                                                        else:
-                                                            st.write(f"❌ Alternative method failed: HTTP {response.status_code}")
-                                                    except Exception as alt_e:
-                                                        st.write(f"❌ Alternative method error: {alt_e}")
-                                                
-                                                if sequence:
-                                                    # Clean the sequence (remove non-DNA characters)
-                                                    clean_sequence = re.sub(r'[^ATGCatgc]', '', sequence.upper())
-                                                    
-                                                    if len(clean_sequence) < 50:
-                                                        st.error("Sequence is too short for primer design (minimum 50 bp required)")
-                                                        return
-                                                    
-                                                    # For very large sequences, limit the length
-                                                    if len(clean_sequence) > 1000000:  # 1MB limit
-                                                        st.warning(f"Sequence is very large ({len(clean_sequence):,} bp). Using first 1MB for primer design.")
-                                                        clean_sequence = clean_sequence[:1000000]
-                                                    
-                                                    # If we couldn't get detailed info, create basic info
-                                                    if not seq_info:
-                                                        seq_info = {
-                                                            "id": sequence_id,
-                                                            "description": f"Sequence {sequence_id}",
-                                                            "length": len(clean_sequence),
-                                                            "organism": organism_name
-                                                        }
-                                                    
-                                                    st.session_state.sequence_info = seq_info
-                                                    st.session_state.current_sequence = clean_sequence
-                                                    
-                                                    st.write(f"🧬 Designing primers for {len(clean_sequence)} bp sequence...")
-                                                    st.write(f"⚙️ Using parameters: min_size={custom_params.get('PRIMER_MIN_SIZE')}, max_size={custom_params.get('PRIMER_MAX_SIZE')}, min_tm={custom_params.get('PRIMER_MIN_TM')}")
-                                                    
-                                                    # Design primers
-                                                    try:
-                                                        primers = designer.design_primers(clean_sequence, custom_params=custom_params)
-                                                        st.write(f"🔬 Primer design completed. Found {len(primers) if primers else 0} primer pairs.")
-                                                        
-                                                        st.session_state.primers_designed = primers
-                                                        
-                                                        if primers:
-                                                            st.success(f"✅ Successfully designed {len(primers)} primer pairs!")
-                                                            # Clear session state after successful search
-                                                            if 'organism_name' in st.session_state:
-                                                                del st.session_state.organism_name
-                                                        else:
-                                                            st.warning("⚠️ No suitable primers found with current parameters. Try adjusting the primer parameters in the sidebar.")
-                                                    except Exception as primer_e:
-                                                        st.error(f"❌ Error during primer design: {primer_e}")
-                                                        st.write("🔧 This might be due to sequence quality or primer parameters.")
-                                                else:
-                                                    st.error("Failed to fetch sequence. The sequence might be too large or unavailable.")
-                                                    
+                                                if info:
+                                                    genome_info.append({
+                                                        'ID': genome_id,
+                                                        'Description': info.get('description', 'N/A'),
+                                                        'Length': info.get('length', 'N/A'),
+                                                        'Organism': info.get('organism', 'N/A')
+                                                    })
                                             except Exception as e:
-                                                st.error(f"Error fetching sequence: {e}")
-                                else:
-                                    st.warning("No genome information could be retrieved")
-                            else:
-                                st.warning(f"No genomes found for organism: {organism_name}")
-                                st.info("Try adjusting your search terms or check the spelling of the organism name.")
-                                
-                        except Exception as e:
-                            st.error(f"Error searching for organism: {e}")
+                                                st.warning(f"Could not fetch info for {genome_id}: {e}")
+                                                # Add basic info even if detailed fetch fails
+                                                genome_info.append({
+                                                    'ID': genome_id,
+                                                    'Description': f'Sequence {genome_id}' if database_used == "nucleotide" else f'Genome Assembly {genome_id}',
+                                                    'Length': 'N/A',
+                                                    'Organism': organism_name
+                                                })
+                                    
+                                    if genome_info:
+                                        # Store search results in session state
+                                        st.session_state.search_results = genome_info
+                                        
+                                        genome_df = pd.DataFrame(genome_info)
+                                        st.dataframe(genome_df, use_container_width=True)
+                                        
+                                        # Let user select a sequence
+                                        if database_used == "genome":
+                                            select_text = "Select a genome assembly to design primers for:"
+                                            button_text = "Design Primers for Selected Assembly"
+                                        else:
+                                            select_text = "Select a nucleotide sequence to design primers for:"
+                                            button_text = "Design Primers for Selected Sequence"
+                                        
+                                        selected_genome = st.selectbox(
+                                            select_text,
+                                            range(len(genome_info)),
+                                            format_func=lambda x: f"{genome_info[x]['ID']} - {genome_info[x]['Description'][:100]}..."
+                                        )
+                                        
+                                        if st.button(button_text, type="primary"):
+                                            with st.spinner("Fetching sequence and designing primers..."):
+                                                sequence_id = genome_info[selected_genome]['ID']
+                                                
+                                                try:
+                                                    if database_used == "genome":
+                                                        # For genome assemblies, search for nucleotide sequences
+                                                        assembly_query = f'"{sequence_id}"[Assembly]'
+                                                        nucleotide_ids = ncbi.search_sequences(assembly_query, database="nucleotide", max_results=10)
+                                                        
+                                                        if nucleotide_ids:
+                                                            st.info(f"Found {len(nucleotide_ids)} sequences from this assembly. Using the first one for primer design.")
+                                                            sequence_id = nucleotide_ids[0]
+                                                        else:
+                                                            st.warning("No nucleotide sequences found for this assembly.")
+                                                            return
+                                                    
+                                                    # Fetch the sequence
+                                                    st.write(f"🔍 Fetching sequence {sequence_id} from {database_used} database...")
+                                                    
+                                                    if database_used == "nucleotide":
+                                                        # For nucleotide sequences, fetch directly
+                                                        st.write("📡 Using nucleotide database for direct fetch...")
+                                                        sequence = ncbi.fetch_sequence(sequence_id, database="nucleotide")
+                                                        seq_info = ncbi.fetch_sequence_info(sequence_id, database="nucleotide")
+                                                    else:
+                                                        # For genome assemblies, use the nucleotide ID we found
+                                                        st.write("📡 Using default database for genome assembly...")
+                                                        sequence = ncbi.fetch_sequence(sequence_id)
+                                                        seq_info = ncbi.fetch_sequence_info(sequence_id)
+                                                    
+                                                    if sequence:
+                                                        st.write(f"✅ Successfully fetched sequence: {len(sequence)} bp")
+                                                        st.write(f"📝 First 100 characters: {sequence[:100]}...")
+                                                    else:
+                                                        st.write("❌ Failed to fetch sequence")
+                                                        st.write("🔧 Trying alternative fetch method...")
+                                                    
+                                                        # Try alternative fetch method
+                                                        try:
+                                                            import requests
+                                                            url = f"https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=nucleotide&id={sequence_id}&rettype=fasta&retmode=text"
+                                                            response = requests.get(url)
+                                                            if response.status_code == 200:
+                                                                fasta_text = response.text
+                                                                lines = fasta_text.split('\n')
+                                                                sequence = ''.join(line for line in lines[1:] if not line.startswith('>'))
+                                                                st.write(f"✅ Alternative method succeeded: {len(sequence)} bp")
+                                                            else:
+                                                                st.write(f"❌ Alternative method failed: HTTP {response.status_code}")
+                                                        except Exception as alt_e:
+                                                            st.write(f"❌ Alternative method error: {alt_e}")
+                                                    
+                                                    if sequence:
+                                                        # Clean the sequence (remove non-DNA characters)
+                                                        clean_sequence = re.sub(r'[^ATGCatgc]', '', sequence.upper())
+                                                        
+                                                        if len(clean_sequence) < 50:
+                                                            st.error("Sequence is too short for primer design (minimum 50 bp required)")
+                                                            return
+                                                        
+                                                        # For very large sequences, limit the length
+                                                        if len(clean_sequence) > 1000000:  # 1MB limit
+                                                            st.warning(f"Sequence is very large ({len(clean_sequence):,} bp). Using first 1MB for primer design.")
+                                                            clean_sequence = clean_sequence[:1000000]
+                                                        
+                                                        # If we couldn't get detailed info, create basic info
+                                                        if not seq_info:
+                                                            seq_info = {
+                                                                "id": sequence_id,
+                                                                "description": f"Sequence {sequence_id}",
+                                                                "length": len(clean_sequence),
+                                                                "organism": organism_name
+                                                            }
+                                                        
+                                                        st.session_state.sequence_info = seq_info
+                                                        st.session_state.current_sequence = clean_sequence
+                                                        
+                                                        st.write(f"🧬 Designing primers for {len(clean_sequence)} bp sequence...")
+                                                        st.write(f"⚙️ Using parameters: min_size={custom_params.get('PRIMER_MIN_SIZE')}, max_size={custom_params.get('PRIMER_MAX_SIZE')}, min_tm={custom_params.get('PRIMER_MIN_TM')}")
+                                                        
+                                                        # Design primers
+                                                        try:
+                                                            primers = designer.design_primers(clean_sequence, custom_params=custom_params)
+                                                            st.write(f"🔬 Primer design completed. Found {len(primers) if primers else 0} primer pairs.")
+                                                            
+                                                            st.session_state.primers_designed = primers
+                                                            
+                                                            if primers:
+                                                                st.success(f"✅ Successfully designed {len(primers)} primer pairs!")
+                                                                # Clear session state after successful search
+                                                                if 'organism_name' in st.session_state:
+                                                                    del st.session_state.organism_name
+                                                            else:
+                                                                st.warning("⚠️ No suitable primers found with current parameters. Try adjusting the primer parameters in the sidebar.")
+                                                        except Exception as primer_e:
+                                                            st.error(f"❌ Error during primer design: {primer_e}")
+                                                            st.write("🔧 This might be due to sequence quality or primer parameters.")
+                                                    else:
+                                                        st.error("Failed to fetch sequence. The sequence might be too large or unavailable.")
+                                                        
+                                                except Exception as e:
+                                                    st.error(f"Error fetching sequence: {e}")
+                                        else:
+                                            st.warning("No genome information could be retrieved")
+                                    else:
+                                        st.warning(f"No genomes found for organism: {organism_name}")
+                                        st.info("Try adjusting your search terms or check the spelling of the organism name.")
+                                        
+                            except Exception as e:
+                                st.error(f"Error searching for organism: {e}")
         
         elif input_method == "GenBank ID":
             genbank_id = st.text_input("Enter GenBank Accession Number:", 
@@ -1179,6 +2333,130 @@ def main():
                 
                 st.write(f"**Product Size:** {primer.product_size} bp")
                 st.write(f"**Penalty Score:** {primer.penalty:.4f}")
+            
+            # T7 Expression Results
+            if hasattr(st.session_state, 't7_results') and st.session_state.t7_results:
+                try:
+                    st.subheader("T7 Expression Design")
+                    
+                    t7_res = st.session_state.t7_results
+                    
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.write("**Expression Forward Primer:**")
+                        st.code(t7_res['forward_primer'], language="text")
+                        st.write(f"Length: {len(t7_res['forward_primer'])} bp")
+                        
+                        features = t7_res['expression_features']
+                        st.write("**Features included:**")
+                        if features.get('t7_promoter'):
+                            st.write("✅ T7 Promoter")
+                        if features.get('kozak_sequence'):
+                            st.write(f"✅ Kozak sequence ({features['kozak_sequence']})")
+                        if features.get('his_tag'):
+                            st.write("✅ His6 tag")
+                        if features.get('restriction_sites'):
+                            sites = features['restriction_sites']
+                            if sites:
+                                st.write(f"✅ Restriction sites: {', '.join(sites.values())}")
+                    
+                    with col2:
+                        st.write("**Expression Reverse Primer:**")
+                        st.code(t7_res['reverse_primer'], language="text")
+                        st.write(f"Length: {len(t7_res['reverse_primer'])} bp")
+                        
+                        orf = t7_res['target_orf']
+                        st.write("**Target ORF:**")
+                        st.write(f"Position: {orf['start']}-{orf['end']}")
+                        st.write(f"Length: {orf['length']} bp")
+                        st.write(f"Reading frame: {orf['frame']}")
+                    
+                    # T7 construct diagram
+                    t7_fig = create_t7_construct_diagram(st.session_state.current_sequence, t7_res)
+                    if t7_fig:
+                        st.plotly_chart(t7_fig, use_container_width=True)
+                        
+                except Exception as e:
+                    st.warning(f"T7 results display error: {e}")
+            
+            # Comprehensive Analysis Results
+            if hasattr(st.session_state, 'comprehensive_analysis_results') and st.session_state.comprehensive_analysis_results:
+                st.subheader("Comprehensive Taxonomic Analysis Results")
+                
+                analysis_results = st.session_state.comprehensive_analysis_results
+                summary = analysis_results['analysis_summary']
+                
+                # Display analysis summary
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    st.metric("Subspecies Analyzed", summary['total_subspecies'])
+                with col2:
+                    st.metric("Total Sequences", summary['total_sequences'])
+                with col3:
+                    st.metric("Conserved Regions", summary['conserved_regions_found'])
+                with col4:
+                    st.metric("Specific Regions", summary['specific_regions_found'])
+                
+                # Display subspecies data
+                st.subheader("Subspecies Analysis")
+                subspecies_df = pd.DataFrame([
+                    {
+                        'Subspecies': subspecies,
+                        'Available Sequences': data['sequence_count'],
+                        'Organism': data['sample_info'].get('organism', 'Unknown')
+                    }
+                    for subspecies, data in analysis_results['subspecies_data'].items()
+                ])
+                st.dataframe(subspecies_df, use_container_width=True)
+                
+                # Display specific regions
+                if analysis_results['specific_regions']:
+                    st.subheader("Genus-Specific Regions")
+                    specific_df = pd.DataFrame([
+                        {
+                            'Region': i + 1,
+                            'Position': f"{region['start']}-{region['end']}",
+                            'Length': region['end'] - region['start'],
+                            'Conservation': f"{region['conservation_score']:.1%}",
+                            'Specificity': f"{region['specificity_score']:.1%}",
+                            'Quality Score': region['conservation_score'] * region['specificity_score']
+                        }
+                        for i, region in enumerate(analysis_results['specific_regions'])
+                    ])
+                    st.dataframe(specific_df, use_container_width=True)
+                
+                # Display primer quality information
+                if st.session_state.primers_designed:
+                    st.subheader("Primer Quality Analysis")
+                    primer_quality_data = []
+                    for i, primer in enumerate(st.session_state.primers_designed):
+                        if hasattr(primer, 'region_info'):
+                            primer_quality_data.append({
+                                'Primer Pair': i + 1,
+                                'Region': primer.region_info['region_number'],
+                                'Conservation Score': f"{primer.region_info['conservation_score']:.1%}",
+                                'Specificity Score': f"{primer.region_info['specificity_score']:.1%}",
+                                'Quality Score': f"{primer.region_info['quality_score']:.3f}",
+                                'Forward Tm': f"{primer.forward_tm:.1f}°C",
+                                'Reverse Tm': f"{primer.reverse_tm:.1f}°C",
+                                'Product Size': f"{primer.product_size} bp"
+                            })
+                    
+                    if primer_quality_data:
+                        quality_df = pd.DataFrame(primer_quality_data)
+                        st.dataframe(quality_df, use_container_width=True)
+                        
+                        # Quality score distribution
+                        quality_scores = [float(data['Quality Score']) for data in primer_quality_data]
+                        avg_quality = np.mean(quality_scores)
+                        st.metric("Average Quality Score", f"{avg_quality:.3f}")
+                        
+                        if avg_quality >= 0.8:
+                            st.success("🎯 Excellent primer quality - suitable for diagnostic applications")
+                        elif avg_quality >= 0.6:
+                            st.info("✅ Good primer quality - suitable for research applications")
+                        else:
+                            st.warning("⚠️ Moderate primer quality - consider adjusting parameters")
         else:
             st.info("No primers designed yet. Please use the Input tab to design primers.")
     
@@ -1196,6 +2474,20 @@ def main():
             fig = create_primer_visualization(primers)
             if fig:
                 st.plotly_chart(fig, use_container_width=True)
+            
+            # Comprehensive analysis visualization
+            if hasattr(st.session_state, 'comprehensive_analysis_results') and st.session_state.comprehensive_analysis_results:
+                if 'specific_regions' in st.session_state.comprehensive_analysis_results:
+                    st.subheader("Comprehensive Analysis Visualization")
+                    
+                    species_fig = create_species_specific_visualization(
+                        st.session_state.current_sequence,
+                        st.session_state.comprehensive_analysis_results.get('specific_regions', []),
+                        primers
+                    )
+                    
+                    if species_fig:
+                        st.plotly_chart(species_fig, use_container_width=True)
             
             # Sequence diagram
             if st.session_state.current_sequence:
