@@ -2305,8 +2305,8 @@ def main():
                     with col1:
                         conservation_threshold = st.slider(
                             "Conservation threshold (%)",
-                            min_value=60, max_value=95, value=80,
-                            help="Minimum conservation required across sequences"
+                            min_value=0, max_value=95, value=80,
+                            help="Minimum conservation required across sequences (0% = no conservation required)"
                         ) / 100
                         
                         window_size = st.slider(
