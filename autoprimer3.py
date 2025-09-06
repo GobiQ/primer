@@ -55,45 +55,214 @@ def check_session_state_validity():
 
 def get_organism_suggestions_with_gene_targets():
     """Get agricultural pest and pathogen suggestions organized by category with comprehensive gene targets"""
-    # This function should be imported from the external gene target database
-    # For now, return a basic structure with some example gene targets
     return {
         "🍄 Fungal Pathogens": {
             "Fusarium species": [
                 ("Fusarium wilt", "Fusarium oxysporum", {
-                    "Essential genes": ["18S rRNA", "28S rRNA", "ACT1", "TUB1", "EF1A"],
-                    "Pathogenicity genes": ["FOW1", "FOW2", "SIX1", "SIX3", "SIX6"],
-                    "Resistance genes": ["ABC1", "MFS1", "CYP51A", "CYP51B"]
+                    "Essential genes": ["ACT1 (actin)", "TUB2 (tubulin)", "EF1A (elongation factor)", "RPB2 (RNA polymerase)", "LSU (large subunit rRNA)"],
+                    "Pathogenicity genes": ["SIX1-14 (secreted in xylem)", "FTF1 (transcription factor)", "FMK1 (MAPK)", "SGE1 (cutinase)", "PEL1 (pectate lyase)"],
+                    "Secondary metabolite genes": ["FUM1 (fumonisin biosynthesis)", "TRI5 (trichothecene biosynthesis)", "PKS4 (polyketide synthase)", "BIK1 (bikaverin)", "FUS1 (fusarin)"],
+                    "Cell wall genes": ["CHI1 (chitinase)", "GEL1 (β-1,3-glucanase)", "CHS1 (chitin synthase)", "FKS1 (β-1,3-glucan synthase)", "PMI1 (mannose-6-phosphate isomerase)"],
+                    "Resistance targets": ["CYP51 (sterol 14α-demethylase)", "SDH (succinate dehydrogenase)", "QoI (cytochrome bc1)", "MBC (β-tubulin)", "DMI (sterol biosynthesis)"]
                 }),
                 ("Fusarium head blight", "Fusarium graminearum", {
-                    "Essential genes": ["18S rRNA", "28S rRNA", "ACT1", "TUB1", "EF1A"],
-                    "Pathogenicity genes": ["FGSG_03624", "FGSG_03625", "TRICHODIENE_SYNTHASE"],
-                    "Mycotoxin genes": ["TRI5", "TRI6", "TRI10", "TRI12"]
+                    "Essential genes": ["ACT1 (actin)", "TUB1 (α-tubulin)", "TUB2 (β-tubulin)", "EF1A (elongation factor)", "RPB2 (RNA polymerase II)"],
+                    "Trichothecene pathway": ["TRI1-TRI16 (trichothecene cluster)", "TRI101 (trichothecene resistance)", "TRI201 (regulatory)", "TRI301 (transport)", "TRI401 (efflux pump)"],
+                    "DON biosynthesis": ["TRI4 (trichodiene oxygenase)", "TRI11 (isotrichodermin C-15 hydroxylase)", "TRI3 (15-O-acetyltransferase)", "TRI7 (C-4 hydroxylase)", "TRI13 (isotrichodermol dehydrogenase)"],
+                    "Pathogenicity factors": ["MGV1 (major facilitator)", "TRI12 (efflux pump)", "FgCHS1 (chitin synthase)", "FgPKS4 (polyketide synthase)", "FgLAE1 (global regulator)"],
+                    "Stress response": ["HOG1 (osmoregulation)", "FgOS2 (osmotic stress)", "FgSLT2 (cell wall integrity)", "ATF1 (oxidative stress)", "FgAP1 (AP-1 transcription factor)"]
+                }),
+                ("Fusarium crown rot", "Fusarium culmorum", {
+                    "Housekeeping genes": ["ACT1", "TUB2", "EF1A", "RPB2", "LSU rRNA"],
+                    "Pathogenicity": ["CUT1 (cutinase)", "PEL2 (pectinase)", "XYL1 (xylanase)", "CEL1 (cellulase)", "AMY1 (amylase)"],
+                    "Secondary metabolites": ["ZEA1-2 (zearalenone)", "TRI cluster", "AUR1 (aurofusarin)", "CUL1 (culmorin)", "BUT1 (butenolide)"],
+                    "Survival genes": ["HSP70 (heat shock)", "SOD1 (superoxide dismutase)", "CAT1 (catalase)", "GPX1 (glutathione peroxidase)", "TRX1 (thioredoxin)"]
+                })
+            ],
+            "Botrytis species": [
+                ("Gray mold", "Botrytis cinerea", {
+                    "Essential genes": ["ACT1", "TUB2", "EF1A", "RPB2", "HSP70"],
+                    "Pathogenicity factors": ["BCG1 (α-galactosidase)", "BMP1 (metalloprotease)", "BCP1 (cerato-platanin)", "BOA1 (botrydial)", "BCR1 (ABC transporter)"],
+                    "Cell wall degrading": ["BcPG1-6 (polygalacturonases)", "BcPME1 (pectin methylesterase)", "BcXYL1 (xylanase)", "BcCEL1 (cellulase)", "BcCUT1 (cutinase)"],
+                    "Secondary metabolites": ["BOT1-5 (botrydial cluster)", "DHN1 (1,8-dihydroxynaphthalene)", "PKS1-13 (polyketide synthases)", "NPS1-6 (nonribosomal peptide synthetases)"],
+                    "Resistance mechanisms": ["ABC1-50 (ABC transporters)", "MFS1-20 (major facilitator superfamily)", "CYP1-20 (cytochrome P450s)", "GST1-10 (glutathione S-transferases)"]
                 })
             ],
             "Other fungi": [
-                ("Gray mold", "Botrytis cinerea", {
-                    "Essential genes": ["18S rRNA", "28S rRNA", "ACT1", "TUB1", "EF1A"],
-                    "Pathogenicity genes": ["BCIN_01", "BCIN_02", "BCIN_03"],
-                    "Detoxification genes": ["CYP51", "ABC1", "MFS1"]
+                ("White mold", "Sclerotinia sclerotiorum", {
+                    "Essential genes": ["ACT1", "TUB2", "EF1A", "RPB2", "CAL1"],
+                    "Pathogenicity factors": ["SSPG1 (polygalacturonase)", "SsPME1 (pectin methylesterase)", "SsCUT1 (cutinase)", "SsNEP1 (necrosis-inducing protein)", "SsCP1 (cysteine protease)"],
+                    "Oxalic acid pathway": ["OAH1 (oxaloacetate hydrolase)", "OXA1 (oxalate oxidase)", "OXD1 (oxalate decarboxylase)", "OMT1 (oxalate metabolism)", "OXT1 (oxalate transporter)"],
+                    "Sclerotia formation": ["SMK1 (sclerotial development)", "SLT1 (sclerotial maturation)", "SCL1 (sclerotial pigmentation)", "MBF1 (melanin biosynthesis)", "LAC1 (laccase)"]
+                }),
+                ("Late blight", "Phytophthora infestans", {
+                    "Essential genes": ["ACT1", "TUB1", "EF1A", "RPB1", "COX1 (cytochrome c oxidase)"],
+                    "Effector genes": ["AVR1-11 (avirulence genes)", "PexRD1-36 (Phytophthora expressed)", "Pi02860-Pi17316 (candidate effectors)", "RXLR1-100 (effector motif)", "CRN1-50 (crinkler effectors)"],
+                    "RXLR effectors": ["PiAVR3a", "PiAVR4", "PiAVRblb1", "PiAVRblb2", "PiAVRvnt1", "Pi02860", "Pi03192", "Pi04314", "Pi07569", "Pi09585"],
+                    "Cell wall degrading": ["PiCBEL1-15 (cellulose-binding elicitor lectin)", "PiGH12-1 (endoglucanase)", "PiPL1-20 (pectate lyases)", "PiXEG1 (xyloglucanase)", "PiPG1-5 (polygalacturonases)"],
+                    "Pathogenicity factors": ["PiINF1 (infestin)", "PiNPP1 (necrosis-inducing protein)", "PiEPI1-10 (epidermis-specific)", "PiHAM34 (haustorial membrane)", "PiMCF1 (mycelium-cyst transition)"]
+                }),
+                ("Powdery mildew", "Erysiphe necator", {
+                    "Essential genes": ["ACT1", "TUB2", "EF1A", "RPB2", "ITS1-2"],
+                    "Pathogenicity": ["ENH1 (haustorium formation)", "ENC1 (conidiophore development)", "ENS1 (spore germination)", "ENP1 (penetration)", "ENA1 (appressorium formation)"],
+                    "Effectors": ["CSEP1-100 (candidate secreted effector proteins)", "ENE1-50 (E. necator effectors)", "AVR1-10 (avirulence candidates)", "HAU1-20 (haustorial expressed)"],
+                    "Sterol biosynthesis": ["CYP51A1", "CYP51B1", "ERG1 (squalene epoxidase)", "ERG7 (lanosterol synthase)", "ERG11 (sterol 14α-demethylase)"]
                 })
             ]
         },
+        
         "🐛 Insect Pests": {
             "Mites": [
                 ("Two-spotted spider mite", "Tetranychus urticae", {
-                    "Essential genes": ["18S rRNA", "28S rRNA", "ACT1", "TUB1", "EF1A"],
-                    "Detoxification genes": ["CYP392A11", "CYP392A12", "GST1", "GST2"],
-                    "Resistance genes": ["ACETYLCHOLINESTERASE", "SODIUM_CHANNEL"]
+                    "Essential genes": ["ACT1 (actin)", "TUB1 (tubulin)", "EF1A (elongation factor)", "RPL32 (ribosomal protein L32)", "RPS3 (ribosomal protein S3)"],
+                    "Detoxification genes": ["CYP1-100 (cytochrome P450s)", "GST1-30 (glutathione S-transferases)", "EST1-20 (esterases)", "UGT1-15 (UDP-glucuronosyltransferases)", "ABC1-50 (ABC transporters)"],
+                    "Acaricide resistance": ["AChE (acetylcholinesterase)", "VGSC (voltage-gated sodium channel)", "RDL (GABA receptor)", "nAChR (nicotinic acetylcholine receptor)", "GluCl (glutamate-gated chloride channel)"],
+                    "Development genes": ["JH1-3 (juvenile hormone)", "ECR (ecdysone receptor)", "USP (ultraspiracle)", "E74 (ecdysone response)", "BR-C (broad complex)"],
+                    "Reproduction genes": ["VIT1-6 (vitellogenin)", "VTG1-3 (vitellogenin)", "CHR (chorion)", "EGG1-5 (egg development)", "EMB1-10 (embryogenesis)"]
+                }),
+                ("European red mite", "Panonychus ulmi", {
+                    "Essential genes": ["ACT1", "TUB1", "EF1A", "RPL32", "COI (cytochrome oxidase I)"],
+                    "Resistance genes": ["CYP1-50", "GST1-20", "EST1-15", "P450-1-25", "MFO1-10 (mixed function oxidases)"],
+                    "Cold tolerance": ["HSP70 (heat shock protein)", "AFP1-3 (antifreeze proteins)", "TRE1 (trehalose)", "GLY1-2 (glycerol)", "CRY1-2 (cryoprotectants)"],
+                    "Diapause genes": ["DIA1-5 (diapause-associated)", "CLK (clock)", "PER (period)", "TIM (timeless)", "CYC (cycle)"]
+                })
+            ],
+            "Whiteflies": [
+                ("Silverleaf whitefly", "Bemisia tabaci", {
+                    "Essential genes": ["ACT1", "TUB1", "EF1A", "COI", "16S rRNA"],
+                    "Insecticide resistance": ["CYP6CM1", "CYP4C64", "CYP4G61", "CYP4G70", "GST1-15", "EST1-10", "ABC1-30", "nAChR (nicotinic receptor)", "VGSC (sodium channel)"],
+                    "Biotype markers": ["mtCOI (mitochondrial COI)", "ITS1", "16S rRNA", "28S rRNA", "RAPD markers"],
+                    "Virus transmission": ["GroEL (endosymbiont)", "HSP70", "cyclophilin", "importin-α", "karyopherin", "VP1-4 (viral proteins)"],
+                    "Endosymbiont genes": ["Portiera (P-endosymbiont)", "Hamiltonella", "Arsenophonus", "Cardinium", "Wolbachia", "Rickettsia"]
+                }),
+                ("Greenhouse whitefly", "Trialeurodes vaporariorum", {
+                    "Essential genes": ["ACT1", "TUB1", "EF1A", "COI", "COII"],
+                    "Development markers": ["JH (juvenile hormone)", "ECR (ecdysone receptor)", "CHI1-3 (chitinase)", "CHS1-2 (chitin synthase)", "TRE1-2 (trehalase)"],
+                    "Host plant interaction": ["SUC1-3 (sucrase)", "APH1-2 (aphid-like stylet)", "SAL1-3 (salivary)", "GUT1-5 (gut-specific)", "PHE1-3 (phenoloxidase)"]
+                })
+            ],
+            "Aphids": [
+                ("Green peach aphid", "Myzus persicae", {
+                    "Essential genes": ["ACT1", "TUB1", "EF1A", "COI", "COII"],
+                    "Insecticide resistance": ["MACE (modified acetylcholinesterase)", "kdr (knockdown resistance)", "RDL (GABA receptor)", "CYP6CY3", "CYP4CJ1", "GST1-10", "EST1-8", "ABC1-20"],
+                    "Morph determination": ["APH1 (apterous)", "WIN1 (wingless)", "VG1 (vestigial)", "DSX1 (doublesex)", "FRU1 (fruitless)"],
+                    "Virus transmission": ["PLRV (potato leafroll virus)", "PVY (potato virus Y)", "CMV (cucumber mosaic virus)", "receptor proteins", "helper factors"],
+                    "Endosymbiont": ["Buchnera aphidicola", "trpA-E (tryptophan synthesis)", "aroA-Q (aromatic amino acids)", "ilv (isoleucine-valine)", "leu (leucine)", "phe (phenylalanine)"]
+                }),
+                ("Cotton aphid", "Aphis gossypii", {
+                    "Essential genes": ["ACT1", "TUB1", "EF1A", "COI", "16S rRNA"],
+                    "Host specialization": ["HSP1-10 (host selection)", "DET1-5 (detoxification)", "FED1-3 (feeding behavior)", "GOT1-5 (gossypol tolerance)", "TAN1-3 (tannin tolerance)"],
+                    "Polyphenism": ["WIN1-5 (wing development)", "ALT1-3 (alternate morph)", "ENV1-5 (environmental response)", "DEN1-3 (density-dependent)", "PHO1-3 (photoperiod)"]
+                })
+            ],
+            "Thrips": [
+                ("Western flower thrips", "Frankliniella occidentalis", {
+                    "Essential genes": ["ACT1", "TUB1", "EF1A", "COI", "18S rRNA"],
+                    "Insecticide resistance": ["CYP1-30", "GST1-15", "EST1-10", "AChE", "VGSC", "RDL", "GluCl", "nAChR"],
+                    "Virus transmission": ["TSWV (tomato spotted wilt virus)", "INSV (impatiens necrotic spot virus)", "receptor1-3", "helper1-2", "vector1-5"],
+                    "Host preference": ["ORN1-10 (olfactory)", "GRN1-5 (gustatory)", "CHE1-8 (chemoreception)", "HOST1-5 (host selection)", "FED1-3 (feeding)"],
+                    "Development": ["JHE (juvenile hormone esterase)", "JH1-3", "ECR", "USP", "E74", "BR-C", "CHI1-2", "CHS1-2"]
+                }),
+                ("Onion thrips", "Thrips tabaci", {
+                    "Essential genes": ["ACT1", "TUB1", "EF1A", "COI", "COII"],
+                    "Arrhenotoky": ["SEX1-5 (sex determination)", "HAP1-3 (haplodiploidy)", "CSD (complementary sex determiner)", "FEM1-2 (feminizer)", "DSX"],
+                    "Onion adaptation": ["ALL1-5 (alliin tolerance)", "SUL1-3 (sulfur metabolism)", "ONI1-5 (onion-specific)", "LAC1-2 (lachrymatory factor)", "THI1-3 (thiosulfinate)"]
                 })
             ]
         },
+
+        "🦠 Bacterial Pathogens": {
+            "Erwinia species": [
+                ("Fire blight", "Erwinia amylovora", {
+                    "Essential genes": ["16S rRNA", "23S rRNA", "gyrA", "gyrB", "rpoB", "rpoD"],
+                    "Pathogenicity factors": ["hrpA-W (type III secretion)", "dspA/E (disease-specific)", "amsA-K (amylovoran synthesis)", "rcsA-C (regulation)", "avrRpt2EA"],
+                    "Type III effectors": ["eop1-4 (effector of pathogenicity)", "hopA1EA", "hopC1EA", "avrE1", "dspA/E", "eop2", "eop3", "eop4"],
+                    "Exopolysaccharide": ["amsA-K (amylovoran)", "galE", "galF", "ugpA-E", "wza-c", "gmd", "fcl", "rmlA-D"],
+                    "Virulence regulation": ["rcsA-C", "kdpD/E", "ompR/envZ", "phoP/Q", "rpoS", "fur", "crp", "ihfA/B"]
+                })
+            ],
+            "Pseudomonas species": [
+                ("Bacterial speck", "Pseudomonas syringae", {
+                    "Essential genes": ["16S rRNA", "gyrA", "gyrB", "rpoB", "rpoD"],
+                    "Type III secretion": ["hrpA-U", "hrcC", "hrcJ", "hrcN", "hrcQ-U", "hrpZ", "hrpA", "hrpG", "hrpL"],
+                    "Effector proteins": ["avrE1", "hopA1", "hopM1", "hopZ1-3", "avrPto", "avrPtoB", "avrRpm1", "avrRpt2", "hopF2", "hopG1"],
+                    "Toxin production": ["coronatine biosynthesis", "cmaA-T", "cfa1-9", "syringomycin", "syrA-E", "syringopeptin", "sypA-C"],
+                    "Ice nucleation": ["inaA-Z", "ice nucleation proteins", "ina genes", "frost injury", "epiphytic survival"]
+                })
+            ],
+            "Xanthomonas species": [
+                ("Bacterial blight", "Xanthomonas campestris", {
+                    "Essential genes": ["16S rRNA", "gyrA", "gyrB", "rpoB", "atpD"],
+                    "Xanthan production": ["gumB-M", "xanA-B", "xanthan gum", "EPS production", "biofilm formation"],
+                    "Type III system": ["hrpA-F", "hrcC", "hrcJ", "hrcN", "hrcQ-U", "hpaA-F", "hpaP"],
+                    "TAL effectors": ["avrBs3 family", "PthA1-4", "TAL1-20", "transcription activator-like", "DNA-binding repeats"],
+                    "Pathogenicity factors": ["rpfA-G (regulation)", "clp (cellulase)", "prt (protease)", "man (mannanase)", "xps (secretion)"]
+                })
+            ],
+            "Ralstonia species": [
+                ("Bacterial wilt", "Ralstonia solanacearum", {
+                    "Essential genes": ["16S rRNA", "gyrA", "gyrB", "rpoB", "egl"],
+                    "Type III secretion": ["hrpA-Y", "hrcC", "hrcJ", "hrcN", "hrcQ-U", "popA-F", "ripA-Z"],
+                    "Rip effectors": ["ripA1-Z9", "popP1-2", "popF1-4", "avrA", "ripG1-7", "ripP1-2", "ripE1", "ripF1"],
+                    "EPS production": ["epsA-R", "exopolysaccharide", "biofilm", "wilt induction", "vascular plugging"],
+                    "Phylotypes": ["phylotype I-IV", "sequevars", "biovars 1-5", "race 1-5", "geographic distribution"]
+                })
+            ]
+        },
+
         "🦠 Plant Viruses": {
             "Tobamoviruses": [
                 ("Tobacco mosaic virus", "Tobacco mosaic virus", {
-                    "Essential genes": ["CP", "MP", "RP", "126K", "183K"],
-                    "Replication genes": ["126K", "183K", "RP"],
-                    "Movement genes": ["MP", "CP"]
+                    "Structural genes": ["MP (movement protein)", "CP (coat protein)", "Rep (replicase)", "helicase domain", "polymerase domain"],
+                    "Movement": ["MP (30K movement protein)", "cell-to-cell movement", "plasmodesmata gating", "viral transport", "cytoskeleton interaction"],
+                    "Replication": ["RdRp (RNA-dependent RNA polymerase)", "126K protein", "183K protein", "methyltransferase", "helicase"],
+                    "Host interaction": ["elicitor recognition", "hypersensitive response", "systemic acquired resistance", "pathogenesis-related proteins"],
+                    "Resistance genes": ["N gene", "Tm-1", "Tm-2", "Tm-22", "resistance-breaking strains"]
+                }),
+                ("Tomato mosaic virus", "Tomato mosaic virus", {
+                    "Essential genes": ["CP (coat protein)", "MP (movement protein)", "Rep (replicase)", "126K protein", "183K protein"],
+                    "Pathogenicity": ["virulence determinants", "host range", "symptom expression", "systemic movement"],
+                    "Resistance breaking": ["resistance-breaking strains", "Tm-2 resistance", "point mutations", "strain classification"]
+                })
+            ],
+            "Other viruses": [
+                ("Potato virus Y", "Potato virus Y", {
+                    "Essential genes": ["P1", "HC-Pro", "P3", "6K1", "CI", "6K2", "VPg", "NIa-Pro", "NIb", "CP"],
+                    "Silencing suppression": ["HC-Pro (helper component proteinase)", "P1", "RNA silencing suppression", "siRNA binding", "RISC complex"],
+                    "Strain differentiation": ["PVY-O (ordinary)", "PVY-N (necrotic)", "PVY-C", "PVY-Z", "PVYNTN", "PVYN-Wi"],
+                    "Vector transmission": ["aphid transmission", "stylet-borne", "non-persistent", "helper component", "virion retention"],
+                    "Recombination": ["recombinant strains", "PVYNTN", "breakpoints", "fitness advantage", "emergence"]
+                }),
+                ("Cucumber mosaic virus", "Cucumber mosaic virus", {
+                    "Essential genes": ["1a", "2a", "2b", "3a", "MP", "CP"],
+                    "Satellite RNA": ["satRNA", "symptom modulation", "D-satRNA", "Y-satRNA", "WL1-satRNA"],
+                    "Subgroups": ["subgroup I", "subgroup II", "subgroup IA", "subgroup IB", "phylogenetic classification"],
+                    "Host range": ["wide host range", "over 1000 species", "monocots", "dicots", "woody plants"],
+                    "Symptom determinants": ["2b protein", "satellite RNA", "strain-specific", "host-dependent", "environmental factors"]
+                })
+            ]
+        },
+
+        "🦠 Oomycetes": {
+            "Pythium species": [
+                ("Pythium root rot", "Pythium ultimum", {
+                    "Essential genes": ["ACT1", "TUB1", "EF1A", "RPB1", "COX1"],
+                    "Pathogenicity factors": ["PyCBEL1-10 (cellulose-binding elicitor lectin)", "PyPL1-8 (pectate lyases)", "PyCUT1-3 (cutinases)", "PyPRO1-5 (proteases)", "PyLIP1-3 (lipases)"],
+                    "Zoospore motility": ["FLA1-20 (flagellar proteins)", "DYN1-5 (dynein)", "KIN1-8 (kinesin)", "TUB1-3 (tubulins)", "MOT1-10 (motility)"],
+                    "Oospore formation": ["OOS1-15 (oospore genes)", "SEX1-5 (sexual reproduction)", "MAT1-3 (mating type)", "GER1-5 (germination)", "DOR1-3 (dormancy)"],
+                    "Cell wall synthesis": ["CEL1-5 (cellulose synthase)", "CHI1-3 (chitinase)", "GEL1-3 (β-1,3-glucanase)", "CHS1 (chitin synthase)", "CAL1 (callose synthase)"]
+                })
+            ]
+        },
+
+        "🧬 Viroids": {
+            "RNA pathogens": [
+                ("Hop latent viroid", "Hop latent viroid", {
+                    "Structural domains": ["P (pathogenicity)", "C (central)", "V (variable)", "T1 (terminal left)", "T2 (terminal right)"],
+                    "Secondary structure": ["rod-like structure", "base-pairing", "hairpin loops", "bulges", "thermodynamic stability"],
+                    "Variants": ["HLVd variants", "sequence diversity", "geographic strains", "hop cultivar adaptation"],
+                    "Pathogenicity": ["latent infection", "hop stunt", "yield reduction", "brewing quality", "bitter compound"],
+                    "Detection": ["RT-PCR", "northern blot", "dot blot", "in situ hybridization", "high-throughput sequencing"]
                 })
             ]
         }
@@ -332,35 +501,41 @@ def export_with_gene_targets(primers, format_type="excel"):
         return df.to_csv(index=False)
 
 def get_gene_priority(category):
-    """Get priority level for a gene category"""
-    category_lower = category.lower()
-    if any(x in category_lower for x in ['essential', 'housekeeping', 'core']):
+    """Get priority level for gene category"""
+    high_priority = ["Essential genes", "Pathogenicity genes", "Resistance targets", "Insecticide resistance", "Acaricide resistance"]
+    medium_priority = ["Secondary metabolite genes", "Detoxification genes", "Development genes", "Effector genes", "Type III secretion"]
+    
+    if category in high_priority:
         return "High"
-    elif any(x in category_lower for x in ['pathogen', 'virulence', 'effector']):
-        return "Medium"
-    elif any(x in category_lower for x in ['resistance', 'detoxification']):
+    elif category in medium_priority:
         return "Medium"
     else:
         return "Low"
 
 def get_gene_use_recommendation(category):
-    """Get usage recommendation for a gene category"""
-    category_lower = category.lower()
-    if 'essential' in category_lower or 'housekeeping' in category_lower:
-        return "Recommended for species identification and phylogenetic studies. High conservation across strains."
-    elif 'pathogen' in category_lower or 'virulence' in category_lower:
-        return "Useful for disease-specific detection and pathogenicity assessment."
-    elif 'resistance' in category_lower:
-        return "Important for monitoring resistance development and management strategies."
-    elif 'detoxification' in category_lower:
-        return "Useful for understanding metabolic capabilities and stress responses."
-    else:
-        return "General purpose target for comprehensive analysis."
+    """Get recommendation for gene category use"""
+    recommendations = {
+        "Essential genes": "Universal targets - always effective for species identification and basic primer design",
+        "Pathogenicity genes": "Ideal for pathogen detection and virulence studies",
+        "Resistance targets": "Critical for resistance monitoring and management strategies", 
+        "Secondary metabolite genes": "Excellent for toxin detection and food safety applications",
+        "Detoxification genes": "Essential for resistance monitoring in pest management",
+        "Acaricide resistance": "Monitor for resistance development in mite populations",
+        "Insecticide resistance": "Track resistance evolution in insect pest populations",
+        "Development genes": "Target for growth regulation and lifecycle disruption",
+        "Reproduction genes": "Fertility control and population management applications",
+        "Effector genes": "Highly specific pathogenicity targets",
+        "Cell wall degrading": "Virulence factors for disease mechanism studies",
+        "Type III secretion": "Pathogenicity system targets",
+        "Virulence regulation": "Regulatory control of disease development"
+    }
+    return recommendations.get(category, "General research and diagnostic applications")
 
 def export_to_excel_with_targets(primers, organism_info):
     """Export primers to Excel with gene target information"""
     try:
-        data = []
+        # Create main primer data
+        primer_data = []
         for i, primer in enumerate(primers):
             row_data = {
                 'Primer_Pair': i + 1,
@@ -380,6 +555,12 @@ def export_to_excel_with_targets(primers, organism_info):
                     'Core_Forward_Tm': round(primer.forward_tm, 2),
                     'Core_Reverse_Tm': round(primer.reverse_tm, 2),
                     'dsRNA_Size': primer.product_size,
+                    'Core_Forward_GC%': round(primer.gc_content_f, 2),
+                    'Core_Reverse_GC%': round(primer.gc_content_r, 2),
+                    'Forward_Start': primer.forward_start,
+                    'Reverse_Start': primer.reverse_start,
+                    'Penalty_Score': round(primer.penalty, 4),
+                    'T7_Promoter': primer.t7_promoter_seq,
                     'Primer_Type': 'T7_dsRNA'
                 })
             else:
@@ -389,15 +570,41 @@ def export_to_excel_with_targets(primers, organism_info):
                     'Forward_Tm': round(primer.forward_tm, 2),
                     'Reverse_Tm': round(primer.reverse_tm, 2),
                     'Product_Size': primer.product_size,
+                    'Forward_GC%': round(primer.gc_content_f, 2),
+                    'Reverse_GC%': round(primer.gc_content_r, 2),
+                    'Forward_Start': primer.forward_start,
+                    'Reverse_Start': primer.reverse_start,
+                    'Penalty_Score': round(primer.penalty, 4),
                     'Primer_Type': 'Standard'
                 })
             
-            data.append(row_data)
+            primer_data.append(row_data)
         
-        df = pd.DataFrame(data)
+        # Create gene target data if available
+        gene_target_data = []
+        if organism_info and 'gene_targets' in organism_info:
+            targets = organism_info['gene_targets']
+            for category, genes in targets.items():
+                for gene in genes:
+                    gene_target_data.append({
+                        'Gene_Category': category,
+                        'Gene_Target': gene,
+                        'Target_Organism': organism_info.get('organism', 'Unknown'),
+                        'Priority': get_gene_priority(category),
+                        'Recommended_Use': get_gene_use_recommendation(category)
+                    })
+        
+        # Create Excel file
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            df.to_excel(writer, sheet_name='Primer_Results', index=False)
+            # Primer results sheet
+            primer_df = pd.DataFrame(primer_data)
+            primer_df.to_excel(writer, sheet_name='Primer_Results', index=False)
+            
+            # Gene targets sheet
+            if gene_target_data:
+                targets_df = pd.DataFrame(gene_target_data)
+                targets_df.to_excel(writer, sheet_name='Gene_Targets', index=False)
         
         return output.getvalue()
     except Exception as e:
@@ -438,41 +645,25 @@ def create_comprehensive_gene_target_export():
         return pd.DataFrame()
 
 def generate_gene_target_statistics():
-    """Generate comprehensive gene target statistics"""
+    """Generate comprehensive statistics about available gene targets"""
     try:
-        suggestions = get_organism_suggestions_with_gene_targets()
+        df = create_comprehensive_gene_target_export()
+        
+        if df.empty:
+            return {}, {}, {}
         
         stats = {
-            'Total Organisms': 0,
-            'Total Gene Targets': 0,
-            'High Priority Targets': 0,
-            'Organism Categories': len(suggestions)
+            'Total Organisms': df['Scientific_Name'].nunique(),
+            'Total Gene Targets': len(df),
+            'Organism Categories': df['Organism_Category'].nunique(),
+            'Gene Categories': df['Gene_Category'].nunique(),
+            'High Priority Targets': len(df[df['Priority'] == 'High']),
+            'Pathogen Targets': len(df[df['Target_Type'] == 'Pathogen']),
+            'Pest Targets': len(df[df['Target_Type'] == 'Pest'])
         }
         
-        category_counts = {}
-        gene_category_counts = {}
-        
-        for category, subcategories in suggestions.items():
-            category_counts[category] = 0
-            for subcategory, organisms in subcategories.items():
-                for item in organisms:
-                    stats['Total Organisms'] += 1
-                    category_counts[category] += 1
-                    
-                    if len(item) == 3:
-                        common_name, scientific_name, gene_targets = item
-                    else:
-                        common_name, scientific_name = item
-                        gene_targets = {"Essential genes": ["16S rRNA", "18S rRNA", "ACT1", "TUB1", "EF1A"]}
-                    
-                    for gene_category, genes in gene_targets.items():
-                        if gene_category not in gene_category_counts:
-                            gene_category_counts[gene_category] = 0
-                        gene_category_counts[gene_category] += len(genes)
-                        stats['Total Gene Targets'] += len(genes)
-                        
-                        if get_gene_priority(gene_category) == "High":
-                            stats['High Priority Targets'] += len(genes)
+        category_counts = df['Organism_Category'].value_counts().to_dict()
+        gene_category_counts = df['Gene_Category'].value_counts().to_dict()
         
         return stats, category_counts, gene_category_counts
     except Exception as e:
