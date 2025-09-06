@@ -28,7 +28,62 @@ def check_session_state_validity():
     """Check if session state has valid data"""
     has_primers = bool(st.session_state.get('primers_designed'))
     has_sequence = bool(st.session_state.get('current_sequence'))
-    has_seq_info = bool(st.session_state.get('sequence_info'))#!/usr/bin/env python3
+    has_seq_info = bool(st.session_state.get('sequence_info'))
+    
+    return {
+        'has_primers': has_primers,
+        'has_sequence': has_sequence,
+        'has_seq_info': has_seq_info,
+        'primer_count': len(st.session_state.get('primers_designed', [])),
+        'sequence_length': len(st.session_state.get('current_sequence', ''))
+    }
+
+def get_organism_suggestions():
+    """Get agricultural pest and pathogen suggestions organized by category"""
+    return {
+        "Fungal Pathogens": {
+            "Fusarium species": [
+                ("Fusarium wilt", "Fusarium oxysporum"),
+                ("Fusarium head blight", "Fusarium graminearum"),
+                ("Fusarium crown rot", "Fusarium culmorum")
+            ],
+            "Botrytis species": [
+                ("Gray mold", "Botrytis cinerea"),
+                ("Botrytis blight", "Botrytis elliptica")
+            ],
+            "Other fungi": [
+                ("Late blight", "Phytophthora infestans"),
+                ("Powdery mildew", "Erysiphe necator"),
+                ("Rust disease", "Puccinia graminis"),
+                ("Smut disease", "Ustilago maydis")
+            ]
+        },
+        "Insect Pests": {
+            "Mites": [
+                ("Two-spotted spider mite", "Tetranychus urticae"),
+                ("European red mite", "Panonychus ulmi")
+            ],
+            "Whiteflies": [
+                ("Silverleaf whitefly", "Bemisia tabaci"),
+                ("Greenhouse whitefly", "Trialeurodes vaporariorum")
+            ],
+            "Thrips": [
+                ("Western flower thrips", "Frankliniella occidentalis"),
+                ("Onion thrips", "Thrips tabaci")
+            ],
+            "Aphids": [
+                ("Green peach aphid", "Myzus persicae"),
+                ("Cotton aphid", "Aphis gossypii")
+            ]
+        },
+        "Bacterial Pathogens": [
+            ("Bacterial wilt", "Ralstonia solanacearum"),
+            ("Fire blight", "Erwinia amylovora"),
+            ("Crown gall", "Agrobacterium tumefaciens")
+        ]
+    }
+
+#!/usr/bin/env python3
 """
 Streamlit Web Application for Automated Primer Design - COMPLETE FIXED VERSION
 ============================================================================
@@ -697,32 +752,134 @@ def main():
             with col1:
                 organism_name = st.text_input("Enter organism name:", 
                                             placeholder="e.g., Fusarium oxysporum, Tetranychus urticae")
-                
-                suggestions = get_organism_suggestions()
-                st.write("**Agricultural Pests & Pathogens:**")
-                
-                for category, subcategories in suggestions.items():
-                    st.write(f"**{category}**")
-                    
-                    for subcategory, organisms in subcategories.items():
-                        st.write(f"*{subcategory}*")
-                        
-                        cols = st.columns(min(len(organisms), 4))
-                        for i, organism in enumerate(organisms):
-                            with cols[i % 4]:
-                                if st.button(organism, key=f"suggest_{category}_{subcategory}_{i}", help=f"Click to search for {organism}"):
-                                    organism_name = organism
-                                    st.rerun()
-                        st.write("")
             
             with col2:
                 max_genomes = st.number_input("Max genomes to search", min_value=1, max_value=20, value=5)
             
-            if st.button("Search Organism Genomes", type="primary"):
+            # Big red search button moved above the suggestions
+            if st.button("🔍 Search Organism Genomes", type="primary", use_container_width=True):
                 if not email:
                     st.error("❌ **Email Required**: Please enter an email address in the sidebar.")
                 elif not organism_name:
                     st.error("❌ **Organism Name Required**: Please enter an organism name.")
+                else:
+                    with st.spinner(f"Searching for {organism_name} genomes..."):
+                        try:
+                            ncbi = NCBIConnector(email, api_key)
+                            designer = PrimerDesigner()
+                            
+                            search_query = f'"{organism_name}"[organism]'
+                            st.write(f"Searching with query: `{search_query}`")
+                            
+                            seq_ids = ncbi.search_sequences(search_query, database="nucleotide", max_results=max_genomes)
+                            
+                            if seq_ids:
+                                st.success(f"Found {len(seq_ids)} sequences!")
+                                
+                                seq_id = seq_ids[0]
+                                st.info(f"Using sequence {seq_id} for primer design...")
+                                
+                                sequence = ncbi.fetch_sequence(seq_id)
+                                seq_info = ncbi.fetch_sequence_info(seq_id)
+                                
+                                if sequence:
+                                    clean_sequence = re.sub(r'[^ATGCatgc]', '', sequence.upper())
+                                    
+                                    if len(clean_sequence) < 50:
+                                        st.error("Sequence too short for primer design")
+                                    else:
+                                        if len(clean_sequence) > 100000:
+                                            st.warning(f"Large sequence ({len(clean_sequence):,} bp). Using first 100kb.")
+                                            clean_sequence = clean_sequence[:100000]
+                                        
+                                        st.session_state.current_sequence = clean_sequence
+                                        st.session_state.sequence_info = seq_info or {
+                                            "id": seq_id,
+                                            "description": f"Sequence {seq_id}",
+                                            "length": len(clean_sequence),
+                                            "organism": organism_name
+                                        }
+                                        
+                                        st.write("Designing primers...")
+                                        primers = designer.design_primers(
+                                            clean_sequence, 
+                                            custom_params=custom_params,
+                                            add_t7_promoter=enable_t7_dsrna
+                                        )
+                                        st.session_state.primers_designed = primers
+                                        
+                                        if enable_t7_dsrna:
+                                            st.session_state.t7_dsrna_enabled = True
+                                            st.session_state.t7_settings = {
+                                                'optimal_length': optimal_dsrna_length,
+                                                'check_efficiency': check_transcription_efficiency
+                                            }
+                                        else:
+                                            st.session_state.t7_dsrna_enabled = False
+                                        
+                                        if primers:
+                                            st.success(f"✅ Successfully designed {len(primers)} primer pairs!")
+                                            
+                                            preview_data = []
+                                            for i, primer in enumerate(primers[:5]):
+                                                preview_data.append({
+                                                    'Pair': i + 1,
+                                                    'Forward': primer.forward_seq[:30] + '...' if len(primer.forward_seq) > 30 else primer.forward_seq,
+                                                    'Reverse': primer.reverse_seq[:30] + '...' if len(primer.reverse_seq) > 30 else primer.reverse_seq,
+                                                    'Product Size': f"{primer.product_size} bp"
+                                                })
+                                            
+                                            st.dataframe(pd.DataFrame(preview_data), use_container_width=True)
+                                            st.info("📊 Go to other tabs to view detailed analysis!")
+                                        else:
+                                            st.warning("No suitable primers found. Try adjusting parameters.")
+                                else:
+                                    st.error("Failed to fetch sequence")
+                            else:
+                                st.warning(f"No sequences found for {organism_name}")
+                                
+                        except Exception as e:
+                            st.error(f"Error: {e}")
+            
+            # Agricultural Pests & Pathogens section with functional buttons
+            st.write("**Agricultural Pests & Pathogens:**")
+            
+            suggestions = get_organism_suggestions()
+            
+            for category, subcategories in suggestions.items():
+                st.write(f"**{category}**")
+                
+                if isinstance(subcategories, dict):
+                    for subcategory, organisms in subcategories.items():
+                        st.write(f"*{subcategory}*")
+                        
+                        # Use more columns to reduce spacing
+                        cols = st.columns(min(len(organisms), 6))
+                        for i, (common_name, latin_name) in enumerate(organisms):
+                            with cols[i % 6]:
+                                if st.button(common_name, key=f"suggest_{category}_{subcategory}_{i}", 
+                                           help=f"Click to search for {latin_name}"):
+                                    # Set the organism name and trigger search
+                                    st.session_state.selected_organism = latin_name
+                                    st.rerun()
+                else:
+                    # Handle bacterial pathogens (list format)
+                    cols = st.columns(min(len(subcategories), 6))
+                    for i, (common_name, latin_name) in enumerate(subcategories):
+                        with cols[i % 6]:
+                            if st.button(common_name, key=f"suggest_{category}_{i}", 
+                                       help=f"Click to search for {latin_name}"):
+                                # Set the organism name and trigger search
+                                st.session_state.selected_organism = latin_name
+                                st.rerun()
+            
+            # Handle organism selection from buttons
+            if 'selected_organism' in st.session_state:
+                organism_name = st.session_state.selected_organism
+                del st.session_state.selected_organism
+                
+                if not email:
+                    st.error("❌ **Email Required**: Please enter an email address in the sidebar.")
                 else:
                     with st.spinner(f"Searching for {organism_name} genomes..."):
                         try:
