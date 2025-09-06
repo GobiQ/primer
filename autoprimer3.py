@@ -1752,6 +1752,80 @@ def perform_gene_targeted_design(organism_name, email, api_key, max_sequences, c
             if all_primers:
                 st.success(f"✅ Successfully designed {len(all_primers)} gene-targeted primer pairs!")
                 
+                # Step 3: Specificity testing for gene-targeted primers
+                st.write("🎯 **Step 3: Testing primer specificity...**")
+                
+                # Get related organisms for specificity testing
+                related_organisms = get_related_organisms(organism_name)
+                st.write(f"Testing against related organisms: {', '.join(related_organisms)}")
+                
+                # Test specificity for the best primer from each gene
+                specificity_results = {}
+                analyzer = ConservationAnalyzer(NCBIConnector(email, api_key))
+                
+                # Group primers by gene target
+                primers_by_gene = {}
+                for primer in all_primers:
+                    gene_target = getattr(primer, 'gene_target', 'Standard Design')
+                    if gene_target not in primers_by_gene:
+                        primers_by_gene[gene_target] = []
+                    primers_by_gene[gene_target].append(primer)
+                
+                # Test the best primer from each gene
+                for gene_target, gene_primers in primers_by_gene.items():
+                    if gene_primers:
+                        # Use the primer with the best penalty score
+                        best_primer = min(gene_primers, key=lambda p: p.penalty)
+                        
+                        # Create a test sequence from the primer binding region
+                        test_sequence = selected_sequence[best_primer.forward_start:best_primer.reverse_start + 1]
+                        
+                        if len(test_sequence) > 50:  # Ensure we have enough sequence for testing
+                            try:
+                                gene_specificity = analyzer.test_specificity(
+                                    test_sequence,
+                                    related_organisms,
+                                    max_similarity=0.7  # 70% similarity threshold
+                                )
+                                specificity_results[gene_target] = gene_specificity
+                            except Exception as e:
+                                st.warning(f"Could not test specificity for {gene_target}: {e}")
+                
+                # Store specificity results
+                st.session_state.specificity_results = specificity_results
+                
+                # Display specificity results
+                if specificity_results:
+                    st.subheader("Specificity Testing Results")
+                    
+                    specificity_data = []
+                    for gene_target, results in specificity_results.items():
+                        for organism, result in results.items():
+                            if 'error' not in result:
+                                specificity_data.append({
+                                    'Gene Target': gene_target,
+                                    'Test Organism': organism,
+                                    'Max Similarity': f"{result['max_similarity']:.1%}",
+                                    'Specific': '✅ Yes' if result['is_specific'] else '❌ No',
+                                    'Sequences Tested': result['sequences_tested']
+                                })
+                    
+                    if specificity_data:
+                        specificity_df = pd.DataFrame(specificity_data)
+                        st.dataframe(specificity_df, use_container_width=True)
+                        
+                        # Summary statistics
+                        total_tests = len(specificity_data)
+                        specific_tests = sum(1 for row in specificity_data if row['Specific'] == '✅ Yes')
+                        specificity_percentage = (specific_tests / total_tests) * 100 if total_tests > 0 else 0
+                        
+                        if specificity_percentage >= 80:
+                            st.success(f"🎯 Excellent specificity: {specific_tests}/{total_tests} tests passed ({specificity_percentage:.0f}%)")
+                        elif specificity_percentage >= 60:
+                            st.info(f"🎯 Good specificity: {specific_tests}/{total_tests} tests passed ({specificity_percentage:.0f}%)")
+                        else:
+                            st.warning(f"⚠️ Moderate specificity: {specific_tests}/{total_tests} tests passed ({specificity_percentage:.0f}%)")
+                
                 # Preview with gene targets
                 preview_data = []
                 for i, primer in enumerate(all_primers[:5]):
@@ -1766,7 +1840,7 @@ def perform_gene_targeted_design(organism_name, email, api_key, max_sequences, c
                     })
                 
                 st.dataframe(pd.DataFrame(preview_data), use_container_width=True)
-                st.info("📊 Go to Results tab to view detailed analysis with specific gene targets!")
+                st.info("📊 Go to Results tab to view detailed analysis with specific gene targets and specificity results!")
             else:
                 st.warning("No suitable primers found. Try adjusting parameters.")
                 
@@ -2009,6 +2083,70 @@ def perform_standard_design(organism_name, email, api_key, max_sequences, custom
                         if primers:
                             st.success(f"✅ Successfully designed {len(primers)} primer pairs!")
                             
+                            # Step 2: Specificity testing for standard primers
+                            st.write("🎯 **Step 2: Testing primer specificity...**")
+                            
+                            # Get related organisms for specificity testing
+                            related_organisms = get_related_organisms(organism_name)
+                            st.write(f"Testing against related organisms: {', '.join(related_organisms)}")
+                            
+                            # Test specificity for the best primers
+                            specificity_results = {}
+                            analyzer = ConservationAnalyzer(NCBIConnector(email, api_key))
+                            
+                            # Test the top 3 primers (best penalty scores)
+                            best_primers = sorted(primers, key=lambda p: p.penalty)[:3]
+                            
+                            for i, primer in enumerate(best_primers):
+                                # Create a test sequence from the primer binding region
+                                test_sequence = clean_sequence[primer.forward_start:primer.reverse_start + 1]
+                                
+                                if len(test_sequence) > 50:  # Ensure we have enough sequence for testing
+                                    try:
+                                        primer_specificity = analyzer.test_specificity(
+                                            test_sequence,
+                                            related_organisms,
+                                            max_similarity=0.7  # 70% similarity threshold
+                                        )
+                                        specificity_results[f"Primer Pair {i+1}"] = primer_specificity
+                                    except Exception as e:
+                                        st.warning(f"Could not test specificity for Primer Pair {i+1}: {e}")
+                            
+                            # Store specificity results
+                            st.session_state.specificity_results = specificity_results
+                            
+                            # Display specificity results
+                            if specificity_results:
+                                st.subheader("Specificity Testing Results")
+                                
+                                specificity_data = []
+                                for primer_name, results in specificity_results.items():
+                                    for organism, result in results.items():
+                                        if 'error' not in result:
+                                            specificity_data.append({
+                                                'Primer Pair': primer_name,
+                                                'Test Organism': organism,
+                                                'Max Similarity': f"{result['max_similarity']:.1%}",
+                                                'Specific': '✅ Yes' if result['is_specific'] else '❌ No',
+                                                'Sequences Tested': result['sequences_tested']
+                                            })
+                                
+                                if specificity_data:
+                                    specificity_df = pd.DataFrame(specificity_data)
+                                    st.dataframe(specificity_df, use_container_width=True)
+                                    
+                                    # Summary statistics
+                                    total_tests = len(specificity_data)
+                                    specific_tests = sum(1 for row in specificity_data if row['Specific'] == '✅ Yes')
+                                    specificity_percentage = (specific_tests / total_tests) * 100 if total_tests > 0 else 0
+                                    
+                                    if specificity_percentage >= 80:
+                                        st.success(f"🎯 Excellent specificity: {specific_tests}/{total_tests} tests passed ({specificity_percentage:.0f}%)")
+                                    elif specificity_percentage >= 60:
+                                        st.info(f"🎯 Good specificity: {specific_tests}/{total_tests} tests passed ({specificity_percentage:.0f}%)")
+                                    else:
+                                        st.warning(f"⚠️ Moderate specificity: {specific_tests}/{total_tests} tests passed ({specificity_percentage:.0f}%)")
+                            
                             preview_data = []
                             for i, primer in enumerate(primers[:5]):
                                 preview_data.append({
@@ -2019,7 +2157,7 @@ def perform_standard_design(organism_name, email, api_key, max_sequences, custom
                                 })
                             
                             st.dataframe(pd.DataFrame(preview_data), use_container_width=True)
-                            st.info("📊 Go to other tabs to view detailed analysis!")
+                            st.info("📊 Go to other tabs to view detailed analysis with specificity results!")
                         else:
                             st.warning("No suitable primers found. Try adjusting parameters.")
                 else:
@@ -2462,6 +2600,10 @@ def main():
                             
                             if primers:
                                 st.success(f"Successfully designed {len(primers)} primer pairs!")
+                                
+                                # Note about specificity testing for direct sequence input
+                                st.info("ℹ️ **Note**: Specificity testing is not available for direct sequence input since no organism information is provided. For specificity testing, please use the 'Organism Name' input method.")
+                                
                                 st.info("📊 Go to other tabs to view detailed analysis!")
                             else:
                                 st.warning("No suitable primers found with current parameters")
