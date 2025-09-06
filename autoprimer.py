@@ -338,12 +338,16 @@ class ComprehensiveTaxonomicAnalyzer:
         
         return None
     
-    def fetch_representative_sequences(self, subspecies_data, target_count=75):
+    def fetch_representative_sequences(self, subspecies_data, target_count=75, progress_callback=None):
         """Fetch representative sequences for each subspecies with geographic diversity"""
         st.info(f"🧬 **Step 2: Collecting sequences from {len(subspecies_data)} subspecies**")
         results = {}
         
-        for subspecies, data in subspecies_data.items():
+        total_subspecies = len(subspecies_data)
+        for current, (subspecies, data) in enumerate(subspecies_data.items(), 1):
+            if progress_callback:
+                progress_callback(current, total_subspecies)
+            
             st.write(f"Fetching sequences for {subspecies}...")
             
             sequence_ids = data['sequence_ids']
@@ -403,7 +407,7 @@ class ComprehensiveTaxonomicAnalyzer:
         
         return sampled
     
-    def perform_multiple_sequence_alignment(self, subspecies_sequences):
+    def perform_multiple_sequence_alignment(self, subspecies_sequences, progress_callback=None):
         """Align sequences across all subspecies to find conserved regions"""
         st.info("🧮 **Step 3: Analyzing sequence conservation across subspecies**")
         
@@ -430,12 +434,13 @@ class ComprehensiveTaxonomicAnalyzer:
         conserved_regions = self.find_conserved_regions_advanced(
             all_sequences, 
             sequence_metadata, 
-            subspecies_sequences
+            subspecies_sequences,
+            progress_callback=progress_callback
         )
         
         return conserved_regions
     
-    def find_conserved_regions_advanced(self, sequences, metadata, subspecies_data):
+    def find_conserved_regions_advanced(self, sequences, metadata, subspecies_data, progress_callback=None):
         """Advanced conserved region analysis with subspecies representation"""
         
         # Find the minimum length across all sequences
@@ -448,37 +453,68 @@ class ComprehensiveTaxonomicAnalyzer:
         
         st.write(f"Analyzing {len(positions)} windows of size {window_size} bp")
         
-        progress_bar = st.progress(0)
-        
-        for i, start_pos in enumerate(positions):
-            progress_bar.progress((i + 1) / len(positions))
-            
-            end_pos = start_pos + window_size
-            window_sequences = [seq[start_pos:end_pos] for seq in sequences]
-            
-            # Calculate conservation metrics
-            conservation_metrics = self.calculate_conservation_metrics(
-                window_sequences, 
-                metadata, 
-                subspecies_data
-            )
-            
-            # Check if this region meets conservation criteria
-            if (conservation_metrics['overall_conservation'] >= self.conservation_threshold and
-                conservation_metrics['subspecies_representation'] >= 0.8):  # 80% of subspecies represented
+        # Use provided progress callback or create default progress bar
+        if progress_callback:
+            for i, start_pos in enumerate(positions):
+                progress_callback(i + 1, len(positions))
                 
-                conserved_regions.append({
-                    'start': start_pos,
-                    'end': end_pos,
-                    'sequence': window_sequences[0],  # Representative sequence
-                    'conservation_score': conservation_metrics['overall_conservation'],
-                    'subspecies_coverage': conservation_metrics['subspecies_representation'],
-                    'sequence_count': len(window_sequences),
-                    'gc_content': self.calculate_gc_content(window_sequences[0]),
-                    'complexity_score': conservation_metrics['complexity_score']
-                })
-        
-        progress_bar.progress(1.0)
+                end_pos = start_pos + window_size
+                window_sequences = [seq[start_pos:end_pos] for seq in sequences]
+                
+                # Calculate conservation metrics
+                conservation_metrics = self.calculate_conservation_metrics(
+                    window_sequences, 
+                    metadata, 
+                    subspecies_data
+                )
+                
+                # Check if this region meets conservation criteria
+                if (conservation_metrics['overall_conservation'] >= self.conservation_threshold and
+                    conservation_metrics['subspecies_representation'] >= 0.8):  # 80% of subspecies represented
+                    
+                    conserved_regions.append({
+                        'start': start_pos,
+                        'end': end_pos,
+                        'sequence': window_sequences[0],  # Representative sequence
+                        'conservation_score': conservation_metrics['overall_conservation'],
+                        'subspecies_coverage': conservation_metrics['subspecies_representation'],
+                        'sequence_count': len(window_sequences),
+                        'gc_content': self.calculate_gc_content(window_sequences[0]),
+                        'complexity_score': conservation_metrics['complexity_score']
+                    })
+        else:
+            # Fallback to original progress bar implementation
+            progress_bar = st.progress(0)
+            
+            for i, start_pos in enumerate(positions):
+                progress_bar.progress((i + 1) / len(positions))
+                
+                end_pos = start_pos + window_size
+                window_sequences = [seq[start_pos:end_pos] for seq in sequences]
+                
+                # Calculate conservation metrics
+                conservation_metrics = self.calculate_conservation_metrics(
+                    window_sequences, 
+                    metadata, 
+                    subspecies_data
+                )
+                
+                # Check if this region meets conservation criteria
+                if (conservation_metrics['overall_conservation'] >= self.conservation_threshold and
+                    conservation_metrics['subspecies_representation'] >= 0.8):  # 80% of subspecies represented
+                    
+                    conserved_regions.append({
+                        'start': start_pos,
+                        'end': end_pos,
+                        'sequence': window_sequences[0],  # Representative sequence
+                        'conservation_score': conservation_metrics['overall_conservation'],
+                        'subspecies_coverage': conservation_metrics['subspecies_representation'],
+                        'sequence_count': len(window_sequences),
+                        'gc_content': self.calculate_gc_content(window_sequences[0]),
+                        'complexity_score': conservation_metrics['complexity_score']
+                    })
+            
+            progress_bar.progress(1.0)
         
         # Merge overlapping regions
         merged_regions = self.merge_overlapping_regions_advanced(conserved_regions)
@@ -598,7 +634,8 @@ class ComprehensiveTaxonomicAnalyzer:
     
     def compare_against_other_taxa(self, conserved_regions, target_genus, 
                                   test_genera=True, test_species=True, 
-                                  comparison_genera=None, comparison_species=None):
+                                  comparison_genera=None, comparison_species=None,
+                                  progress_callback=None):
         """Compare conserved regions against other genera and/or species for specificity"""
         
         st.info("🎯 **Step 4: Testing specificity against related organisms**")
@@ -617,7 +654,7 @@ class ComprehensiveTaxonomicAnalyzer:
             
             st.write(f"Testing against genera: {', '.join(comparison_genera)}")
             genus_specific_regions = self._test_specificity_against_taxa(
-                conserved_regions, comparison_genera, "genus"
+                conserved_regions, comparison_genera, "genus", progress_callback
             )
             specificity_results['genus_results'] = {
                 'tested_against': comparison_genera,
@@ -634,7 +671,7 @@ class ComprehensiveTaxonomicAnalyzer:
             
             st.write(f"Testing against species: {', '.join(comparison_species)}")
             species_specific_regions = self._test_specificity_against_taxa(
-                conserved_regions, comparison_species, "species"
+                conserved_regions, comparison_species, "species", progress_callback
             )
             specificity_results['species_results'] = {
                 'tested_against': comparison_species,
@@ -683,15 +720,19 @@ class ComprehensiveTaxonomicAnalyzer:
         
         return specificity_results
     
-    def _test_specificity_against_taxa(self, conserved_regions, comparison_taxa, test_type):
+    def _test_specificity_against_taxa(self, conserved_regions, comparison_taxa, test_type, progress_callback=None):
         """Helper method to test specificity against a list of taxa"""
         specific_regions = []
         
-        progress_bar = st.progress(0)
         total_regions = len(conserved_regions)
         
         for idx, region in enumerate(conserved_regions):
-            progress_bar.progress((idx + 1) / total_regions)
+            if progress_callback:
+                progress_callback(idx + 1, total_regions)
+            else:
+                # Fallback to original progress bar
+                progress_bar = st.progress(0)
+                progress_bar.progress((idx + 1) / total_regions)
             
             st.write(f"Testing {test_type} specificity for region {region['start']}-{region['end']}")
             
@@ -1770,6 +1811,10 @@ def main():
                                 
                                 st.write(f"🧬 Designing primers for {len(clean_sequence)} bp sequence...")
                                 
+                                # Add progress bar for primer design
+                                design_progress_bar = st.progress(0)
+                                design_status_text = st.empty()
+                                
                                 # Design primers
                                 try:
                                     primers = []
@@ -1777,11 +1822,14 @@ def main():
                                     
                                     if enable_t7_design:
                                         # T7 expression primer design
-                                        st.write("🧬 Designing T7 expression primers...")
+                                        design_status_text.text("🧬 Designing T7 expression primers...")
+                                        design_progress_bar.progress(0.1)
                                         
                                         t7_designer = T7PrimerDesigner()
                                         
                                         # Find ORFs first
+                                        design_status_text.text("🔍 Finding open reading frames...")
+                                        design_progress_bar.progress(0.2)
                                         orfs = t7_designer.find_orfs(clean_sequence, min_length=min_orf_length)
                                         
                                         if orfs:
@@ -1808,6 +1856,8 @@ def main():
                                                 }
                                             
                                             # Design T7 primers
+                                            design_status_text.text("🧬 Designing T7 expression primers...")
+                                            design_progress_bar.progress(0.4)
                                             t7_results, error = t7_designer.design_t7_expression_primers(
                                                 clean_sequence,
                                                 target_orf=target_orf,
@@ -1820,6 +1870,8 @@ def main():
                                                 st.success("T7 expression primers designed!")
                                                 
                                                 # Validate the construct
+                                                design_status_text.text("🔍 Validating expression construct...")
+                                                design_progress_bar.progress(0.6)
                                                 validation = t7_designer.validate_expression_construct(
                                                     t7_results['forward_primer'],
                                                     t7_results['reverse_primer'],
@@ -1875,8 +1927,12 @@ def main():
                                                 primers.extend(region_primers[:3])  # Take top 3 from each region
                                     elif not enable_t7_design:  # Only do standard design if T7 is not enabled
                                         # Standard primer design
+                                        design_status_text.text("🧬 Designing standard primers...")
+                                        design_progress_bar.progress(0.8)
                                         primers = designer.design_primers(clean_sequence, custom_params=custom_params)
                                     
+                                    design_status_text.text("✅ Primer design completed!")
+                                    design_progress_bar.progress(1.0)
                                     st.write(f"🔬 Primer design completed. Found {len(primers) if primers else 0} primer pairs.")
                                     
                                     st.session_state.primers_designed = primers
@@ -2015,9 +2071,17 @@ def main():
                                 st.success(f"✅ Discovered {len(subspecies_data)} subspecies for analysis")
                                 
                                 # Step 2: Fetch representative sequences
+                                st.info("🔄 **Step 2: Fetching representative sequences from each subspecies**")
+                                progress_bar = st.progress(0)
+                                status_text = st.empty()
+                                
                                 subspecies_sequences = analyzer.fetch_representative_sequences(
                                     subspecies_data, 
-                                    sequences_per_subspecies
+                                    sequences_per_subspecies,
+                                    progress_callback=lambda current, total: (
+                                        progress_bar.progress(current / total),
+                                        status_text.text(f"Fetching sequences: {current}/{total} subspecies")
+                                    )
                                 )
                                 
                                 if not subspecies_sequences:
@@ -2040,7 +2104,17 @@ def main():
                                 st.success(f"✅ Collected {total_sequences} sequences for conservation analysis")
                                 
                                 # Step 3: Multiple sequence alignment and conservation analysis
-                                conserved_regions = analyzer.perform_multiple_sequence_alignment(subspecies_sequences)
+                                st.info("🧮 **Step 3: Analyzing sequence conservation across subspecies**")
+                                progress_bar = st.progress(0)
+                                status_text = st.empty()
+                                
+                                conserved_regions = analyzer.perform_multiple_sequence_alignment(
+                                    subspecies_sequences,
+                                    progress_callback=lambda current, total: (
+                                        progress_bar.progress(current / total),
+                                        status_text.text(f"Analyzing conservation: {current}/{total} windows")
+                                    )
+                                )
                                 
                                 if not conserved_regions:
                                     st.warning("No conserved regions found with current thresholds")
@@ -2066,6 +2140,10 @@ def main():
                                 st.success(f"✅ Found {len(conserved_regions)} highly conserved regions")
                                 
                                 # Step 4: Specificity testing against other taxa
+                                st.info("🎯 **Step 4: Testing specificity against related taxa**")
+                                progress_bar = st.progress(0)
+                                status_text = st.empty()
+                                
                                 comparison_genera = None
                                 if custom_comparison_genera.strip():
                                     comparison_genera = [g.strip() for g in custom_comparison_genera.split(',')]
@@ -2080,7 +2158,11 @@ def main():
                                     test_genera=test_genus_specificity,
                                     test_species=test_species_specificity,
                                     comparison_genera=comparison_genera,
-                                    comparison_species=comparison_species
+                                    comparison_species=comparison_species,
+                                    progress_callback=lambda current, total: (
+                                        progress_bar.progress(current / total),
+                                        status_text.text(f"Testing specificity: {current}/{total} regions")
+                                    )
                                 )
 
                                 specific_regions = specificity_results['combined_specific_regions']
@@ -2147,8 +2229,13 @@ def main():
                                 
                                 st.write(f"Designing primers for top {len(top_regions)} regions...")
                                 
+                                # Add progress bar for primer design
+                                primer_progress_bar = st.progress(0)
+                                primer_status_text = st.empty()
+                                
                                 for i, region in enumerate(top_regions):
-                                    st.write(f"Designing primers for region {i+1}: {region['start']}-{region['end']}")
+                                    primer_progress_bar.progress((i + 1) / len(top_regions))
+                                    primer_status_text.text(f"Designing primers for region {i+1}/{len(top_regions)}: {region['start']}-{region['end']}")
                                     
                                     try:
                                         region_primers = designer.design_primers(
