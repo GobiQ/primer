@@ -1521,10 +1521,13 @@ def export_to_excel(primers: List[PrimerPair]) -> bytes:
     try:
         data = []
         for i, primer in enumerate(primers):
+            # Handle existing primer pairs that don't have gene_target attribute
+            gene_target = getattr(primer, 'gene_target', 'Standard Design')
+            
             if hasattr(primer, 'has_t7_promoter') and primer.has_t7_promoter:
                 data.append({
                     'Primer_Pair': i + 1,
-                    'Gene_Target': primer.gene_target,
+                    'Gene_Target': gene_target,
                     'Forward_T7_Sequence': primer.forward_seq,
                     'Reverse_T7_Sequence': primer.reverse_seq,
                     'Forward_Core_Sequence': primer.core_forward_seq,
@@ -1543,7 +1546,7 @@ def export_to_excel(primers: List[PrimerPair]) -> bytes:
             else:
                 data.append({
                     'Primer_Pair': i + 1,
-                    'Gene_Target': primer.gene_target,
+                    'Gene_Target': gene_target,
                     'Forward_Sequence': primer.forward_seq,
                     'Reverse_Sequence': primer.reverse_seq,
                     'Forward_Tm': round(primer.forward_tm, 2),
@@ -1752,9 +1755,11 @@ def perform_gene_targeted_design(organism_name, email, api_key, max_sequences, c
                 # Preview with gene targets
                 preview_data = []
                 for i, primer in enumerate(all_primers[:5]):
+                    # Handle existing primer pairs that don't have gene_target attribute
+                    gene_target = getattr(primer, 'gene_target', 'Standard Design')
                     preview_data.append({
                         'Pair': i + 1,
-                        'Gene Target': primer.gene_target,
+                        'Gene Target': gene_target,
                         'Forward': primer.forward_seq[:30] + '...' if len(primer.forward_seq) > 30 else primer.forward_seq,
                         'Reverse': primer.reverse_seq[:30] + '...' if len(primer.reverse_seq) > 30 else primer.reverse_seq,
                         'Product Size': f"{primer.product_size} bp"
@@ -2594,10 +2599,13 @@ def main():
         
         data = []
         for i, primer in enumerate(primers):
+            # Handle existing primer pairs that don't have gene_target attribute
+            gene_target = getattr(primer, 'gene_target', 'Standard Design')
+            
             if hasattr(primer, 'has_t7_promoter') and primer.has_t7_promoter:
                 row = {
                     'Pair': i + 1,
-                    'Gene Target': primer.gene_target,
+                    'Gene Target': gene_target,
                     'Forward (with T7)': primer.forward_seq,
                     'Reverse (with T7)': primer.reverse_seq,
                     'Core Forward': primer.core_forward_seq,
@@ -2610,7 +2618,7 @@ def main():
             else:
                 row = {
                     'Pair': i + 1,
-                    'Gene Target': primer.gene_target,
+                    'Gene Target': gene_target,
                     'Forward Sequence': primer.forward_seq,
                     'Reverse Sequence': primer.reverse_seq,
                     'Forward Tm': f"{primer.forward_tm:.1f}°C",
@@ -3033,10 +3041,13 @@ def main():
             try:
                 data = []
                 for i, primer in enumerate(primers):
+                    # Handle existing primer pairs that don't have gene_target attribute
+                    gene_target = getattr(primer, 'gene_target', 'Standard Design')
+                    
                     if hasattr(primer, 'has_t7_promoter') and primer.has_t7_promoter:
                         row = {
                             'Primer_Pair': i + 1,
-                            'Gene_Target': primer.gene_target,
+                            'Gene_Target': gene_target,
                             'Forward_T7_Sequence': primer.forward_seq,
                             'Reverse_T7_Sequence': primer.reverse_seq,
                             'Forward_Core_Sequence': primer.core_forward_seq,
@@ -3055,7 +3066,7 @@ def main():
                     else:
                         row = {
                             'Primer_Pair': i + 1,
-                            'Gene_Target': primer.gene_target,
+                            'Gene_Target': gene_target,
                             'Forward_Sequence': primer.forward_seq,
                             'Reverse_Sequence': primer.reverse_seq,
                             'Forward_Tm': round(primer.forward_tm, 2),
