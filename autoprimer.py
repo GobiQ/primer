@@ -197,16 +197,30 @@ def init_session_state():
         st.session_state.sequence_info = {}
 
 def get_organism_suggestions():
-    """Get common organism name suggestions for the search"""
-    return [
-        "Homo sapiens", "Mus musculus", "Rattus norvegicus", "Drosophila melanogaster",
-        "Caenorhabditis elegans", "Saccharomyces cerevisiae", "Escherichia coli",
-        "Bacillus subtilis", "Staphylococcus aureus", "Pseudomonas aeruginosa",
-        "Arabidopsis thaliana", "Oryza sativa", "Zea mays", "Solanum lycopersicum",
-        "Nicotiana tabacum", "Triticum aestivum", "Hordeum vulgare", "Glycine max",
-        "Medicago truncatula", "Populus trichocarpa", "Vitis vinifera",
-        "Chlamydomonas reinhardtii", "Physcomitrella patens", "Marchantia polymorpha"
-    ]
+    """Get agricultural pest and pathogen suggestions for the search"""
+    return {
+        "Arthropods": {
+            "🕷️ Mites": ["Aculops lycopersici", "Tetranychus urticae", "Polyphagotarsonemus latus"],
+            "🐛 Other, walking": ["Pemphigus betae", "Thrips tabaci", "Liriomyza trifolii", "Planococcus citri"],
+            "🦟 Other, flying": ["Bemisia tabaci", "Bradysia impatiens", "Diaphorina citri"]
+        },
+        "Fungi": {
+            "🍄 Fusarium species": ["Fusarium oxysporum", "Fusarium solani", "Fusarium proliferatum", "Fusarium"],
+            "🍄 Botrytis species": ["Botrytis cinerea", "Botrytis"],
+            "🍄 Powdery mildew": ["Golovinomyces ambrosiae", "Golovinomyces"]
+        },
+        "Pseudofungi/Oomycetes": {
+            "💧 Water molds": ["Pythium myriotylum", "Pythium"]
+        },
+        "Viruses": {
+            "🦠 Plant viruses": ["Beet curly top virus", "Alfalfa mosaic virus", "Arabis mosaic virus", 
+                               "Lettuce chlorosis virus", "Cannabis cryptic virus", "Tomato ringspot virus",
+                               "Tomato mosaic virus", "Tobacco mosaic virus"]
+        },
+        "Viroids": {
+            "🧬 RNA pathogens": ["Hop latent viroid"]
+        }
+    }
 
 def create_primer_visualization(primers: List[PrimerPair]):
     """Create interactive visualizations for primer pairs"""
@@ -436,22 +450,31 @@ def main():
         
         if input_method == "Organism Name":
             st.subheader("Search by Organism")
-            st.info("💡 **Tip:** Enter the scientific name (e.g., 'Homo sapiens') for best results. You can also search for specific genes within an organism using the advanced options below.")
+            st.info("💡 **Tip:** Enter the scientific name (e.g., 'Fusarium oxysporum') for best results. You can also search for specific genes within an organism using the advanced options below.")
             
             col1, col2 = st.columns([2, 1])
             with col1:
                 organism_name = st.text_input("Enter organism name:", 
-                                            placeholder="e.g., Homo sapiens, Arabidopsis thaliana, Escherichia coli")
+                                            placeholder="e.g., Fusarium oxysporum, Tetranychus urticae, Beet curly top virus")
                 
                 # Show organism suggestions
                 suggestions = get_organism_suggestions()
-                st.write("**Common organisms:**")
-                cols = st.columns(4)
-                for i, suggestion in enumerate(suggestions[:12]):  # Show first 12
-                    with cols[i % 4]:
-                        if st.button(suggestion, key=f"suggest_{i}"):
-                            st.session_state.organism_name = suggestion
-                            st.rerun()
+                st.write("**Agricultural Pests & Pathogens:**")
+                
+                for category, subcategories in suggestions.items():
+                    st.write(f"**{category}**")
+                    
+                    for subcategory, organisms in subcategories.items():
+                        st.write(f"*{subcategory}*")
+                        
+                        # Create columns for organisms in this subcategory
+                        cols = st.columns(min(len(organisms), 4))
+                        for i, organism in enumerate(organisms):
+                            with cols[i % 4]:
+                                if st.button(organism, key=f"suggest_{category}_{subcategory}_{i}", help=f"Click to search for {organism}"):
+                                    st.session_state.organism_name = organism
+                                    st.rerun()
+                        st.write("")  # Add spacing between subcategories
             with col2:
                 max_genomes = st.number_input("Max genomes to search", min_value=1, max_value=20, value=5)
             
