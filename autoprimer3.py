@@ -12,11 +12,22 @@ def get_related_organisms(target_organism):
         'rhizoctonia': ['Fusarium oxysporum', 'Pythium ultimum', 'Sclerotinia sclerotiorum'],
         'aspergillus': ['Penicillium chrysogenum', 'Trichoderma harzianum', 'Fusarium oxysporum'],
         'penicillium': ['Aspergillus niger', 'Trichoderma harzianum', 'Fusarium oxysporum'],
+        'sclerotinia': ['Botrytis cinerea', 'Fusarium oxysporum', 'Rhizoctonia solani'],
+        'phytophthora': ['Pythium ultimum', 'Fusarium oxysporum', 'Rhizoctonia solani'],
+        'erysiphe': ['Puccinia graminis', 'Ustilago maydis', 'Botrytis cinerea'],
+        'puccinia': ['Ustilago maydis', 'Erysiphe necator', 'Phytophthora infestans'],
+        'ustilago': ['Puccinia graminis', 'Erysiphe necator', 'Fusarium oxysporum'],
         
         # Arthropods
         'tetranychus': ['Panonychus ulmi', 'Oligonychus ilicis', 'Aculops lycopersici'],
         'bemisia': ['Trialeurodes vaporariorum', 'Aphis gossypii', 'Myzus persicae'],
         'thrips': ['Frankliniella occidentalis', 'Thrips palmi', 'Scirtothrips dorsalis'],
+        'myzus': ['Aphis gossypii', 'Bemisia tabaci', 'Trialeurodes vaporariorum'],
+        'aphis': ['Myzus persicae', 'Bemisia tabaci', 'Diaphorina citri'],
+        'diaphorina': ['Aphis gossypii', 'Myzus persicae', 'Bemisia tabaci'],
+        'frankliniella': ['Thrips tabaci', 'Thrips palmi', 'Scirtothrips dorsalis'],
+        'polyphagotarsonemus': ['Tetranychus urticae', 'Panonychus ulmi', 'Aculops lycopersici'],
+        'aculops': ['Tetranychus urticae', 'Panonychus ulmi', 'Polyphagotarsonemus latus'],
         
         # Viruses - KEY ADDITION
         'coronavirus': ['Influenza A virus', 'Rhinovirus', 'Adenovirus', 'Respiratory syncytial virus'],
@@ -24,11 +35,28 @@ def get_related_organisms(target_organism):
         'influenza': ['Coronavirus', 'Rhinovirus', 'Parainfluenza virus', 'Respiratory syncytial virus'],
         'tobacco mosaic': ['Tomato mosaic virus', 'Cucumber mosaic virus', 'Potato virus X'],
         'tomato': ['Tobacco mosaic virus', 'Cucumber mosaic virus', 'Potato virus Y'],
+        'potato virus': ['Tobacco mosaic virus', 'Cucumber mosaic virus', 'Tomato mosaic virus'],
+        'cucumber mosaic': ['Tobacco mosaic virus', 'Tomato mosaic virus', 'Potato virus Y'],
+        'beet curly top': ['Tomato mosaic virus', 'Cucumber mosaic virus', 'Potato virus Y'],
+        'arabis mosaic': ['Tomato mosaic virus', 'Cucumber mosaic virus', 'Alfalfa mosaic virus'],
+        'alfalfa mosaic': ['Cucumber mosaic virus', 'Arabis mosaic virus', 'Potato virus Y'],
+        'lettuce chlorosis': ['Cucumber mosaic virus', 'Tomato mosaic virus', 'Potato virus Y'],
+        'cannabis cryptic': ['Cucumber mosaic virus', 'Arabis mosaic virus', 'Alfalfa mosaic virus'],
         
         # Bacteria
         'ralstonia': ['Pseudomonas syringae', 'Xanthomonas campestris', 'Erwinia amylovora'],
         'erwinia': ['Pseudomonas syringae', 'Xanthomonas campestris', 'Ralstonia solanacearum'],
-        'agrobacterium': ['Rhizobium leguminosarum', 'Sinorhizobium meliloti', 'Pseudomonas syringae']
+        'agrobacterium': ['Rhizobium leguminosarum', 'Sinorhizobium meliloti', 'Pseudomonas syringae'],
+        'pseudomonas': ['Xanthomonas campestris', 'Erwinia amylovora', 'Ralstonia solanacearum'],
+        'xanthomonas': ['Pseudomonas syringae', 'Erwinia amylovora', 'Ralstonia solanacearum'],
+        
+        # Oomycetes
+        'pythium': ['Phytophthora infestans', 'Fusarium oxysporum', 'Rhizoctonia solani'],
+        'phytophthora': ['Pythium ultimum', 'Fusarium oxysporum', 'Rhizoctonia solani'],
+        
+        # Viroids
+        'hop latent': ['Cucumber mosaic virus', 'Arabis mosaic virus', 'Alfalfa mosaic virus'],
+        'viroid': ['Cucumber mosaic virus', 'Arabis mosaic virus', 'Alfalfa mosaic virus']
     }
     
     # Find matching genus
@@ -77,18 +105,28 @@ def get_organism_suggestions_with_gene_targets():
                     "Pathogenicity": ["CUT1 (cutinase)", "PEL2 (pectinase)", "XYL1 (xylanase)", "CEL1 (cellulase)", "AMY1 (amylase)"],
                     "Secondary metabolites": ["ZEA1-2 (zearalenone)", "TRI cluster", "AUR1 (aurofusarin)", "CUL1 (culmorin)", "BUT1 (butenolide)"],
                     "Survival genes": ["HSP70 (heat shock)", "SOD1 (superoxide dismutase)", "CAT1 (catalase)", "GPX1 (glutathione peroxidase)", "TRX1 (thioredoxin)"]
+                }),
+                ("Fusarium root rot", "Fusarium solani", {
+                    "Essential genes": ["ACT1", "TUB2", "EF1A", "RPB2", "HSP70"],
+                    "Pathogenicity factors": ["FSOL1-10 (F. solani specific)", "CUT1-5 (cutinases)", "PEL1-3 (pectate lyases)", "XYL1-2 (xylanases)", "CEL1-2 (cellulases)"],
+                    "Secondary metabolites": ["FUM1-3 (fumonisin)", "TRI1-16 (trichothecene)", "ZEA1-2 (zearalenone)", "FUS1-5 (fusarin)", "BIK1-3 (bikaverin)"],
+                    "Resistance mechanisms": ["CYP51A1-B1", "SDH1-4", "ABC1-20", "MFS1-15", "GST1-10"]
+                }),
+                ("Fusarium ear rot", "Fusarium proliferatum", {
+                    "Essential genes": ["ACT1", "TUB2", "EF1A", "RPB2", "ITS1-2"],
+                    "Fumonisin biosynthesis": ["FUM1-21 (fumonisin cluster)", "FUM8 (polyketide synthase)", "FUM6 (aminotransferase)", "FUM3 (C-5 oxygenase)", "FUM19 (transporter)"],
+                    "Pathogenicity": ["FPR1-10 (F. proliferatum specific)", "CUT1-3", "PEL1-2", "XYL1", "CEL1"],
+                    "Host interaction": ["HOST1-5 (host-specific)", "ADH1-3 (adhesion)", "INV1-2 (invasion)", "COL1-3 (colonization)"]
                 })
             ],
-            "Botrytis species": [
+            "Other fungi": [
                 ("Gray mold", "Botrytis cinerea", {
                     "Essential genes": ["ACT1", "TUB2", "EF1A", "RPB2", "HSP70"],
                     "Pathogenicity factors": ["BCG1 (α-galactosidase)", "BMP1 (metalloprotease)", "BCP1 (cerato-platanin)", "BOA1 (botrydial)", "BCR1 (ABC transporter)"],
                     "Cell wall degrading": ["BcPG1-6 (polygalacturonases)", "BcPME1 (pectin methylesterase)", "BcXYL1 (xylanase)", "BcCEL1 (cellulase)", "BcCUT1 (cutinase)"],
                     "Secondary metabolites": ["BOT1-5 (botrydial cluster)", "DHN1 (1,8-dihydroxynaphthalene)", "PKS1-13 (polyketide synthases)", "NPS1-6 (nonribosomal peptide synthetases)"],
                     "Resistance mechanisms": ["ABC1-50 (ABC transporters)", "MFS1-20 (major facilitator superfamily)", "CYP1-20 (cytochrome P450s)", "GST1-10 (glutathione S-transferases)"]
-                })
-            ],
-            "Other fungi": [
+                }),
                 ("White mold", "Sclerotinia sclerotiorum", {
                     "Essential genes": ["ACT1", "TUB2", "EF1A", "RPB2", "CAL1"],
                     "Pathogenicity factors": ["SSPG1 (polygalacturonase)", "SsPME1 (pectin methylesterase)", "SsCUT1 (cutinase)", "SsNEP1 (necrosis-inducing protein)", "SsCP1 (cysteine protease)"],
@@ -107,6 +145,18 @@ def get_organism_suggestions_with_gene_targets():
                     "Pathogenicity": ["ENH1 (haustorium formation)", "ENC1 (conidiophore development)", "ENS1 (spore germination)", "ENP1 (penetration)", "ENA1 (appressorium formation)"],
                     "Effectors": ["CSEP1-100 (candidate secreted effector proteins)", "ENE1-50 (E. necator effectors)", "AVR1-10 (avirulence candidates)", "HAU1-20 (haustorial expressed)"],
                     "Sterol biosynthesis": ["CYP51A1", "CYP51B1", "ERG1 (squalene epoxidase)", "ERG7 (lanosterol synthase)", "ERG11 (sterol 14α-demethylase)"]
+                }),
+                ("Rust disease", "Puccinia graminis", {
+                    "Essential genes": ["ACT1", "TUB1", "EF1A", "RPB1", "COI"],
+                    "Pathogenicity factors": ["PG1-50 (P. graminis specific)", "AVR1-20 (avirulence genes)", "EFF1-30 (effector proteins)", "SEC1-10 (secreted proteins)", "HST1-5 (host-specific toxins)"],
+                    "Life cycle genes": ["TEL1-5 (teliospore formation)", "BAS1-3 (basidiospore)", "PYC1-2 (pycniospore)", "AEC1-3 (aeciospore)", "URE1-5 (urediniospore)"],
+                    "Host interaction": ["HOST1-10 (host recognition)", "PEN1-5 (penetration)", "COL1-8 (colonization)", "SPR1-5 (sporulation)"]
+                }),
+                ("Smut disease", "Ustilago maydis", {
+                    "Essential genes": ["ACT1", "TUB1", "EF1A", "RPB1", "HSP70"],
+                    "Pathogenicity factors": ["UM1-100 (U. maydis specific)", "EFF1-50 (effector proteins)", "SEC1-20 (secreted proteins)", "CWP1-10 (cell wall proteins)", "ENZ1-15 (enzymes)"],
+                    "Mating and development": ["MAT1-2 (mating type)", "B1-6 (b locus)", "A1-4 (a locus)", "CLP1 (clamp connection)", "DIC1-3 (dikaryon formation)"],
+                    "Host specificity": ["HOST1-8 (host recognition)", "MAI1-5 (maize interaction)", "TIS1-3 (tissue specificity)", "SIZ1-2 (size control)"]
                 })
             ]
         },
@@ -125,9 +175,21 @@ def get_organism_suggestions_with_gene_targets():
                     "Resistance genes": ["CYP1-50", "GST1-20", "EST1-15", "P450-1-25", "MFO1-10 (mixed function oxidases)"],
                     "Cold tolerance": ["HSP70 (heat shock protein)", "AFP1-3 (antifreeze proteins)", "TRE1 (trehalose)", "GLY1-2 (glycerol)", "CRY1-2 (cryoprotectants)"],
                     "Diapause genes": ["DIA1-5 (diapause-associated)", "CLK (clock)", "PER (period)", "TIM (timeless)", "CYC (cycle)"]
+                }),
+                ("Broad mite", "Polyphagotarsonemus latus", {
+                    "Essential genes": ["ACT1", "TUB1", "EF1A", "RPL32", "COI"],
+                    "Host range genes": ["HOST1-10 (host specificity)", "DET1-5 (detoxification)", "ADH1-3 (adhesion)", "PEN1-2 (penetration)", "COL1-3 (colonization)"],
+                    "Resistance mechanisms": ["CYP1-30", "GST1-15", "EST1-10", "ABC1-20", "MFS1-10"],
+                    "Development": ["JH1-2", "ECR", "USP", "E74", "BR-C"]
+                }),
+                ("Russet mite", "Aculops lycopersici", {
+                    "Essential genes": ["ACT1", "TUB1", "EF1A", "RPL32", "COI"],
+                    "Tomato adaptation": ["TOM1-5 (tomato-specific)", "LYC1-3 (lycopersicon)", "SOL1-2 (solanum)", "ADH1-2 (adhesion)", "PEN1 (penetration)"],
+                    "Resistance genes": ["CYP1-25", "GST1-12", "EST1-8", "ABC1-15", "MFS1-8"],
+                    "Feeding behavior": ["FED1-5 (feeding)", "SAL1-3 (salivary)", "GUT1-3 (gut-specific)", "DIG1-2 (digestion)"]
                 })
             ],
-            "Whiteflies": [
+            "Sucking insects": [
                 ("Silverleaf whitefly", "Bemisia tabaci", {
                     "Essential genes": ["ACT1", "TUB1", "EF1A", "COI", "16S rRNA"],
                     "Insecticide resistance": ["CYP6CM1", "CYP4C64", "CYP4G61", "CYP4G70", "GST1-15", "EST1-10", "ABC1-30", "nAChR (nicotinic receptor)", "VGSC (sodium channel)"],
@@ -139,9 +201,7 @@ def get_organism_suggestions_with_gene_targets():
                     "Essential genes": ["ACT1", "TUB1", "EF1A", "COI", "COII"],
                     "Development markers": ["JH (juvenile hormone)", "ECR (ecdysone receptor)", "CHI1-3 (chitinase)", "CHS1-2 (chitin synthase)", "TRE1-2 (trehalase)"],
                     "Host plant interaction": ["SUC1-3 (sucrase)", "APH1-2 (aphid-like stylet)", "SAL1-3 (salivary)", "GUT1-5 (gut-specific)", "PHE1-3 (phenoloxidase)"]
-                })
-            ],
-            "Aphids": [
+                }),
                 ("Green peach aphid", "Myzus persicae", {
                     "Essential genes": ["ACT1", "TUB1", "EF1A", "COI", "COII"],
                     "Insecticide resistance": ["MACE (modified acetylcholinesterase)", "kdr (knockdown resistance)", "RDL (GABA receptor)", "CYP6CY3", "CYP4CJ1", "GST1-10", "EST1-8", "ABC1-20"],
@@ -153,6 +213,12 @@ def get_organism_suggestions_with_gene_targets():
                     "Essential genes": ["ACT1", "TUB1", "EF1A", "COI", "16S rRNA"],
                     "Host specialization": ["HSP1-10 (host selection)", "DET1-5 (detoxification)", "FED1-3 (feeding behavior)", "GOT1-5 (gossypol tolerance)", "TAN1-3 (tannin tolerance)"],
                     "Polyphenism": ["WIN1-5 (wing development)", "ALT1-3 (alternate morph)", "ENV1-5 (environmental response)", "DEN1-3 (density-dependent)", "PHO1-3 (photoperiod)"]
+                }),
+                ("Asian citrus psyllid", "Diaphorina citri", {
+                    "Essential genes": ["ACT1", "TUB1", "EF1A", "COI", "16S rRNA"],
+                    "CLas transmission": ["CLas1-10 (Candidatus Liberibacter asiaticus)", "HSP1-5 (heat shock)", "SEC1-5 (secretion)", "TRP1-3 (transporter)", "BIND1-3 (binding)"],
+                    "Citrus adaptation": ["CIT1-5 (citrus-specific)", "RUT1-3 (rutaceae)", "FLAV1-2 (flavonoid)", "TERP1-2 (terpene)", "OIL1-2 (essential oil)"],
+                    "Development": ["JH1-2", "ECR", "USP", "E74", "BR-C"]
                 })
             ],
             "Thrips": [
@@ -207,6 +273,15 @@ def get_organism_suggestions_with_gene_targets():
                     "EPS production": ["epsA-R", "exopolysaccharide", "biofilm", "wilt induction", "vascular plugging"],
                     "Phylotypes": ["phylotype I-IV", "sequevars", "biovars 1-5", "race 1-5", "geographic distribution"]
                 })
+            ],
+            "Common bacteria": [
+                ("Crown gall", "Agrobacterium tumefaciens", {
+                    "Essential genes": ["16S rRNA", "gyrA", "gyrB", "rpoB", "atpD"],
+                    "Ti plasmid genes": ["virA-G (virulence)", "tms1-2 (tumor morphology)", "tmr (tumor morphology)", "tss (tumor size)", "ipt (isopentenyl transferase)"],
+                    "T-DNA transfer": ["T-DNA border sequences", "overdrive sequences", "virD1-4 (T-DNA processing)", "virE1-2 (T-DNA protection)", "virB1-11 (T4SS)"],
+                    "Opine catabolism": ["occ (octopine)", "nop (nopaline)", "agr (agropine)", "man (mannopine)", "suc (succinamopine)"],
+                    "Plant interaction": ["chvA-B (chromosomal virulence)", "exoC (exopolysaccharide)", "cel (cellulose)", "att (attachment)", "biofilm formation"]
+                })
             ]
         },
 
@@ -226,6 +301,41 @@ def get_organism_suggestions_with_gene_targets():
                 })
             ],
             "Other viruses": [
+                ("Beet curly top virus", "Beet curly top virus", {
+                    "Essential genes": ["C1 (replication initiator)", "C2 (transcription activator)", "C3 (replication enhancer)", "C4 (pathogenicity)", "V1 (coat protein)", "V2 (movement protein)"],
+                    "Geminivirus features": ["circular ssDNA", "bipartite genome", "rolling circle replication", "transcription activation", "silencing suppression"],
+                    "Host range": ["beet", "tomato", "pepper", "bean", "spinach", "squash", "cucumber"],
+                    "Vector transmission": ["beet leafhopper", "Circulifer tenellus", "persistent transmission", "propagative transmission"],
+                    "Pathogenicity factors": ["C4 (symptom determinant)", "C2 (transcription activator)", "V2 (movement protein)", "silencing suppression", "host range determination"]
+                }),
+                ("Arabis mosaic virus", "Arabis mosaic virus", {
+                    "Essential genes": ["RNA1 (replication)", "RNA2 (movement)", "CP (coat protein)", "MP (movement protein)", "Rep (replicase)"],
+                    "Nepovirus features": ["bipartite RNA genome", "polyprotein processing", "3' poly(A) tail", "5' VPg", "icosahedral particles"],
+                    "Host range": ["arabis", "strawberry", "raspberry", "grapevine", "tobacco", "cucumber"],
+                    "Vector transmission": ["nematode vectors", "Xiphinema diversicaudatum", "X. coxi", "soil transmission", "seed transmission"],
+                    "Pathogenicity": ["systemic infection", "mosaic symptoms", "stunting", "yield reduction", "latent infection"]
+                }),
+                ("Alfalfa mosaic virus", "Alfalfa mosaic virus", {
+                    "Essential genes": ["RNA1 (P1, P2)", "RNA2 (P3)", "RNA3 (MP, CP)", "P1 (replicase)", "P2 (helicase)", "P3 (polymerase)", "MP (movement protein)", "CP (coat protein)"],
+                    "Alfamovirus features": ["tripartite RNA genome", "bacilliform particles", "coat protein requirement", "genome activation", "replication"],
+                    "Host range": ["alfalfa", "tobacco", "tomato", "pepper", "bean", "cucumber", "lettuce"],
+                    "Vector transmission": ["aphid transmission", "non-persistent", "stylet-borne", "Myzus persicae", "Aphis gossypii"],
+                    "Pathogenicity": ["mosaic symptoms", "yellowing", "stunting", "systemic infection", "yield reduction"]
+                }),
+                ("Cannabis cryptic virus", "Cannabis cryptic virus", {
+                    "Essential genes": ["RNA1 (RdRp)", "RNA2 (CP)", "RdRp (RNA-dependent RNA polymerase)", "CP (coat protein)", "MP (movement protein)"],
+                    "Cryptic virus features": ["persistent infection", "latent infection", "no symptoms", "vertical transmission", "seed transmission"],
+                    "Host specificity": ["Cannabis sativa", "hemp", "marijuana", "endophytic", "systemic infection"],
+                    "Transmission": ["seed transmission", "pollen transmission", "no vector", "vertical transmission", "graft transmission"],
+                    "Molecular features": ["dsRNA genome", "icosahedral particles", "persistent infection", "no cell-to-cell movement", "replication in cytoplasm"]
+                }),
+                ("Lettuce chlorosis virus", "Lettuce chlorosis virus", {
+                    "Essential genes": ["RNA1 (replication)", "RNA2 (movement)", "P1 (replicase)", "P2 (helicase)", "P3 (polymerase)", "MP (movement protein)", "CP (coat protein)"],
+                    "Crinivirus features": ["bipartite RNA genome", "whitefly transmission", "phloem-limited", "long flexuous particles", "genome activation"],
+                    "Host range": ["lettuce", "tomato", "pepper", "cucumber", "melon", "squash", "bean"],
+                    "Vector transmission": ["whitefly transmission", "Bemisia tabaci", "Trialeurodes vaporariorum", "semi-persistent", "circulative"],
+                    "Pathogenicity": ["chlorosis", "yellowing", "stunting", "phloem necrosis", "yield reduction"]
+                }),
                 ("Potato virus Y", "Potato virus Y", {
                     "Essential genes": ["P1", "HC-Pro", "P3", "6K1", "CI", "6K2", "VPg", "NIa-Pro", "NIb", "CP"],
                     "Silencing suppression": ["HC-Pro (helper component proteinase)", "P1", "RNA silencing suppression", "siRNA binding", "RISC complex"],
@@ -244,13 +354,20 @@ def get_organism_suggestions_with_gene_targets():
         },
 
         "🦠 Oomycetes": {
-            "Pythium species": [
+            "Water molds": [
                 ("Pythium root rot", "Pythium ultimum", {
                     "Essential genes": ["ACT1", "TUB1", "EF1A", "RPB1", "COX1"],
                     "Pathogenicity factors": ["PyCBEL1-10 (cellulose-binding elicitor lectin)", "PyPL1-8 (pectate lyases)", "PyCUT1-3 (cutinases)", "PyPRO1-5 (proteases)", "PyLIP1-3 (lipases)"],
                     "Zoospore motility": ["FLA1-20 (flagellar proteins)", "DYN1-5 (dynein)", "KIN1-8 (kinesin)", "TUB1-3 (tubulins)", "MOT1-10 (motility)"],
                     "Oospore formation": ["OOS1-15 (oospore genes)", "SEX1-5 (sexual reproduction)", "MAT1-3 (mating type)", "GER1-5 (germination)", "DOR1-3 (dormancy)"],
                     "Cell wall synthesis": ["CEL1-5 (cellulose synthase)", "CHI1-3 (chitinase)", "GEL1-3 (β-1,3-glucanase)", "CHS1 (chitin synthase)", "CAL1 (callose synthase)"]
+                }),
+                ("Pythium damping-off", "Pythium myriotylum", {
+                    "Essential genes": ["ACT1", "TUB1", "EF1A", "RPB1", "COX1"],
+                    "Pathogenicity factors": ["PmCBEL1-8 (cellulose-binding elicitor lectin)", "PmPL1-6 (pectate lyases)", "PmCUT1-2 (cutinases)", "PmPRO1-4 (proteases)", "PmLIP1-2 (lipases)"],
+                    "Damping-off factors": ["DAMP1-5 (damping-off specific)", "ROOT1-3 (root infection)", "SEED1-2 (seed rot)", "STEM1-2 (stem rot)", "CROWN1 (crown rot)"],
+                    "Host range": ["HOST1-10 (host specificity)", "CROP1-5 (crop-specific)", "SOL1-3 (solanaceous)", "CUC1-2 (cucurbit)", "LEG1-2 (legume)"],
+                    "Environmental adaptation": ["TEMP1-3 (temperature)", "MOIST1-2 (moisture)", "pH1-2 (pH tolerance)", "SALT1 (salt tolerance)", "ANA1 (anaerobic)"]
                 })
             ]
         },
