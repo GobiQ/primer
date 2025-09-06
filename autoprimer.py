@@ -105,6 +105,29 @@ class NCBIConnector:
         except Exception as e:
             st.error(f"Error fetching sequence info for {seq_id}: {e}")
             return {}
+    
+    def fetch_genome_assembly_info(self, assembly_id: str) -> Dict:
+        """Fetch genome assembly information from NCBI"""
+        try:
+            time.sleep(self.rate_limit_delay)
+            # Use esummary to get assembly information
+            handle = Entrez.esummary(db="assembly", id=assembly_id)
+            summary = Entrez.read(handle)
+            handle.close()
+            
+            if summary and len(summary) > 0:
+                assembly = summary[0]
+                return {
+                    "id": assembly_id,
+                    "description": assembly.get("AssemblyName", "Unknown Assembly"),
+                    "length": "N/A",  # Assembly length is complex to get
+                    "organism": assembly.get("SpeciesName", "Unknown"),
+                    "assembly_accession": assembly.get("AssemblyAccession", assembly_id)
+                }
+            return {}
+        except Exception as e:
+            st.error(f"Error fetching assembly info for {assembly_id}: {e}")
+            return {}
 
 class PrimerDesigner:
     """Main primer design class with advanced parameters"""
@@ -565,6 +588,9 @@ def main():
                             if not genome_ids:
                                 st.info("No genomes found, searching nucleotide database...")
                                 genome_ids = ncbi.search_sequences(search_query, database="nucleotide", max_results=max_genomes)
+                                database_used = "nucleotide"
+                            else:
+                                database_used = "genome"
                             
                             if genome_ids:
                                 st.success(f"Found {len(genome_ids)} genome entries!")
@@ -575,13 +601,24 @@ def main():
                                 
                                 for i, genome_id in enumerate(genome_ids):
                                     with st.spinner(f"Fetching genome {i+1}/{len(genome_ids)}..."):
-                                        info = ncbi.fetch_sequence_info(genome_id, database="genome")
-                                        if info:
+                                        try:
+                                            # For genome database, we need to get assembly info differently
+                                            info = ncbi.fetch_genome_assembly_info(genome_id)
+                                            if info:
+                                                genome_info.append({
+                                                    'ID': genome_id,
+                                                    'Description': info.get('description', 'N/A'),
+                                                    'Length': info.get('length', 'N/A'),
+                                                    'Organism': info.get('organism', 'N/A')
+                                                })
+                                        except Exception as e:
+                                            st.warning(f"Could not fetch info for genome {genome_id}: {e}")
+                                            # Add basic info even if detailed fetch fails
                                             genome_info.append({
                                                 'ID': genome_id,
-                                                'Description': info.get('description', 'N/A'),
-                                                'Length': info.get('length', 'N/A'),
-                                                'Organism': info.get('organism', 'N/A')
+                                                'Description': f'Genome Assembly {genome_id}',
+                                                'Length': 'N/A',
+                                                'Organism': organism_name
                                             })
                                 
                                 if genome_info:
@@ -596,34 +633,51 @@ def main():
                                     )
                                     
                                     if st.button("Design Primers for Selected Genome", type="primary"):
-                                        with st.spinner("Fetching genome sequence and designing primers..."):
-                                            # Get the full genome sequence
-                                            genome_id = genome_info[selected_genome]['ID']
-                                            sequence = ncbi.fetch_sequence(genome_id, database="genome")
+                                        with st.spinner("Fetching sequence and designing primers..."):
+                                            sequence_id = genome_info[selected_genome]['ID']
                                             
-                                            if sequence:
-                                                # For very large genomes, we might want to limit the sequence length
-                                                if len(sequence) > 1000000:  # 1MB limit
-                                                    st.warning(f"Genome is very large ({len(sequence):,} bp). Using first 1MB for primer design.")
-                                                    sequence = sequence[:1000000]
+                                            try:
+                                                if database_used == "genome":
+                                                    # For genome assemblies, search for nucleotide sequences
+                                                    assembly_query = f'"{sequence_id}"[Assembly]'
+                                                    nucleotide_ids = ncbi.search_sequences(assembly_query, database="nucleotide", max_results=10)
+                                                    
+                                                    if nucleotide_ids:
+                                                        st.info(f"Found {len(nucleotide_ids)} sequences from this assembly. Using the first one for primer design.")
+                                                        sequence_id = nucleotide_ids[0]
+                                                    else:
+                                                        st.warning("No nucleotide sequences found for this assembly.")
+                                                        return
                                                 
-                                                seq_info = ncbi.fetch_sequence_info(genome_id, database="genome")
-                                                st.session_state.sequence_info = seq_info
-                                                st.session_state.current_sequence = sequence
+                                                # Fetch the sequence
+                                                sequence = ncbi.fetch_sequence(sequence_id)
                                                 
-                                                # Design primers
-                                                primers = designer.design_primers(sequence, custom_params=custom_params)
-                                                st.session_state.primers_designed = primers
-                                                
-                                                if primers:
-                                                    st.success(f"Successfully designed {len(primers)} primer pairs!")
-                                                    # Clear session state after successful search
-                                                    if 'organism_name' in st.session_state:
-                                                        del st.session_state.organism_name
+                                                if sequence:
+                                                    # For very large sequences, limit the length
+                                                    if len(sequence) > 1000000:  # 1MB limit
+                                                        st.warning(f"Sequence is very large ({len(sequence):,} bp). Using first 1MB for primer design.")
+                                                        sequence = sequence[:1000000]
+                                                    
+                                                    seq_info = ncbi.fetch_sequence_info(sequence_id)
+                                                    st.session_state.sequence_info = seq_info
+                                                    st.session_state.current_sequence = sequence
+                                                    
+                                                    # Design primers
+                                                    primers = designer.design_primers(sequence, custom_params=custom_params)
+                                                    st.session_state.primers_designed = primers
+                                                    
+                                                    if primers:
+                                                        st.success(f"Successfully designed {len(primers)} primer pairs!")
+                                                        # Clear session state after successful search
+                                                        if 'organism_name' in st.session_state:
+                                                            del st.session_state.organism_name
+                                                    else:
+                                                        st.warning("No suitable primers found with current parameters")
                                                 else:
-                                                    st.warning("No suitable primers found with current parameters")
-                                            else:
-                                                st.error("Failed to fetch genome sequence")
+                                                    st.error("Failed to fetch sequence")
+                                                    
+                                            except Exception as e:
+                                                st.error(f"Error fetching sequence: {e}")
                                 else:
                                     st.warning("No genome information could be retrieved")
                             else:
