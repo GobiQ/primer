@@ -1419,12 +1419,28 @@ def perform_gene_targeted_design(organism_name, email, api_key, max_sequences, c
     """Perform gene-targeted primer design workflow"""
     with st.spinner(f"Designing gene-targeted primers for {organism_name}..."):
         try:
-            ncbi = NCBIConnector(email, api_key)
-            designer = PrimerDesigner()
+            # Check if gene targets have been selected
+            if 'selected_gene_targets' not in st.session_state:
+                st.error("❌ Please select gene targets first before designing primers.")
+                st.info("💡 Scroll up to select your desired gene categories and targets.")
+                return
             
             # Get selected gene targets
             gene_targets = st.session_state.selected_gene_targets
+            
+            # Check if selected_genes exists in the gene_targets
+            if 'selected_genes' not in gene_targets:
+                st.error("❌ Gene target selection incomplete. Please reselect your gene targets.")
+                return
+                
             selected_genes = gene_targets['selected_genes']
+            
+            if not selected_genes:
+                st.error("❌ No gene targets selected. Please select at least one gene target.")
+                return
+            
+            ncbi = NCBIConnector(email, api_key)
+            designer = PrimerDesigner()
             
             st.write("🔍 **Step 1: Searching for gene-specific sequences...**")
             
@@ -1972,23 +1988,24 @@ def main():
                         if organism_targets:
                             gene_targets_selected = display_gene_targets_interface(organism_targets)
                             
-                            if gene_targets_selected:
-                                st.success("✅ Gene targets selected. Primers will be designed for your selected genes.")
+                            # Only show the design button if gene targets are selected
+                            if gene_targets_selected and 'selected_gene_targets' in st.session_state:
+                                st.success("✅ Gene targets selected. Ready to design primers!")
+                                if st.button("🎯 Design Gene-Targeted Primers", type="primary", use_container_width=True):
+                                    if not email or not organism_name:
+                                        st.error("❌ Please provide email and organism name.")
+                                    else:
+                                        perform_gene_targeted_design(organism_name, email, api_key, max_sequences, custom_params, enable_t7_dsrna, optimal_dsrna_length, check_transcription_efficiency)
                             else:
-                                st.warning("⚠️ Please select gene targets above to continue with gene-targeted design.")
+                                st.info("⚠️ Please select gene targets above to enable primer design.")
+                                # Show a disabled button to indicate what will be available
+                                st.button("🎯 Design Gene-Targeted Primers", disabled=True, help="Select gene targets first")
                         else:
                             st.info("📝 No specific gene targets available for this organism. Consider using Conservation-Based or Standard Design.")
                     except Exception as e:
                         st.warning(f"Gene target information not available: {e}")
-                
-                # Search button for gene-targeted design
-                if st.button("🎯 Design Gene-Targeted Primers", type="primary", use_container_width=True):
-                    if not email or not organism_name:
-                        st.error("❌ Please provide email and organism name.")
-                    elif 'selected_gene_targets' not in st.session_state:
-                        st.error("❌ Please select gene targets above before designing primers.")
-                    else:
-                        perform_gene_targeted_design(organism_name, email, api_key, max_sequences, custom_params, enable_t7_dsrna, optimal_dsrna_length, check_transcription_efficiency)
+                else:
+                    st.info("👆 Enter an organism name above to see available gene targets.")
             
             # ==========================================
             # WORKFLOW 2: CONSERVATION-BASED DESIGN  
