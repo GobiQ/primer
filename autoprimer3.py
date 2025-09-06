@@ -388,12 +388,15 @@ def display_gene_targets_interface(organism_targets):
     return False
 
 def display_results_with_gene_context():
-    """Display primer results with gene target context"""
+    """Display primer results with gene target context - workflow aware"""
     
-    if 'selected_gene_targets' in st.session_state:
+    # Check design mode
+    design_mode = st.session_state.get('sequence_info', {}).get('design_mode', 'unknown')
+    
+    if design_mode == 'gene_targeted' and 'selected_gene_targets' in st.session_state:
         target_info = st.session_state.selected_gene_targets
         
-        st.subheader("🧬 Gene Target Context")
+        st.subheader("🎯 Gene-Targeted Design Context")
         
         col1, col2, col3, col4 = st.columns(4)
         with col1:
@@ -407,7 +410,7 @@ def display_results_with_gene_context():
             st.metric("High Priority Categories", high_priority)
         
         # Target-specific recommendations
-        with st.expander("📋 Target-Specific Recommendations", expanded=False):
+        with st.expander("📋 Gene Target Recommendations", expanded=False):
             recommendations = []
             for category in target_info['selected_categories']:
                 rec = get_gene_use_recommendation(category)
@@ -422,34 +425,28 @@ def display_results_with_gene_context():
             
             rec_df = pd.DataFrame(recommendations)
             st.dataframe(rec_df, use_container_width=True)
+    
+    elif design_mode == 'conservation_based':
+        st.subheader("🧬 Conservation-Based Design Context")
+        analysis_metadata = st.session_state.get('analysis_metadata', {})
         
-        # Primer design strategy
-        with st.expander("🎯 Primer Design Strategy for Selected Targets", expanded=False):
-            st.markdown(f"""
-            **Strategy for {target_info['organism_info']['organism']}:**
-            
-            **Selected Categories:** {', '.join(target_info['selected_categories'])}
-            
-            **Recommended Approach:**
-            """)
-            
-            for category in target_info['selected_categories']:
-                priority = get_gene_priority(category)
-                if priority == "High":
-                    st.markdown(f"• **{category}** (High Priority): Design multiple primer pairs for redundancy")
-                elif priority == "Medium":
-                    st.markdown(f"• **{category}** (Medium Priority): Design 1-2 primer pairs for validation")
-                else:
-                    st.markdown(f"• **{category}** (Low Priority): Optional targets for comprehensive analysis")
-            
-            st.markdown("""
-            **General Tips:**
-            - Use essential genes for species identification and phylogenetic studies
-            - Target pathogenicity genes for disease-specific detection
-            - Design multiplex primers for multiple gene targets when possible
-            - Consider gene expression levels and copy number when selecting targets
-            - Validate primers against multiple strains/isolates when available
-            """)
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Sequences Analyzed", analysis_metadata.get('sequences_analyzed', 'N/A'))
+        with col2:
+            conservation_thresh = analysis_metadata.get('conservation_threshold', 0)
+            st.metric("Conservation Threshold", f"{conservation_thresh:.0%}")
+        with col3:
+            specificity_tested = analysis_metadata.get('specificity_tested', False)
+            st.metric("Specificity Tested", "Yes" if specificity_tested else "No")
+        with col4:
+            if specificity_tested:
+                spec_thresh = analysis_metadata.get('specificity_threshold', 0)
+                st.metric("Specificity Threshold", f"{spec_thresh:.0%}")
+    
+    elif design_mode == 'standard':
+        st.subheader("⚡ Standard Design Context")
+        st.info("Primers designed from single sequence using standard approach. Consider Gene-Targeted or Conservation-Based design for enhanced specificity.")
 
 def export_with_gene_targets(primers, format_type="excel"):
     """Export primers with gene target information"""
@@ -636,7 +633,8 @@ def create_comprehensive_gene_target_export():
                                 'Gene_Category': gene_category,
                                 'Gene_Name': gene,
                                 'Priority': get_gene_priority(gene_category),
-                                'Recommendation': get_gene_use_recommendation(gene_category)
+                                'Recommendation': get_gene_use_recommendation(gene_category),
+                                'Target_Type': 'Pathogen' if any(x in category for x in ['🍄', '🦠']) else 'Pest'
                             })
         
         return pd.DataFrame(data)
@@ -1417,6 +1415,388 @@ def check_session_state_validity():
         'sequence_length': len(st.session_state.get('current_sequence', ''))
     }
 
+def perform_gene_targeted_design(organism_name, email, api_key, max_sequences, custom_params, enable_t7_dsrna, optimal_dsrna_length, check_transcription_efficiency):
+    """Perform gene-targeted primer design workflow"""
+    with st.spinner(f"Designing gene-targeted primers for {organism_name}..."):
+        try:
+            ncbi = NCBIConnector(email, api_key)
+            designer = PrimerDesigner()
+            
+            # Get selected gene targets
+            gene_targets = st.session_state.selected_gene_targets
+            selected_genes = gene_targets['selected_genes']
+            
+            st.write("🔍 **Step 1: Searching for gene-specific sequences...**")
+            
+            # Try to find sequences for selected genes
+            gene_sequences = []
+            for gene_info in selected_genes[:5]:  # Limit to first 5 genes
+                try:
+                    # Parse gene info: "Category: Gene name"
+                    if ': ' in gene_info:
+                        category, gene_name = gene_info.split(': ', 1)
+                        # Clean gene name for search
+                        clean_gene = gene_name.split('(')[0].strip()
+                        
+                        # Search for gene-specific sequences
+                        search_query = f'"{organism_name}"[organism] AND "{clean_gene}"'
+                        seq_ids = ncbi.search_sequences(search_query, database="nucleotide", max_results=2)
+                        
+                        if seq_ids:
+                            for seq_id in seq_ids[:1]:  # Take first sequence per gene
+                                sequence = ncbi.fetch_sequence(seq_id)
+                                if sequence and len(sequence) > 100:
+                                    gene_sequences.append({
+                                        'gene': clean_gene,
+                                        'category': category,
+                                        'sequence': sequence,
+                                        'id': seq_id
+                                    })
+                                    break
+                except Exception as e:
+                    continue
+            
+            if not gene_sequences:
+                st.warning("No gene-specific sequences found. Falling back to standard genome search...")
+                # Fallback to standard search
+                search_query = f'"{organism_name}"[organism]'
+                seq_ids = ncbi.search_sequences(search_query, database="nucleotide", max_results=max_sequences)
+                if seq_ids:
+                    sequence = ncbi.fetch_sequence(seq_ids[0])
+                    seq_info = ncbi.fetch_sequence_info(seq_ids[0])
+                    if sequence:
+                        clean_sequence = re.sub(r'[^ATGCatgc]', '', sequence.upper())
+                        selected_sequence = clean_sequence[:10000] if len(clean_sequence) > 10000 else clean_sequence
+                        sequence_source = "Genome sequence (fallback)"
+                else:
+                    st.error("No sequences found for this organism.")
+                    return
+            else:
+                st.success(f"Found {len(gene_sequences)} gene-specific sequences!")
+                
+                # Display found genes
+                gene_data = []
+                for gene_seq in gene_sequences:
+                    gene_data.append({
+                        'Gene': gene_seq['gene'],
+                        'Category': gene_seq['category'],
+                        'Sequence ID': gene_seq['id'],
+                        'Length': f"{len(gene_seq['sequence']):,} bp"
+                    })
+                
+                gene_df = pd.DataFrame(gene_data)
+                st.dataframe(gene_df, use_container_width=True)
+                
+                # Use the longest gene sequence for primer design
+                best_gene = max(gene_sequences, key=lambda x: len(x['sequence']))
+                selected_sequence = re.sub(r'[^ATGCatgc]', '', best_gene['sequence'].upper())
+                if len(selected_sequence) > 10000:
+                    selected_sequence = selected_sequence[:10000]
+                sequence_source = f"Gene-specific sequence: {best_gene['gene']}"
+            
+            st.write("🧬 **Step 2: Designing primers...**")
+            
+            # Store sequence and design primers
+            st.session_state.current_sequence = selected_sequence
+            st.session_state.sequence_info = {
+                "id": gene_sequences[0]['id'] if gene_sequences else seq_ids[0],
+                "description": sequence_source,
+                "length": len(selected_sequence),
+                "organism": organism_name,
+                "design_mode": "gene_targeted"
+            }
+            
+            primers = designer.design_primers(
+                selected_sequence, 
+                custom_params=custom_params,
+                add_t7_promoter=enable_t7_dsrna
+            )
+            
+            st.session_state.primers_designed = primers
+            
+            if enable_t7_dsrna:
+                st.session_state.t7_dsrna_enabled = True
+                st.session_state.t7_settings = {
+                    'optimal_length': optimal_dsrna_length,
+                    'check_efficiency': check_transcription_efficiency
+                }
+            
+            if primers:
+                st.success(f"✅ Successfully designed {len(primers)} gene-targeted primer pairs!")
+                
+                # Preview
+                preview_data = []
+                for i, primer in enumerate(primers[:3]):
+                    preview_data.append({
+                        'Pair': i + 1,
+                        'Forward': primer.forward_seq[:30] + '...' if len(primer.forward_seq) > 30 else primer.forward_seq,
+                        'Reverse': primer.reverse_seq[:30] + '...' if len(primer.reverse_seq) > 30 else primer.reverse_seq,
+                        'Product Size': f"{primer.product_size} bp"
+                    })
+                
+                st.dataframe(pd.DataFrame(preview_data), use_container_width=True)
+                st.info("📊 Go to Results tab to view detailed analysis!")
+            else:
+                st.warning("No suitable primers found. Try adjusting parameters.")
+                
+        except Exception as e:
+            st.error(f"Gene-targeted design error: {e}")
+
+def perform_conservation_based_design(organism_name, email, api_key, max_sequences, conservation_threshold, window_size, enable_specificity_testing, specificity_threshold, comparison_organisms, custom_params, enable_t7_dsrna):
+    """Perform conservation-based primer design workflow"""
+    with st.spinner(f"Performing conservation analysis for {organism_name}..."):
+        try:
+            # Clear any existing gene targets to avoid confusion
+            if 'selected_gene_targets' in st.session_state:
+                del st.session_state['selected_gene_targets']
+            
+            # Initialize managers
+            sequence_manager = SequenceManager(NCBIConnector(email, api_key))
+            analyzer = ConservationAnalyzer(NCBIConnector(email, api_key))
+            
+            # Step 1: Fetch sequences
+            st.write("🔍 **Step 1: Fetching sequences...**")
+            sequences = sequence_manager.fetch_organism_sequences(organism_name, max_sequences)
+            
+            if not sequences:
+                st.warning(f"No sequences found for {organism_name}")
+                return
+            
+            st.success(f"Found {len(sequences)} sequences!")
+            
+            # Display sequence summary
+            sequence_data = []
+            for i, seq in enumerate(sequences):
+                sequence_data.append({
+                    'ID': seq['id'],
+                    'Description': seq['description'][:80] + '...' if len(seq['description']) > 80 else seq['description'],
+                    'Length': f"{seq['length']:,} bp"
+                })
+            
+            sequence_df = pd.DataFrame(sequence_data)
+            st.dataframe(sequence_df, use_container_width=True)
+            
+            # Step 2: Conservation analysis
+            st.write("🧬 **Step 2: Analyzing conservation...**")
+            seq_list = [seq['sequence'] for seq in sequences]
+            
+            conserved_regions = analyzer.analyze_multiple_sequences(
+                seq_list,
+                min_conservation=conservation_threshold,
+                window_size=window_size
+            )
+            
+            if not conserved_regions:
+                st.warning("No conserved regions found with current parameters. Try lowering the conservation threshold.")
+                return
+            
+            st.success(f"Found {len(conserved_regions)} conserved regions!")
+            
+            # Display conserved regions
+            conservation_data = []
+            for i, region in enumerate(conserved_regions):
+                conservation_data.append({
+                    'Region': i + 1,
+                    'Position': f"{region['start']}-{region['end']}",
+                    'Length': f"{region['length']} bp",
+                    'Conservation': f"{region['conservation_score']:.1%}",
+                    'Sequences': region['sequence_count']
+                })
+            
+            conservation_df = pd.DataFrame(conservation_data)
+            st.dataframe(conservation_df, use_container_width=True)
+            
+            # Step 3: Specificity testing
+            specificity_results = {}
+            if enable_specificity_testing:
+                st.write("🎯 **Step 3: Testing specificity...**")
+                
+                # Select best conserved region for testing
+                best_region = max(conserved_regions, key=lambda x: x['conservation_score'])
+                consensus_seq = best_region['consensus_sequence']
+                
+                # Determine comparison organisms
+                if comparison_organisms.strip():
+                    comp_orgs = [org.strip() for org in comparison_organisms.split(',')]
+                else:
+                    comp_orgs = get_related_organisms(organism_name)
+                
+                st.write(f"Testing against: {', '.join(comp_orgs)}")
+                
+                specificity_results = analyzer.test_specificity(
+                    consensus_seq,
+                    comp_orgs,
+                    max_similarity=specificity_threshold
+                )
+                
+                # Display specificity results
+                specificity_data = []
+                for org, result in specificity_results.items():
+                    if 'error' not in result:
+                        specificity_data.append({
+                            'Organism': org,
+                            'Max Similarity': f"{result['max_similarity']:.1%}",
+                            'Specific': '✅' if result['is_specific'] else '❌',
+                            'Sequences Tested': result['sequences_tested']
+                        })
+                
+                if specificity_data:
+                    specificity_df = pd.DataFrame(specificity_data)
+                    st.dataframe(specificity_df, use_container_width=True)
+            
+            # Step 4: Design primers
+            st.write("🧬 **Step 4: Designing primers from best conserved region...**")
+            
+            # Use the most conserved region
+            best_region = max(conserved_regions, key=lambda x: x['conservation_score'])
+            consensus_seq = best_region['consensus_sequence']
+            
+            # Store sequence and design primers
+            st.session_state.current_sequence = consensus_seq
+            st.session_state.sequence_info = {
+                "id": f"consensus_region",
+                "description": f"Conserved region ({best_region['conservation_score']:.1%} conserved) from {len(sequences)} {organism_name} sequences",
+                "length": len(consensus_seq),
+                "organism": organism_name,
+                "conservation_score": best_region['conservation_score'],
+                "region_info": best_region,
+                "design_mode": "conservation_based"
+            }
+            
+            # Store conservation analysis results
+            st.session_state.conserved_regions = conserved_regions
+            st.session_state.conservation_sequences = sequences
+            st.session_state.specificity_results = specificity_results
+            
+            # Store analysis metadata
+            st.session_state.analysis_metadata = {
+                'type': 'conservation_based',
+                'sequences_analyzed': len(sequences),
+                'conservation_threshold': conservation_threshold,
+                'specificity_tested': enable_specificity_testing,
+                'specificity_threshold': specificity_threshold if enable_specificity_testing else None
+            }
+            
+            # Design primers
+            designer = PrimerDesigner()
+            primers = designer.design_primers(
+                consensus_seq,
+                custom_params=custom_params,
+                add_t7_promoter=enable_t7_dsrna
+            )
+            
+            st.session_state.primers_designed = primers
+            
+            if enable_t7_dsrna:
+                st.session_state.t7_dsrna_enabled = True
+            
+            if primers:
+                st.success(f"✅ Designed {len(primers)} conservation-based primers!")
+                st.info("📊 Go to Results tab to view detailed analysis!")
+                
+                # Show preview
+                preview_data = []
+                for i, primer in enumerate(primers[:3]):
+                    preview_data.append({
+                        'Pair': i + 1,
+                        'Forward': primer.forward_seq[:30] + '...' if len(primer.forward_seq) > 30 else primer.forward_seq,
+                        'Reverse': primer.reverse_seq[:30] + '...' if len(primer.reverse_seq) > 30 else primer.reverse_seq,
+                        'Product Size': f"{primer.product_size} bp"
+                    })
+                
+                st.dataframe(pd.DataFrame(preview_data), use_container_width=True)
+            else:
+                st.warning("No suitable primers found for conserved region")
+                
+        except Exception as e:
+            st.error(f"Conservation analysis error: {e}")
+
+def perform_standard_design(organism_name, email, api_key, max_sequences, custom_params, enable_t7_dsrna, optimal_dsrna_length, check_transcription_efficiency):
+    """Perform standard primer design workflow"""
+    with st.spinner(f"Searching for {organism_name} genomes..."):
+        try:
+            # Clear any existing gene targets and conservation data
+            for key in ['selected_gene_targets', 'conserved_regions', 'specificity_results', 'analysis_metadata']:
+                if key in st.session_state:
+                    del st.session_state[key]
+            
+            ncbi = NCBIConnector(email, api_key)
+            designer = PrimerDesigner()
+            
+            search_query = f'"{organism_name}"[organism]'
+            st.write(f"Searching with query: `{search_query}`")
+            
+            seq_ids = ncbi.search_sequences(search_query, database="nucleotide", max_results=max_sequences)
+            
+            if seq_ids:
+                st.success(f"Found {len(seq_ids)} sequences!")
+                
+                seq_id = seq_ids[0]
+                st.info(f"Using sequence {seq_id} for primer design...")
+                
+                sequence = ncbi.fetch_sequence(seq_id)
+                seq_info = ncbi.fetch_sequence_info(seq_id)
+                
+                if sequence:
+                    clean_sequence = re.sub(r'[^ATGCatgc]', '', sequence.upper())
+                    
+                    if len(clean_sequence) < 50:
+                        st.error("Sequence too short for primer design")
+                    else:
+                        if len(clean_sequence) > 100000:
+                            st.warning(f"Large sequence ({len(clean_sequence):,} bp). Using first 100kb.")
+                            clean_sequence = clean_sequence[:100000]
+                        
+                        st.session_state.current_sequence = clean_sequence
+                        st.session_state.sequence_info = seq_info or {
+                            "id": seq_id,
+                            "description": f"Sequence {seq_id}",
+                            "length": len(clean_sequence),
+                            "organism": organism_name,
+                            "design_mode": "standard"
+                        }
+                        
+                        st.write("Designing primers...")
+                        primers = designer.design_primers(
+                            clean_sequence, 
+                            custom_params=custom_params,
+                            add_t7_promoter=enable_t7_dsrna
+                        )
+                        st.session_state.primers_designed = primers
+                        
+                        if enable_t7_dsrna:
+                            st.session_state.t7_dsrna_enabled = True
+                            st.session_state.t7_settings = {
+                                'optimal_length': optimal_dsrna_length,
+                                'check_efficiency': check_transcription_efficiency
+                            }
+                        else:
+                            st.session_state.t7_dsrna_enabled = False
+                        
+                        if primers:
+                            st.success(f"✅ Successfully designed {len(primers)} primer pairs!")
+                            
+                            preview_data = []
+                            for i, primer in enumerate(primers[:5]):
+                                preview_data.append({
+                                    'Pair': i + 1,
+                                    'Forward': primer.forward_seq[:30] + '...' if len(primer.forward_seq) > 30 else primer.forward_seq,
+                                    'Reverse': primer.reverse_seq[:30] + '...' if len(primer.reverse_seq) > 30 else primer.reverse_seq,
+                                    'Product Size': f"{primer.product_size} bp"
+                                })
+                            
+                            st.dataframe(pd.DataFrame(preview_data), use_container_width=True)
+                            st.info("📊 Go to other tabs to view detailed analysis!")
+                        else:
+                            st.warning("No suitable primers found. Try adjusting parameters.")
+                else:
+                    st.error("Failed to fetch sequence")
+            else:
+                st.warning(f"No sequences found for {organism_name}")
+                
+        except Exception as e:
+            st.error(f"Error: {e}")
+
 def main():
     """Main Streamlit application"""
     
@@ -1555,25 +1935,64 @@ def main():
             with col2:
                 max_sequences = st.number_input("Max sequences to search", min_value=5, max_value=50, value=10)
             
-            # Gene target integration
-            if organism_name:
-                organism_targets = search_organism_with_gene_targets(organism_name, email, api_key)
-                if organism_targets:
-                    gene_targets_selected = display_gene_targets_interface(organism_targets)
+            # ==========================================
+            # NEW: WORKFLOW SELECTION
+            # ==========================================
+            st.subheader("🔬 Primer Design Strategy")
             
-            # Analysis mode selection
-            st.subheader("Analysis Mode")
-            analysis_mode = st.radio(
-                "Choose analysis approach:",
-                ["Standard (Single Sequence)", "Advanced (Conservation Analysis)"],
-                help="Standard: Use first sequence found. Advanced: Analyze conservation across multiple sequences."
+            workflow_choice = st.radio(
+                "Choose your primer design approach:",
+                [
+                    "🎯 Gene-Targeted Design (Recommended for specific genes)",
+                    "🧬 Conservation-Based Design (Recommended for robust primers)",
+                    "⚡ Standard Design (Single sequence, fastest)"
+                ],
+                help="Select based on your research goals: specific gene detection vs. broad applicability vs. speed"
             )
             
-            # Advanced options (only show for Advanced mode)
-            if analysis_mode == "Advanced (Conservation Analysis)":
-                with st.expander("Advanced Conservation Analysis Options", expanded=True):
-                    st.info("🧬 **Conservation Analysis Mode**: Find conserved regions across multiple sequences for robust primer design")
-                    
+            # Initialize workflow variables
+            gene_targets_workflow = "🎯 Gene-Targeted Design" in workflow_choice
+            conservation_workflow = "🧬 Conservation-Based Design" in workflow_choice
+            standard_workflow = "⚡ Standard Design" in workflow_choice
+            
+            # ==========================================
+            # WORKFLOW 1: GENE-TARGETED DESIGN
+            # ==========================================
+            if gene_targets_workflow:
+                st.info("🎯 **Gene-Targeted Design Mode**\nDesign primers for specific genes with known biological functions. Ideal for pathogenicity studies, resistance monitoring, and functional genomics.")
+                
+                # Gene target integration (only for this workflow)
+                if organism_name:
+                    try:
+                        organism_targets = search_organism_with_gene_targets(organism_name, email, api_key)
+                        if organism_targets:
+                            gene_targets_selected = display_gene_targets_interface(organism_targets)
+                            
+                            if gene_targets_selected:
+                                st.success("✅ Gene targets selected. Primers will be designed for your selected genes.")
+                            else:
+                                st.warning("⚠️ Please select gene targets above to continue with gene-targeted design.")
+                        else:
+                            st.info("📝 No specific gene targets available for this organism. Consider using Conservation-Based or Standard Design.")
+                    except Exception as e:
+                        st.warning(f"Gene target information not available: {e}")
+                
+                # Search button for gene-targeted design
+                if st.button("🎯 Design Gene-Targeted Primers", type="primary", use_container_width=True):
+                    if not email or not organism_name:
+                        st.error("❌ Please provide email and organism name.")
+                    elif 'selected_gene_targets' not in st.session_state:
+                        st.error("❌ Please select gene targets above before designing primers.")
+                    else:
+                        perform_gene_targeted_design(organism_name, email, api_key, max_sequences, custom_params, enable_t7_dsrna, optimal_dsrna_length, check_transcription_efficiency)
+            
+            # ==========================================
+            # WORKFLOW 2: CONSERVATION-BASED DESIGN  
+            # ==========================================
+            elif conservation_workflow:
+                st.info("🧬 **Conservation-Based Design Mode**\nAnalyze multiple sequences to find conserved regions for robust, broad-spectrum primers. Ideal for species identification and population studies.")
+                
+                with st.expander("Conservation Analysis Parameters", expanded=True):
                     col1, col2 = st.columns(2)
                     with col1:
                         conservation_threshold = st.slider(
@@ -1608,261 +2027,31 @@ def main():
                         placeholder="e.g., Aspergillus niger, Penicillium chrysogenum",
                         help="Leave empty for automatic selection based on target organism"
                     )
+                
+                # Search button for conservation-based design
+                if st.button("🧬 Design Conservation-Based Primers", type="primary", use_container_width=True):
+                    if not email or not organism_name:
+                        st.error("❌ Please provide email and organism name.")
+                    else:
+                        perform_conservation_based_design(
+                            organism_name, email, api_key, max_sequences, 
+                            conservation_threshold, window_size, enable_specificity_testing, 
+                            specificity_threshold if enable_specificity_testing else None,
+                            comparison_organisms, custom_params, enable_t7_dsrna
+                        )
             
-            # Search button
-            if st.button("🔍 Search Organism Sequences", type="primary", use_container_width=True):
-                if not email:
-                    st.error("❌ **Email Required**: Please enter an email address in the sidebar.")
-                elif not organism_name:
-                    st.error("❌ **Organism Name Required**: Please enter an organism name.")
-                else:
-                    if analysis_mode == "Standard (Single Sequence)":
-                        # EXISTING STANDARD METHOD (keep as-is)
-                        with st.spinner(f"Searching for {organism_name} genomes..."):
-                            try:
-                                ncbi = NCBIConnector(email, api_key)
-                                designer = PrimerDesigner()
-                                
-                                search_query = f'"{organism_name}"[organism]'
-                                st.write(f"Searching with query: `{search_query}`")
-                                
-                                seq_ids = ncbi.search_sequences(search_query, database="nucleotide", max_results=max_sequences)
-                                
-                                if seq_ids:
-                                    st.success(f"Found {len(seq_ids)} sequences!")
-                                    
-                                    seq_id = seq_ids[0]
-                                    st.info(f"Using sequence {seq_id} for primer design...")
-                                    
-                                    sequence = ncbi.fetch_sequence(seq_id)
-                                    seq_info = ncbi.fetch_sequence_info(seq_id)
-                                    
-                                    if sequence:
-                                        clean_sequence = re.sub(r'[^ATGCatgc]', '', sequence.upper())
-                                        
-                                        if len(clean_sequence) < 50:
-                                            st.error("Sequence too short for primer design")
-                                        else:
-                                            if len(clean_sequence) > 100000:
-                                                st.warning(f"Large sequence ({len(clean_sequence):,} bp). Using first 100kb.")
-                                                clean_sequence = clean_sequence[:100000]
-                                            
-                                            st.session_state.current_sequence = clean_sequence
-                                            st.session_state.sequence_info = seq_info or {
-                                                "id": seq_id,
-                                                "description": f"Sequence {seq_id}",
-                                                "length": len(clean_sequence),
-                                                "organism": organism_name
-                                            }
-                                            
-                                            st.write("Designing primers...")
-                                            primers = designer.design_primers(
-                                                clean_sequence, 
-                                                custom_params=custom_params,
-                                                add_t7_promoter=enable_t7_dsrna
-                                            )
-                                            st.session_state.primers_designed = primers
-                                            
-                                            if enable_t7_dsrna:
-                                                st.session_state.t7_dsrna_enabled = True
-                                                st.session_state.t7_settings = {
-                                                    'optimal_length': optimal_dsrna_length,
-                                                    'check_efficiency': check_transcription_efficiency
-                                                }
-                                            else:
-                                                st.session_state.t7_dsrna_enabled = False
-                                            
-                                            if primers:
-                                                st.success(f"✅ Successfully designed {len(primers)} primer pairs!")
-                                                
-                                                preview_data = []
-                                                for i, primer in enumerate(primers[:5]):
-                                                    preview_data.append({
-                                                        'Pair': i + 1,
-                                                        'Forward': primer.forward_seq[:30] + '...' if len(primer.forward_seq) > 30 else primer.forward_seq,
-                                                        'Reverse': primer.reverse_seq[:30] + '...' if len(primer.reverse_seq) > 30 else primer.reverse_seq,
-                                                        'Product Size': f"{primer.product_size} bp"
-                                                    })
-                                                
-                                                st.dataframe(pd.DataFrame(preview_data), use_container_width=True)
-                                                st.info("📊 Go to other tabs to view detailed analysis!")
-                                            else:
-                                                st.warning("No suitable primers found. Try adjusting parameters.")
-                                    else:
-                                        st.error("Failed to fetch sequence")
-                                else:
-                                    st.warning(f"No sequences found for {organism_name}")
-                                    
-                            except Exception as e:
-                                st.error(f"Error: {e}")
-                    
-                    else:  # Advanced Conservation Analysis
-                        # NEW ADVANCED METHOD
-                        with st.spinner(f"Performing advanced conservation analysis for {organism_name}..."):
-                            try:
-                                # Initialize managers
-                                sequence_manager = SequenceManager(NCBIConnector(email, api_key))
-                                analyzer = ConservationAnalyzer(NCBIConnector(email, api_key))
-                                
-                                # Step 1: Fetch sequences
-                                st.write("🔍 **Step 1: Fetching sequences...**")
-                                sequences = sequence_manager.fetch_organism_sequences(
-                                    organism_name, max_sequences
-                                )
-                                
-                                if not sequences:
-                                    st.warning(f"No sequences found for {organism_name}")
-                                    return
-                                
-                                st.success(f"Found {len(sequences)} sequences!")
-                                
-                                # Display sequence summary
-                                sequence_data = []
-                                for i, seq in enumerate(sequences):
-                                    sequence_data.append({
-                                        'ID': seq['id'],
-                                        'Description': seq['description'][:80] + '...' if len(seq['description']) > 80 else seq['description'],
-                                        'Length': f"{seq['length']:,} bp"
-                                    })
-                                
-                                sequence_df = pd.DataFrame(sequence_data)
-                                st.dataframe(sequence_df, use_container_width=True)
-                                
-                                # Step 2: Conservation analysis
-                                st.write("🧬 **Step 2: Analyzing conservation...**")
-                                seq_list = [seq['sequence'] for seq in sequences]
-                                
-                                conserved_regions = analyzer.analyze_multiple_sequences(
-                                    seq_list,
-                                    min_conservation=conservation_threshold,
-                                    window_size=window_size
-                                )
-                                
-                                if not conserved_regions:
-                                    st.warning("No conserved regions found with current parameters. Try lowering the conservation threshold.")
-                                    return
-                                
-                                st.success(f"Found {len(conserved_regions)} conserved regions!")
-                                
-                                # Display conserved regions
-                                conservation_data = []
-                                for i, region in enumerate(conserved_regions):
-                                    conservation_data.append({
-                                        'Region': i + 1,
-                                        'Position': f"{region['start']}-{region['end']}",
-                                        'Length': f"{region['length']} bp",
-                                        'Conservation': f"{region['conservation_score']:.1%}",
-                                        'Sequences': region['sequence_count']
-                                    })
-                                
-                                conservation_df = pd.DataFrame(conservation_data)
-                                st.dataframe(conservation_df, use_container_width=True)
-                                
-                                # Step 3: Specificity testing
-                                specificity_results = {}
-                                if enable_specificity_testing:
-                                    st.write("🎯 **Step 3: Testing specificity...**")
-                                    
-                                    # Select best conserved region for testing
-                                    best_region = max(conserved_regions, key=lambda x: x['conservation_score'])
-                                    consensus_seq = best_region['consensus_sequence']
-                                    
-                                    # Determine comparison organisms
-                                    if comparison_organisms.strip():
-                                        comp_orgs = [org.strip() for org in comparison_organisms.split(',')]
-                                    else:
-                                        comp_orgs = get_related_organisms(organism_name)
-                                    
-                                    st.write(f"Testing against: {', '.join(comp_orgs)}")
-                                    
-                                    specificity_results = analyzer.test_specificity(
-                                        consensus_seq,
-                                        comp_orgs,
-                                        max_similarity=specificity_threshold
-                                    )
-                                    
-                                    # Display specificity results
-                                    specificity_data = []
-                                    for org, result in specificity_results.items():
-                                        if 'error' not in result:
-                                            specificity_data.append({
-                                                'Organism': org,
-                                                'Max Similarity': f"{result['max_similarity']:.1%}",
-                                                'Specific': '✅' if result['is_specific'] else '❌',
-                                                'Sequences Tested': result['sequences_tested']
-                                            })
-                                    
-                                    if specificity_data:
-                                        specificity_df = pd.DataFrame(specificity_data)
-                                        st.dataframe(specificity_df, use_container_width=True)
-                                
-                                # Step 4: Design primers
-                                st.write("🧬 **Step 4: Designing primers from best conserved region...**")
-                                
-                                # Use the most conserved region
-                                best_region = max(conserved_regions, key=lambda x: x['conservation_score'])
-                                consensus_seq = best_region['consensus_sequence']
-                                
-                                # Store sequence and design primers
-                                st.session_state.current_sequence = consensus_seq
-                                st.session_state.sequence_info = {
-                                    "id": f"consensus_region",
-                                    "description": f"Conserved region ({best_region['conservation_score']:.1%} conserved) from {len(sequences)} {organism_name} sequences",
-                                    "length": len(consensus_seq),
-                                    "organism": organism_name,
-                                    "conservation_score": best_region['conservation_score'],
-                                    "region_info": best_region
-                                }
-                                
-                                # Store conservation analysis results
-                                st.session_state.conserved_regions = conserved_regions
-                                st.session_state.conservation_sequences = sequences
-                                st.session_state.specificity_results = specificity_results
-                                
-                                # Store analysis metadata
-                                st.session_state.analysis_metadata = {
-                                    'type': 'conservation_based',
-                                    'sequences_analyzed': len(sequences),
-                                    'conservation_threshold': conservation_threshold,
-                                    'specificity_tested': enable_specificity_testing,
-                                    'specificity_threshold': specificity_threshold if enable_specificity_testing else None
-                                }
-                                
-                                # Design primers
-                                designer = PrimerDesigner()
-                                primers = designer.design_primers(
-                                    consensus_seq,
-                                    custom_params=custom_params,
-                                    add_t7_promoter=enable_t7_dsrna
-                                )
-                                
-                                st.session_state.primers_designed = primers
-                                
-                                if enable_t7_dsrna:
-                                    st.session_state.t7_dsrna_enabled = True
-                                
-                                if primers:
-                                    st.success(f"✅ Designed {len(primers)} conservation-based primers!")
-                                    st.info("📊 Go to Results tab to view detailed analysis!")
-                                    
-                                    # Show preview
-                                    preview_data = []
-                                    for i, primer in enumerate(primers[:3]):
-                                        preview_data.append({
-                                            'Pair': i + 1,
-                                            'Forward': primer.forward_seq[:30] + '...' if len(primer.forward_seq) > 30 else primer.forward_seq,
-                                            'Reverse': primer.reverse_seq[:30] + '...' if len(primer.reverse_seq) > 30 else primer.reverse_seq,
-                                            'Product Size': f"{primer.product_size} bp"
-                                        })
-                                    
-                                    st.dataframe(pd.DataFrame(preview_data), use_container_width=True)
-                                else:
-                                    st.warning("No suitable primers found for conserved region")
-                                
-                            except Exception as e:
-                                st.error(f"Advanced analysis error: {e}")
-                                import traceback
-                                st.code(traceback.format_exc())
+            # ==========================================
+            # WORKFLOW 3: STANDARD DESIGN
+            # ==========================================
+            else:  # standard_workflow
+                st.info("⚡ **Standard Design Mode**\nQuick primer design from the first available sequence. Ideal for rapid prototyping and basic applications.")
+                
+                # Search button for standard design
+                if st.button("⚡ Design Standard Primers", type="primary", use_container_width=True):
+                    if not email or not organism_name:
+                        st.error("❌ Please provide email and organism name.")
+                    else:
+                        perform_standard_design(organism_name, email, api_key, max_sequences, custom_params, enable_t7_dsrna, optimal_dsrna_length, check_transcription_efficiency)
             
             # Agricultural Pests & Pathogens section with improved layout
             st.markdown("---")
@@ -1915,83 +2104,13 @@ def main():
                 if not email:
                     st.error("❌ **Email Required**: Please enter an email address in the sidebar.")
                 else:
-                    with st.spinner(f"Searching for {organism_name} genomes..."):
-                        try:
-                            ncbi = NCBIConnector(email, api_key)
-                            designer = PrimerDesigner()
-                            
-                            search_query = f'"{organism_name}"[organism]'
-                            st.write(f"Searching with query: `{search_query}`")
-                            
-                            seq_ids = ncbi.search_sequences(search_query, database="nucleotide", max_results=max_sequences)
-                            
-                            if seq_ids:
-                                st.success(f"Found {len(seq_ids)} sequences!")
-                                
-                                seq_id = seq_ids[0]
-                                st.info(f"Using sequence {seq_id} for primer design...")
-                                
-                                sequence = ncbi.fetch_sequence(seq_id)
-                                seq_info = ncbi.fetch_sequence_info(seq_id)
-                                
-                                if sequence:
-                                    clean_sequence = re.sub(r'[^ATGCatgc]', '', sequence.upper())
-                                    
-                                    if len(clean_sequence) < 50:
-                                        st.error("Sequence too short for primer design")
-                                    else:
-                                        if len(clean_sequence) > 100000:
-                                            st.warning(f"Large sequence ({len(clean_sequence):,} bp). Using first 100kb.")
-                                            clean_sequence = clean_sequence[:100000]
-                                        
-                                        st.session_state.current_sequence = clean_sequence
-                                        st.session_state.sequence_info = seq_info or {
-                                            "id": seq_id,
-                                            "description": f"Sequence {seq_id}",
-                                            "length": len(clean_sequence),
-                                            "organism": organism_name
-                                        }
-                                        
-                                        st.write("Designing primers...")
-                                        primers = designer.design_primers(
-                                            clean_sequence, 
-                                            custom_params=custom_params,
-                                            add_t7_promoter=enable_t7_dsrna
-                                        )
-                                        st.session_state.primers_designed = primers
-                                        
-                                        if enable_t7_dsrna:
-                                            st.session_state.t7_dsrna_enabled = True
-                                            st.session_state.t7_settings = {
-                                                'optimal_length': optimal_dsrna_length,
-                                                'check_efficiency': check_transcription_efficiency
-                                            }
-                                        else:
-                                            st.session_state.t7_dsrna_enabled = False
-                                        
-                                        if primers:
-                                            st.success(f"✅ Successfully designed {len(primers)} primer pairs!")
-                                            
-                                            preview_data = []
-                                            for i, primer in enumerate(primers[:5]):
-                                                preview_data.append({
-                                                    'Pair': i + 1,
-                                                    'Forward': primer.forward_seq[:30] + '...' if len(primer.forward_seq) > 30 else primer.forward_seq,
-                                                    'Reverse': primer.reverse_seq[:30] + '...' if len(primer.reverse_seq) > 30 else primer.reverse_seq,
-                                                    'Product Size': f"{primer.product_size} bp"
-                                                })
-                                            
-                                            st.dataframe(pd.DataFrame(preview_data), use_container_width=True)
-                                            st.info("📊 Go to other tabs to view detailed analysis!")
-                                        else:
-                                            st.warning("No suitable primers found. Try adjusting parameters.")
-                                else:
-                                    st.error("Failed to fetch sequence")
-                            else:
-                                st.warning(f"No sequences found for {organism_name}")
-                                
-                        except Exception as e:
-                            st.error(f"Error: {e}")
+                    # Use the currently selected workflow
+                    if gene_targets_workflow:
+                        st.info("🎯 **Gene-Targeted Mode Selected** - Please select gene targets above after organism selection.")
+                    elif conservation_workflow:
+                        st.info("🧬 **Conservation Mode Selected** - Click the conservation button above to proceed.")
+                    else:  # standard workflow
+                        perform_standard_design(organism_name, email, api_key, max_sequences, custom_params, enable_t7_dsrna, optimal_dsrna_length, check_transcription_efficiency)
         
         elif input_method == "Direct Sequence":
             sequence_input = st.text_area("Enter DNA sequence:", 
@@ -2051,7 +2170,10 @@ def main():
         t7_enabled = st.session_state.get('t7_dsrna_enabled', False)
         
         # Display gene target context if available
-        display_results_with_gene_context()
+        try:
+            display_results_with_gene_context()
+        except Exception as e:
+            st.warning(f"Gene target context display unavailable: {e}")
         
         if t7_enabled:
             st.info("🧬 **T7 dsRNA Mode Active** - Primers include T7 promoter sequences for double-stranded RNA production")
@@ -2495,25 +2617,31 @@ def main():
         
         with col1:
             if st.button("📊 Download Enhanced Excel", type="primary"):
-                excel_data = export_with_gene_targets(primers, "excel")
-                if excel_data:
-                    filename = "enhanced_primer_results_with_targets.xlsx"
-                    st.download_button(
-                        label="Click to Download Enhanced Excel File",
-                        data=excel_data,
-                        file_name=filename,
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                    )
+                try:
+                    excel_data = export_with_gene_targets(primers, "excel")
+                    if excel_data:
+                        filename = "enhanced_primer_results_with_targets.xlsx"
+                        st.download_button(
+                            label="Click to Download Enhanced Excel File",
+                            data=excel_data,
+                            file_name=filename,
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                        )
+                except Exception as e:
+                    st.error(f"Error creating enhanced Excel: {e}")
         
         with col2:
-            csv_data = export_with_gene_targets(primers, "csv")
-            filename = "primer_results_with_gene_targets.csv"
-            st.download_button(
-                label="📄 Download Enhanced CSV",
-                data=csv_data,
-                file_name=filename,
-                mime="text/csv"
-            )
+            try:
+                csv_data = export_with_gene_targets(primers, "csv")
+                filename = "primer_results_with_gene_targets.csv"
+                st.download_button(
+                    label="📄 Download Enhanced CSV",
+                    data=csv_data,
+                    file_name=filename,
+                    mime="text/csv"
+                )
+            except Exception as e:
+                st.error(f"Error creating enhanced CSV: {e}")
         
         with col3:
             if gene_targets_available:
