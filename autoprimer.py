@@ -196,6 +196,18 @@ def init_session_state():
     if 'sequence_info' not in st.session_state:
         st.session_state.sequence_info = {}
 
+def get_organism_suggestions():
+    """Get common organism name suggestions for the search"""
+    return [
+        "Homo sapiens", "Mus musculus", "Rattus norvegicus", "Drosophila melanogaster",
+        "Caenorhabditis elegans", "Saccharomyces cerevisiae", "Escherichia coli",
+        "Bacillus subtilis", "Staphylococcus aureus", "Pseudomonas aeruginosa",
+        "Arabidopsis thaliana", "Oryza sativa", "Zea mays", "Solanum lycopersicum",
+        "Nicotiana tabacum", "Triticum aestivum", "Hordeum vulgare", "Glycine max",
+        "Medicago truncatula", "Populus trichocarpa", "Vitis vinifera",
+        "Chlamydomonas reinhardtii", "Physcomitrella patens", "Marchantia polymorpha"
+    ]
+
 def create_primer_visualization(primers: List[PrimerPair]):
     """Create interactive visualizations for primer pairs"""
     if not primers:
@@ -419,10 +431,150 @@ def main():
         
         input_method = st.radio(
             "Choose input method:",
-            ["GenBank ID", "NCBI Search", "Direct Sequence", "Upload File"]
+            ["Organism Name", "GenBank ID", "NCBI Search", "Direct Sequence", "Upload File"]
         )
         
-        if input_method == "GenBank ID":
+        if input_method == "Organism Name":
+            st.subheader("Search by Organism")
+            st.info("💡 **Tip:** Enter the scientific name (e.g., 'Homo sapiens') for best results. You can also search for specific genes within an organism using the advanced options below.")
+            
+            col1, col2 = st.columns([2, 1])
+            with col1:
+                organism_name = st.text_input("Enter organism name:", 
+                                            placeholder="e.g., Homo sapiens, Arabidopsis thaliana, Escherichia coli")
+                
+                # Show organism suggestions
+                suggestions = get_organism_suggestions()
+                st.write("**Common organisms:**")
+                cols = st.columns(4)
+                for i, suggestion in enumerate(suggestions[:12]):  # Show first 12
+                    with cols[i % 4]:
+                        if st.button(suggestion, key=f"suggest_{i}"):
+                            st.session_state.organism_name = suggestion
+                            st.rerun()
+            with col2:
+                max_genomes = st.number_input("Max genomes to search", min_value=1, max_value=20, value=5)
+            
+            # Use session state for organism name if set
+            if 'organism_name' in st.session_state:
+                organism_name = st.session_state.organism_name
+                del st.session_state.organism_name
+            
+            # Additional search options
+            with st.expander("Advanced Search Options"):
+                col1, col2 = st.columns(2)
+                with col1:
+                    genome_type = st.selectbox("Genome type:", 
+                                             ["Any", "Complete genome", "Chromosome", "Scaffold", "Contig"])
+                with col2:
+                    assembly_level = st.selectbox("Assembly level:", 
+                                                ["Any", "Complete", "Chromosome", "Scaffold", "Contig"])
+                
+                # Optional gene search
+                gene_name = st.text_input("Optional: Search for specific gene (e.g., BRCA1, COI, 16S):", 
+                                        placeholder="Leave empty to search entire genome")
+            
+            if st.button("Search Organism Genomes", type="primary"):
+                if not email:
+                    st.error("Please provide an email address for NCBI access")
+                elif not organism_name:
+                    st.error("Please provide an organism name")
+                else:
+                    with st.spinner(f"Searching for {organism_name} genomes..."):
+                        try:
+                            ncbi = NCBIConnector(email, api_key)
+                            designer = PrimerDesigner()
+                            
+                            # Build search query
+                            query_parts = [f'"{organism_name}"[organism]']
+                            
+                            if gene_name:
+                                query_parts.append(f'"{gene_name}"[gene]')
+                            
+                            if genome_type != "Any":
+                                query_parts.append(f'"{genome_type}"[title]')
+                            
+                            if assembly_level != "Any":
+                                query_parts.append(f'"{assembly_level}"[assembly_level]')
+                            
+                            search_query = " AND ".join(query_parts)
+                            
+                            # Search for genome sequences
+                            st.write(f"Searching with query: `{search_query}`")
+                            
+                            # Search in genome database first
+                            genome_ids = ncbi.search_sequences(search_query, database="genome", max_results=max_genomes)
+                            
+                            # If no genomes found, try nucleotide database
+                            if not genome_ids:
+                                st.info("No genomes found, searching nucleotide database...")
+                                genome_ids = ncbi.search_sequences(search_query, database="nucleotide", max_results=max_genomes)
+                            
+                            if genome_ids:
+                                st.success(f"Found {len(genome_ids)} genome entries!")
+                                
+                                # Display found genomes
+                                st.subheader("Available Genomes")
+                                genome_info = []
+                                
+                                for i, genome_id in enumerate(genome_ids):
+                                    with st.spinner(f"Fetching genome {i+1}/{len(genome_ids)}..."):
+                                        info = ncbi.fetch_sequence_info(genome_id, database="genome")
+                                        if info:
+                                            genome_info.append({
+                                                'ID': genome_id,
+                                                'Description': info.get('description', 'N/A'),
+                                                'Length': info.get('length', 'N/A'),
+                                                'Organism': info.get('organism', 'N/A')
+                                            })
+                                
+                                if genome_info:
+                                    genome_df = pd.DataFrame(genome_info)
+                                    st.dataframe(genome_df, use_container_width=True)
+                                    
+                                    # Let user select a genome
+                                    selected_genome = st.selectbox(
+                                        "Select a genome to design primers for:",
+                                        range(len(genome_info)),
+                                        format_func=lambda x: f"{genome_info[x]['ID']} - {genome_info[x]['Description'][:100]}..."
+                                    )
+                                    
+                                    if st.button("Design Primers for Selected Genome", type="primary"):
+                                        with st.spinner("Fetching genome sequence and designing primers..."):
+                                            # Get the full genome sequence
+                                            genome_id = genome_info[selected_genome]['ID']
+                                            sequence = ncbi.fetch_sequence(genome_id, database="genome")
+                                            
+                                            if sequence:
+                                                # For very large genomes, we might want to limit the sequence length
+                                                if len(sequence) > 1000000:  # 1MB limit
+                                                    st.warning(f"Genome is very large ({len(sequence):,} bp). Using first 1MB for primer design.")
+                                                    sequence = sequence[:1000000]
+                                                
+                                                seq_info = ncbi.fetch_sequence_info(genome_id, database="genome")
+                                                st.session_state.sequence_info = seq_info
+                                                st.session_state.current_sequence = sequence
+                                                
+                                                # Design primers
+                                                primers = designer.design_primers(sequence, custom_params=custom_params)
+                                                st.session_state.primers_designed = primers
+                                                
+                                                if primers:
+                                                    st.success(f"Successfully designed {len(primers)} primer pairs!")
+                                                else:
+                                                    st.warning("No suitable primers found with current parameters")
+                                            else:
+                                                st.error("Failed to fetch genome sequence")
+                                else:
+                                    st.warning("No genome information could be retrieved")
+                            else:
+                                st.warning(f"No genomes found for organism: {organism_name}")
+                                st.info("Try adjusting your search terms or check the spelling of the organism name.")
+                                
+                        except Exception as e:
+                            st.error(f"Error searching for organism: {e}")
+        
+        elif input_method == "GenBank ID":
             genbank_id = st.text_input("Enter GenBank Accession Number:", 
                                      placeholder="e.g., NM_000314.6")
             
