@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """
-Streamlit Web Application for Automated Primer Design - FIXED VERSION
-===================================================================
+Streamlit Web Application for Automated Primer Design - COMPLETE FIXED VERSION
+============================================================================
 
-Fixed issues with session state management between tabs.
+Complete version with T7 dsRNA functionality and all bug fixes.
 
-Key fixes:
-1. Added session state debugging
-2. Fixed tab data access
-3. Improved error handling
-4. Added fallback for missing data
+Key features:
+1. Fixed session state management
+2. T7 promoter addition for dsRNA production
+3. Comprehensive analysis and export options
+4. Agricultural pest/pathogen focus
 
 Installation:
 pip install streamlit biopython primer3-py requests pandas openpyxl plotly
@@ -53,7 +53,6 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Import the primer design classes (assuming they're in the same file or imported)
 @dataclass
 class PrimerPair:
     """Class to store primer pair information"""
@@ -118,7 +117,7 @@ class NCBIConnector:
             return {}
 
 class PrimerDesigner:
-    """Main primer design class with advanced parameters"""
+    """Main primer design class with T7 dsRNA functionality"""
     
     def __init__(self):
         self.default_params = {
@@ -140,13 +139,22 @@ class PrimerDesigner:
             'PRIMER_PAIR_MAX_COMPL_END': 8,
             'PRIMER_PRODUCT_SIZE_RANGE': [[75, 300], [300, 600], [600, 1000]]
         }
+        
+        # T7 promoter sequence for dsRNA production
+        self.t7_promoter = "TAATACGACTCACTATAGGG"
     
     def calculate_gc_content(self, sequence: str) -> float:
         gc_count = sequence.upper().count('G') + sequence.upper().count('C')
         return (gc_count / len(sequence)) * 100 if sequence else 0
     
+    def reverse_complement(self, sequence: str) -> str:
+        """Generate reverse complement of DNA sequence"""
+        complement = {'A': 'T', 'T': 'A', 'G': 'C', 'C': 'G'}
+        return "".join(complement.get(base, base) for base in reversed(sequence.upper()))
+    
     def design_primers(self, sequence: str, target_region: Optional[Tuple[int, int]] = None,
-                      custom_params: Optional[Dict] = None) -> List[PrimerPair]:
+                      custom_params: Optional[Dict] = None, add_t7_promoter: bool = False) -> List[PrimerPair]:
+        """Design primers with optional T7 promoter for dsRNA production"""
         params = self.default_params.copy()
         if custom_params:
             params.update(custom_params)
@@ -174,21 +182,56 @@ class PrimerDesigner:
                 product_size = primer_results[f'PRIMER_PAIR_{i}_PRODUCT_SIZE']
                 penalty = primer_results[f'PRIMER_PAIR_{i}_PENALTY']
                 
-                forward_tm = Tm_NN(forward_seq)
-                reverse_tm = Tm_NN(reverse_seq)
+                # Add T7 promoter if requested (for dsRNA production)
+                if add_t7_promoter:
+                    # Add T7 to both forward and reverse primers for bidirectional transcription
+                    forward_seq_t7 = self.t7_promoter + forward_seq
+                    reverse_seq_t7 = self.t7_promoter + reverse_seq
+                    
+                    # Calculate Tm for core primer sequence (without T7)
+                    forward_tm = Tm_NN(forward_seq)
+                    reverse_tm = Tm_NN(reverse_seq)
+                    
+                    # Store both original and T7-modified sequences
+                    primer_pair = PrimerPair(
+                        forward_seq=forward_seq_t7,  # T7 + primer
+                        reverse_seq=reverse_seq_t7,  # T7 + primer  
+                        forward_tm=forward_tm,       # Tm of core primer
+                        reverse_tm=reverse_tm,       # Tm of core primer
+                        product_size=product_size,
+                        gc_content_f=self.calculate_gc_content(forward_seq),  # GC of core primer
+                        gc_content_r=self.calculate_gc_content(reverse_seq),  # GC of core primer
+                        forward_start=forward_start,
+                        reverse_start=reverse_start,
+                        penalty=penalty
+                    )
+                    
+                    # Store additional T7 information
+                    primer_pair.core_forward_seq = forward_seq
+                    primer_pair.core_reverse_seq = reverse_seq
+                    primer_pair.has_t7_promoter = True
+                    primer_pair.t7_promoter_seq = self.t7_promoter
+                    
+                else:
+                    # Standard primers without T7
+                    forward_tm = Tm_NN(forward_seq)
+                    reverse_tm = Tm_NN(reverse_seq)
+                    
+                    primer_pair = PrimerPair(
+                        forward_seq=forward_seq,
+                        reverse_seq=reverse_seq,
+                        forward_tm=forward_tm,
+                        reverse_tm=reverse_tm,
+                        product_size=product_size,
+                        gc_content_f=self.calculate_gc_content(forward_seq),
+                        gc_content_r=self.calculate_gc_content(reverse_seq),
+                        forward_start=forward_start,
+                        reverse_start=reverse_start,
+                        penalty=penalty
+                    )
+                    
+                    primer_pair.has_t7_promoter = False
                 
-                primer_pair = PrimerPair(
-                    forward_seq=forward_seq,
-                    reverse_seq=reverse_seq,
-                    forward_tm=forward_tm,
-                    reverse_tm=reverse_tm,
-                    product_size=product_size,
-                    gc_content_f=self.calculate_gc_content(forward_seq),
-                    gc_content_r=self.calculate_gc_content(reverse_seq),
-                    forward_start=forward_start,
-                    reverse_start=reverse_start,
-                    penalty=penalty
-                )
                 primers.append(primer_pair)
             
             return primers
@@ -196,11 +239,48 @@ class PrimerDesigner:
         except Exception as e:
             st.error(f"Error in primer design: {e}")
             return []
+    
+    def calculate_dsrna_properties(self, primer_pair: PrimerPair, sequence: str) -> Dict:
+        """Calculate properties relevant for dsRNA production"""
+        if not hasattr(primer_pair, 'has_t7_promoter') or not primer_pair.has_t7_promoter:
+            return {}
+        
+        try:
+            # Extract the target region that will be transcribed
+            target_start = primer_pair.forward_start
+            target_end = primer_pair.reverse_start
+            target_sequence = sequence[target_start:target_end + 1]
+            
+            # Calculate dsRNA properties
+            dsrna_length = len(target_sequence)
+            gc_content = self.calculate_gc_content(target_sequence)
+            
+            # Check for optimal dsRNA characteristics
+            optimal_length = 100 <= dsrna_length <= 500  # Optimal for RNAi
+            moderate_gc = 40 <= gc_content <= 60  # Avoid extreme GC content
+            
+            # Calculate T7 transcription efficiency factors
+            # T7 prefers certain nucleotides at +1 position (G is best)
+            transcription_start = target_sequence[0] if target_sequence else 'N'
+            t7_efficiency = "High" if transcription_start == 'G' else "Moderate" if transcription_start in ['A', 'C'] else "Low"
+            
+            return {
+                'dsrna_length': dsrna_length,
+                'dsrna_gc_content': gc_content,
+                'target_sequence': target_sequence[:100] + '...' if len(target_sequence) > 100 else target_sequence,
+                'optimal_length': optimal_length,
+                'moderate_gc': moderate_gc,
+                'transcription_efficiency': t7_efficiency,
+                'transcription_start': transcription_start,
+                'estimated_yield': "High" if optimal_length and moderate_gc else "Moderate" if optimal_length or moderate_gc else "Low"
+            }
+        
+        except Exception as e:
+            return {'error': str(e)}
 
 # Streamlit App Functions
 def init_session_state():
-    """Initialize session state variables - FIXED VERSION"""
-    # Initialize all required session state variables
+    """Initialize session state variables"""
     session_vars = {
         'primers_designed': [],
         'current_sequence': "",
@@ -208,7 +288,9 @@ def init_session_state():
         'search_results': None,
         'database_used': None,
         'comprehensive_analysis_results': None,
-        't7_results': None
+        't7_results': None,
+        't7_dsrna_enabled': False,
+        't7_settings': {}
     }
     
     for var, default_value in session_vars.items():
@@ -216,7 +298,7 @@ def init_session_state():
             st.session_state[var] = default_value
 
 def debug_session_state():
-    """Debug function to show session state - ADDED"""
+    """Debug function to show session state"""
     with st.expander("🔍 Debug: Session State"):
         st.write("**Session State Variables:**")
         for key, value in st.session_state.items():
@@ -231,12 +313,11 @@ def debug_session_state():
                     st.write(f"- {key}: {type(value)} - {value}")
 
 def create_primer_visualization(primers: List[PrimerPair]):
-    """Create interactive visualizations for primer pairs - FIXED"""
+    """Create interactive visualizations for primer pairs"""
     if not primers:
         return None
     
     try:
-        # Create subplot with secondary y-axis
         fig = make_subplots(
             rows=2, cols=2,
             subplot_titles=('Melting Temperatures', 'GC Content Distribution', 
@@ -245,7 +326,6 @@ def create_primer_visualization(primers: List[PrimerPair]):
                    [{"secondary_y": False}, {"secondary_y": False}]]
         )
         
-        # Data preparation
         primer_nums = list(range(1, len(primers) + 1))
         forward_tms = [p.forward_tm for p in primers]
         reverse_tms = [p.reverse_tm for p in primers]
@@ -254,7 +334,6 @@ def create_primer_visualization(primers: List[PrimerPair]):
         product_sizes = [p.product_size for p in primers]
         penalties = [p.penalty for p in primers]
         
-        # Melting temperatures
         fig.add_trace(
             go.Scatter(x=primer_nums, y=forward_tms, name='Forward Tm', 
                       line=dict(color='blue'), mode='lines+markers'),
@@ -266,7 +345,6 @@ def create_primer_visualization(primers: List[PrimerPair]):
             row=1, col=1
         )
         
-        # GC Content
         fig.add_trace(
             go.Bar(x=primer_nums, y=forward_gcs, name='Forward GC%', 
                    marker_color='lightblue', opacity=0.7),
@@ -278,14 +356,12 @@ def create_primer_visualization(primers: List[PrimerPair]):
             row=1, col=2
         )
         
-        # Product sizes
         fig.add_trace(
             go.Scatter(x=primer_nums, y=product_sizes, name='Product Size', 
                       line=dict(color='green'), mode='lines+markers'),
             row=2, col=1
         )
         
-        # Penalty scores
         fig.add_trace(
             go.Bar(x=primer_nums, y=penalties, name='Penalty Score', 
                    marker_color='orange'),
@@ -305,7 +381,7 @@ def create_primer_visualization(primers: List[PrimerPair]):
         return None
 
 def create_sequence_diagram(sequence: str, primers: List[PrimerPair], selected_primer: int = 0):
-    """Create a sequence diagram showing primer binding sites - FIXED"""
+    """Create a sequence diagram showing primer binding sites"""
     if not primers or selected_primer >= len(primers) or not sequence:
         return None
     
@@ -313,10 +389,8 @@ def create_sequence_diagram(sequence: str, primers: List[PrimerPair], selected_p
         primer = primers[selected_primer]
         seq_len = len(sequence)
         
-        # Create figure
         fig = go.Figure()
         
-        # Add sequence as background
         fig.add_shape(
             type="rect",
             x0=0, y0=0.4, x1=seq_len, y1=0.6,
@@ -324,33 +398,38 @@ def create_sequence_diagram(sequence: str, primers: List[PrimerPair], selected_p
             line=dict(color="black", width=1),
         )
         
-        # Add forward primer
+        # Determine primer length for visualization
+        if hasattr(primer, 'has_t7_promoter') and primer.has_t7_promoter:
+            forward_len = len(primer.core_forward_seq)
+            reverse_len = len(primer.core_reverse_seq)
+        else:
+            forward_len = len(primer.forward_seq)
+            reverse_len = len(primer.reverse_seq)
+        
         fig.add_shape(
             type="rect",
             x0=primer.forward_start, y0=0.6, 
-            x1=primer.forward_start + len(primer.forward_seq), y1=0.8,
+            x1=primer.forward_start + forward_len, y1=0.8,
             fillcolor="blue",
             line=dict(color="darkblue", width=2),
         )
         
-        # Add reverse primer
         fig.add_shape(
             type="rect",
-            x0=primer.reverse_start - len(primer.reverse_seq) + 1, y0=0.2,
+            x0=primer.reverse_start - reverse_len + 1, y0=0.2,
             x1=primer.reverse_start + 1, y1=0.4,
             fillcolor="red",
             line=dict(color="darkred", width=2),
         )
         
-        # Add annotations
         fig.add_annotation(
-            x=primer.forward_start + len(primer.forward_seq)/2, y=0.7,
+            x=primer.forward_start + forward_len/2, y=0.7,
             text=f"Forward<br>Tm: {primer.forward_tm:.1f}°C",
             showarrow=True, arrowhead=2, arrowcolor="blue"
         )
         
         fig.add_annotation(
-            x=primer.reverse_start - len(primer.reverse_seq)/2, y=0.3,
+            x=primer.reverse_start - reverse_len/2, y=0.3,
             text=f"Reverse<br>Tm: {primer.reverse_tm:.1f}°C",
             showarrow=True, arrowhead=2, arrowcolor="red"
         )
@@ -369,23 +448,43 @@ def create_sequence_diagram(sequence: str, primers: List[PrimerPair], selected_p
         return None
 
 def export_to_excel(primers: List[PrimerPair]) -> bytes:
-    """Export primer results to Excel format - FIXED"""
+    """Export primer results to Excel format"""
     try:
         data = []
         for i, primer in enumerate(primers):
-            data.append({
-                'Primer_Pair': i + 1,
-                'Forward_Sequence': primer.forward_seq,
-                'Reverse_Sequence': primer.reverse_seq,
-                'Forward_Tm': round(primer.forward_tm, 2),
-                'Reverse_Tm': round(primer.reverse_tm, 2),
-                'Product_Size': primer.product_size,
-                'Forward_GC%': round(primer.gc_content_f, 2),
-                'Reverse_GC%': round(primer.gc_content_r, 2),
-                'Forward_Start': primer.forward_start,
-                'Reverse_Start': primer.reverse_start,
-                'Penalty_Score': round(primer.penalty, 4)
-            })
+            if hasattr(primer, 'has_t7_promoter') and primer.has_t7_promoter:
+                data.append({
+                    'Primer_Pair': i + 1,
+                    'Forward_T7_Sequence': primer.forward_seq,
+                    'Reverse_T7_Sequence': primer.reverse_seq,
+                    'Forward_Core_Sequence': primer.core_forward_seq,
+                    'Reverse_Core_Sequence': primer.core_reverse_seq,
+                    'Core_Forward_Tm': round(primer.forward_tm, 2),
+                    'Core_Reverse_Tm': round(primer.reverse_tm, 2),
+                    'dsRNA_Size': primer.product_size,
+                    'Core_Forward_GC%': round(primer.gc_content_f, 2),
+                    'Core_Reverse_GC%': round(primer.gc_content_r, 2),
+                    'Forward_Start': primer.forward_start,
+                    'Reverse_Start': primer.reverse_start,
+                    'Penalty_Score': round(primer.penalty, 4),
+                    'T7_Promoter': primer.t7_promoter_seq,
+                    'Primer_Type': 'T7_dsRNA'
+                })
+            else:
+                data.append({
+                    'Primer_Pair': i + 1,
+                    'Forward_Sequence': primer.forward_seq,
+                    'Reverse_Sequence': primer.reverse_seq,
+                    'Forward_Tm': round(primer.forward_tm, 2),
+                    'Reverse_Tm': round(primer.reverse_tm, 2),
+                    'Product_Size': primer.product_size,
+                    'Forward_GC%': round(primer.gc_content_f, 2),
+                    'Reverse_GC%': round(primer.gc_content_r, 2),
+                    'Forward_Start': primer.forward_start,
+                    'Reverse_Start': primer.reverse_start,
+                    'Penalty_Score': round(primer.penalty, 4),
+                    'Primer_Type': 'Standard'
+                })
         
         df = pd.DataFrame(data)
         output = io.BytesIO()
@@ -398,7 +497,7 @@ def export_to_excel(primers: List[PrimerPair]) -> bytes:
         return b""
 
 def get_organism_suggestions():
-    """Get agricultural pest and pathogen suggestions for the search"""
+    """Get agricultural pest and pathogen suggestions"""
     return {
         "Arthropods": {
             "Mites": ["Aculops lycopersici", "Tetranychus urticae", "Polyphagotarsonemus latus"],
@@ -424,7 +523,7 @@ def get_organism_suggestions():
     }
 
 def check_session_state_validity():
-    """Check if session state has valid data - ADDED"""
+    """Check if session state has valid data"""
     has_primers = bool(st.session_state.get('primers_designed'))
     has_sequence = bool(st.session_state.get('current_sequence'))
     has_seq_info = bool(st.session_state.get('sequence_info'))
@@ -438,37 +537,30 @@ def check_session_state_validity():
     }
 
 def main():
-    """Main Streamlit application - FIXED VERSION"""
+    """Main Streamlit application"""
     
-    # Initialize session state
     init_session_state()
     
-    # Header
     st.title("🧬 Automated Primer Design Tool")
-    st.markdown("### Design PCR primers with NCBI database integration")
+    st.markdown("### Design PCR primers with NCBI database integration and T7 dsRNA functionality")
     
-    # Debug session state (can be hidden in production)
     debug_session_state()
     
-    # Sidebar configuration (keeping original sidebar code)
+    # Sidebar configuration
     st.sidebar.header("⚙️ Configuration")
     
     # NCBI Configuration
     st.sidebar.subheader("NCBI Settings")
-    
-    # Make email requirement more prominent
-    st.sidebar.info("📧 **Email Required**: NCBI requires a valid email address for database access. This is mandatory for all searches.")
+    st.sidebar.info("📧 **Email Required**: NCBI requires a valid email address for database access.")
     
     email = st.sidebar.text_input("Email (required for NCBI)", 
                                  placeholder="your.email@example.com",
-                                 help="Required by NCBI for database access. Use any valid email address.")
+                                 help="Required by NCBI for database access.")
     
-    # Add a default email option for testing
     if st.sidebar.button("🚀 Use test email (demo@example.com)", type="secondary"):
         st.session_state.demo_email = "demo@example.com"
         st.rerun()
     
-    # Use demo email if set
     if 'demo_email' in st.session_state:
         email = st.session_state.demo_email
         del st.session_state.demo_email
@@ -495,12 +587,39 @@ def main():
         max_poly_x = st.slider("Max poly-X runs", 3, 6, 4)
         salt_conc = st.slider("Salt concentration (mM)", 10.0, 100.0, 50.0, 1.0)
         
-        # Product size ranges
         st.write("Product size ranges:")
         min_product = st.number_input("Minimum product size", 50, 500, 75)
         max_product = st.number_input("Maximum product size", 200, 2000, 1000)
     
-    # Create custom parameters
+    # T7 dsRNA Production Settings
+    st.sidebar.subheader("🧬 dsRNA Production")
+    enable_t7_dsrna = st.sidebar.checkbox(
+        "Add T7 promoters for dsRNA production", 
+        value=False,
+        help="Adds T7 promoter sequences to both primers for bidirectional transcription and dsRNA synthesis"
+    )
+    
+    if enable_t7_dsrna:
+        with st.sidebar.expander("dsRNA Parameters", expanded=True):
+            st.info("**T7 dsRNA Production**\nAdds T7 promoter (TAATACGACTCACTATAGGG) to both forward and reverse primers. This enables:\n\n• Bidirectional transcription\n• Double-stranded RNA synthesis\n• RNAi applications\n• Pest management research")
+            
+            optimal_dsrna_length = st.checkbox(
+                "Optimize for dsRNA length (100-500 bp)",
+                value=True,
+                help="Prioritize primer pairs that produce optimal dsRNA lengths for RNAi"
+            )
+            
+            check_transcription_efficiency = st.checkbox(
+                "Check T7 transcription efficiency",
+                value=True,
+                help="Analyze factors affecting T7 polymerase transcription efficiency"
+            )
+            
+            if optimal_dsrna_length:
+                min_product = max(min_product, 100)
+                max_product = min(max_product, 500)
+                st.write(f"**Adjusted for dsRNA:** {min_product}-{max_product} bp")
+    
     custom_params = {
         'PRIMER_OPT_SIZE': opt_size,
         'PRIMER_MIN_SIZE': min_size,
@@ -515,7 +634,7 @@ def main():
         'PRIMER_PRODUCT_SIZE_RANGE': [[min_product, max_product]]
     }
     
-    # Main content area - FIXED TABS
+    # Main content area
     tab1, tab2, tab3, tab4 = st.tabs([
         "📝 Input", 
         "🔬 Results", 
@@ -523,13 +642,11 @@ def main():
         "💾 Export"
     ])
     
-    # Check session state validity
     state_check = check_session_state_validity()
     
     with tab1:
         st.header("Sequence Input")
         
-        # Show current session state status
         if state_check['has_primers']:
             st.success(f"✅ Current session: {state_check['primer_count']} primers designed for {state_check['sequence_length']:,} bp sequence")
         
@@ -546,13 +663,11 @@ def main():
             else:
                 st.info("💡 **Tip:** Enter the scientific name (e.g., 'Fusarium oxysporum') for best results.")
             
-            # Store existing organism search logic here
             col1, col2 = st.columns([2, 1])
             with col1:
                 organism_name = st.text_input("Enter organism name:", 
                                             placeholder="e.g., Fusarium oxysporum, Tetranychus urticae")
                 
-                # Show organism suggestions
                 suggestions = get_organism_suggestions()
                 st.write("**Agricultural Pests & Pathogens:**")
                 
@@ -562,14 +677,13 @@ def main():
                     for subcategory, organisms in subcategories.items():
                         st.write(f"*{subcategory}*")
                         
-                        # Create columns for organisms in this subcategory
                         cols = st.columns(min(len(organisms), 4))
                         for i, organism in enumerate(organisms):
                             with cols[i % 4]:
                                 if st.button(organism, key=f"suggest_{category}_{subcategory}_{i}", help=f"Click to search for {organism}"):
                                     organism_name = organism
                                     st.rerun()
-                        st.write("")  # Add spacing between subcategories
+                        st.write("")
             
             with col2:
                 max_genomes = st.number_input("Max genomes to search", min_value=1, max_value=20, value=5)
@@ -585,37 +699,30 @@ def main():
                             ncbi = NCBIConnector(email, api_key)
                             designer = PrimerDesigner()
                             
-                            # Search for sequences
                             search_query = f'"{organism_name}"[organism]'
                             st.write(f"Searching with query: `{search_query}`")
                             
-                            # Try nucleotide database first
                             seq_ids = ncbi.search_sequences(search_query, database="nucleotide", max_results=max_genomes)
                             
                             if seq_ids:
                                 st.success(f"Found {len(seq_ids)} sequences!")
                                 
-                                # Get first sequence for primer design
                                 seq_id = seq_ids[0]
                                 st.info(f"Using sequence {seq_id} for primer design...")
                                 
-                                # Fetch sequence
                                 sequence = ncbi.fetch_sequence(seq_id)
                                 seq_info = ncbi.fetch_sequence_info(seq_id)
                                 
                                 if sequence:
-                                    # Clean sequence
                                     clean_sequence = re.sub(r'[^ATGCatgc]', '', sequence.upper())
                                     
                                     if len(clean_sequence) < 50:
                                         st.error("Sequence too short for primer design")
                                     else:
-                                        # Limit sequence length for performance
                                         if len(clean_sequence) > 100000:
                                             st.warning(f"Large sequence ({len(clean_sequence):,} bp). Using first 100kb.")
                                             clean_sequence = clean_sequence[:100000]
                                         
-                                        # Store in session state - THIS IS THE KEY FIX
                                         st.session_state.current_sequence = clean_sequence
                                         st.session_state.sequence_info = seq_info or {
                                             "id": seq_id,
@@ -624,21 +731,32 @@ def main():
                                             "organism": organism_name
                                         }
                                         
-                                        # Design primers
                                         st.write("Designing primers...")
-                                        primers = designer.design_primers(clean_sequence, custom_params=custom_params)
+                                        primers = designer.design_primers(
+                                            clean_sequence, 
+                                            custom_params=custom_params,
+                                            add_t7_promoter=enable_t7_dsrna
+                                        )
                                         st.session_state.primers_designed = primers
+                                        
+                                        if enable_t7_dsrna:
+                                            st.session_state.t7_dsrna_enabled = True
+                                            st.session_state.t7_settings = {
+                                                'optimal_length': optimal_dsrna_length,
+                                                'check_efficiency': check_transcription_efficiency
+                                            }
+                                        else:
+                                            st.session_state.t7_dsrna_enabled = False
                                         
                                         if primers:
                                             st.success(f"✅ Successfully designed {len(primers)} primer pairs!")
                                             
-                                            # Show preview
                                             preview_data = []
-                                            for i, primer in enumerate(primers[:5]):  # Show first 5
+                                            for i, primer in enumerate(primers[:5]):
                                                 preview_data.append({
                                                     'Pair': i + 1,
-                                                    'Forward': primer.forward_seq,
-                                                    'Reverse': primer.reverse_seq,
+                                                    'Forward': primer.forward_seq[:30] + '...' if len(primer.forward_seq) > 30 else primer.forward_seq,
+                                                    'Reverse': primer.reverse_seq[:30] + '...' if len(primer.reverse_seq) > 30 else primer.reverse_seq,
                                                     'Product Size': f"{primer.product_size} bp"
                                                 })
                                             
@@ -667,10 +785,8 @@ def main():
                         try:
                             designer = PrimerDesigner()
                             
-                            # Clean sequence
                             clean_seq = re.sub(r'[^ATGCatgc]', '', sequence_input.upper())
                             
-                            # Store in session state - KEY FIX
                             st.session_state.current_sequence = clean_seq
                             st.session_state.sequence_info = {
                                 "length": len(clean_seq),
@@ -679,8 +795,21 @@ def main():
                                 "id": "user_sequence"
                             }
                             
-                            primers = designer.design_primers(clean_seq, custom_params=custom_params)
+                            primers = designer.design_primers(
+                                clean_seq, 
+                                custom_params=custom_params,
+                                add_t7_promoter=enable_t7_dsrna
+                            )
                             st.session_state.primers_designed = primers
+                            
+                            if enable_t7_dsrna:
+                                st.session_state.t7_dsrna_enabled = True
+                                st.session_state.t7_settings = {
+                                    'optimal_length': optimal_dsrna_length,
+                                    'check_efficiency': check_transcription_efficiency
+                                }
+                            else:
+                                st.session_state.t7_dsrna_enabled = False
                             
                             if primers:
                                 st.success(f"Successfully designed {len(primers)} primer pairs!")
@@ -689,23 +818,19 @@ def main():
                                 st.warning("No suitable primers found with current parameters")
                         except Exception as e:
                             st.error(f"Error: {e}")
-        
-        # Add other input methods (GenBank ID, NCBI Search, Upload File) here
-        # Keeping them brief for space, but same pattern applies
     
     with tab2:
         st.header("Primer Design Results")
         
-        # Check session state - FIXED
         if not state_check['has_primers']:
             st.info("No primers designed yet. Please use the Input tab to design primers.")
-            st.write("**Session State Debug:**")
-            st.write(f"- Has primers: {state_check['has_primers']}")
-            st.write(f"- Has sequence: {state_check['has_sequence']}")
-            st.write(f"- Primer count: {state_check['primer_count']}")
             return
         
         primers = st.session_state.primers_designed
+        t7_enabled = st.session_state.get('t7_dsrna_enabled', False)
+        
+        if t7_enabled:
+            st.info("🧬 **T7 dsRNA Mode Active** - Primers include T7 promoter sequences for double-stranded RNA production")
         
         # Sequence information
         if st.session_state.sequence_info:
@@ -726,20 +851,34 @@ def main():
         # Primer results table
         st.subheader("Primer Pairs")
         
-        # Create DataFrame for display
         data = []
         for i, primer in enumerate(primers):
-            data.append({
-                'Pair': i + 1,
-                'Forward Sequence': primer.forward_seq,
-                'Reverse Sequence': primer.reverse_seq,
-                'Forward Tm': f"{primer.forward_tm:.1f}°C",
-                'Reverse Tm': f"{primer.reverse_tm:.1f}°C",
-                'Product Size': f"{primer.product_size} bp",
-                'Forward GC%': f"{primer.gc_content_f:.1f}%",
-                'Reverse GC%': f"{primer.gc_content_r:.1f}%",
-                'Penalty': f"{primer.penalty:.3f}"
-            })
+            if hasattr(primer, 'has_t7_promoter') and primer.has_t7_promoter:
+                row = {
+                    'Pair': i + 1,
+                    'Forward (with T7)': primer.forward_seq,
+                    'Reverse (with T7)': primer.reverse_seq,
+                    'Core Forward': primer.core_forward_seq,
+                    'Core Reverse': primer.core_reverse_seq,
+                    'Core Tm': f"{primer.forward_tm:.1f}°C / {primer.reverse_tm:.1f}°C",
+                    'dsRNA Size': f"{primer.product_size} bp",
+                    'Core GC%': f"{primer.gc_content_f:.1f}% / {primer.gc_content_r:.1f}%",
+                    'Penalty': f"{primer.penalty:.3f}"
+                }
+            else:
+                row = {
+                    'Pair': i + 1,
+                    'Forward Sequence': primer.forward_seq,
+                    'Reverse Sequence': primer.reverse_seq,
+                    'Forward Tm': f"{primer.forward_tm:.1f}°C",
+                    'Reverse Tm': f"{primer.reverse_tm:.1f}°C",
+                    'Product Size': f"{primer.product_size} bp",
+                    'Forward GC%': f"{primer.gc_content_f:.1f}%",
+                    'Reverse GC%': f"{primer.gc_content_r:.1f}%",
+                    'Penalty': f"{primer.penalty:.3f}"
+                }
+            
+            data.append(row)
         
         df = pd.DataFrame(data)
         st.dataframe(df, use_container_width=True)
@@ -753,7 +892,6 @@ def main():
         if selected_primer < len(primers):
             primer = primers[selected_primer]
             
-            # Check if this is a T7 dsRNA primer
             if hasattr(primer, 'has_t7_promoter') and primer.has_t7_promoter:
                 st.info("🧬 **T7 dsRNA Primer Pair** - Includes T7 promoter for double-stranded RNA synthesis")
                 
@@ -800,7 +938,6 @@ def main():
                         with col3:
                             st.metric("T7 Efficiency", dsrna_props.get('transcription_efficiency', 'N/A'))
                         
-                        # Quality indicators
                         st.write("**dsRNA Quality Indicators:**")
                         if dsrna_props.get('optimal_length'):
                             st.success("✅ Optimal length for RNAi (100-500 bp)")
@@ -815,12 +952,10 @@ def main():
                         st.write(f"**Transcription Start:** {dsrna_props.get('transcription_start', 'N/A')} (G is optimal for T7)")
                         st.write(f"**Estimated Yield:** {dsrna_props.get('estimated_yield', 'N/A')}")
                         
-                        # Show target sequence
                         if 'target_sequence' in dsrna_props:
                             st.write("**Target Sequence (first 100 bp):**")
                             st.code(dsrna_props['target_sequence'], language="text")
             else:
-                # Standard primer display
                 col1, col2 = st.columns(2)
                 
                 with col1:
@@ -842,40 +977,77 @@ def main():
                 st.write(f"**Product Size:** {primer.product_size} bp")
             
             st.write(f"**Penalty Score:** {primer.penalty:.4f}")
-                st.write(f"- Position: {primer.forward_start}")
-                st.write(f"- Length: {len(primer.forward_seq)} bp")
-                st.write(f"- Tm: {primer.forward_tm:.2f}°C")
-                st.write(f"- GC Content: {primer.gc_content_f:.1f}%")
+        
+        # dsRNA Production Protocol
+        if t7_enabled and primers:
+            st.subheader("dsRNA Production Protocol")
             
-            with col2:
-                st.write("**Reverse Primer**")
-                st.code(primer.reverse_seq, language="text")
-                st.write(f"- Position: {primer.reverse_start}")
-                st.write(f"- Length: {len(primer.reverse_seq)} bp")
-                st.write(f"- Tm: {primer.reverse_tm:.2f}°C")
-                st.write(f"- GC Content: {primer.gc_content_r:.1f}%")
-            
-            st.write(f"**Product Size:** {primer.product_size} bp")
-            st.write(f"**Penalty Score:** {primer.penalty:.4f}")
+            with st.expander("Step-by-Step dsRNA Synthesis Protocol", expanded=False):
+                st.markdown("""
+                **Materials Required:**
+                - T7 RNA Polymerase
+                - NTP mix (ATP, CTP, GTP, UTP)
+                - T7 transcription buffer
+                - RNase-free water
+                - DNase I
+                - Phenol-chloroform (optional)
+                - Ethanol precipitation reagents
+                
+                **Protocol:**
+                
+                **Step 1: PCR Amplification**
+                1. Use the T7-tagged primers to amplify your target region
+                2. Confirm PCR product size by gel electrophoresis
+                3. Purify PCR product using standard methods
+                
+                **Step 2: In Vitro Transcription**
+                1. Set up T7 transcription reaction:
+                   - 1-2 μg PCR template
+                   - 2 mM each NTP
+                   - 1× T7 transcription buffer
+                   - 20-40 units T7 RNA Polymerase
+                   - RNase-free water to 20 μL
+                2. Incubate at 37°C for 2-4 hours
+                
+                **Step 3: DNase Treatment**
+                1. Add 2 units DNase I
+                2. Incubate at 37°C for 15 minutes
+                
+                **Step 4: dsRNA Formation**
+                1. Heat to 95°C for 5 minutes
+                2. Cool slowly to room temperature (30-60 minutes)
+                3. This allows sense and antisense strands to anneal
+                
+                **Step 5: Purification**
+                1. Phenol-chloroform extraction (optional)
+                2. Ethanol precipitation
+                3. Resuspend in RNase-free water
+                
+                **Step 6: Quality Control**
+                1. Check dsRNA by gel electrophoresis
+                2. Quantify using spectrophotometer
+                3. Store at -80°C
+                """)
     
     with tab3:
         st.header("Primer Analysis")
         
-        # Check session state - FIXED
         if not state_check['has_primers']:
             st.info("No primers designed yet. Please use the Input tab to design primers.")
             return
         
         primers = st.session_state.primers_designed
+        t7_enabled = st.session_state.get('t7_dsrna_enabled', False)
         
-        # Create visualizations
+        if t7_enabled:
+            st.info("🧬 **T7 dsRNA Analysis Mode** - Showing analysis for dsRNA production primers")
+        
         fig = create_primer_visualization(primers)
         if fig:
             st.plotly_chart(fig, use_container_width=True)
         else:
             st.warning("Could not create primer visualization")
         
-        # Sequence diagram
         if state_check['has_sequence']:
             st.subheader("Primer Binding Sites")
             selected_for_diagram = st.selectbox(
@@ -892,30 +1064,78 @@ def main():
             )
             if seq_fig:
                 st.plotly_chart(seq_fig, use_container_width=True)
-            else:
-                st.warning("Could not create sequence diagram")
         
-        # Statistics
+        # dsRNA-specific analysis
+        if t7_enabled and primers:
+            st.subheader("dsRNA Production Analysis")
+            
+            designer = PrimerDesigner()
+            dsrna_analysis = []
+            
+            for i, primer in enumerate(primers):
+                if hasattr(primer, 'has_t7_promoter') and primer.has_t7_promoter:
+                    props = designer.calculate_dsrna_properties(primer, st.session_state.current_sequence)
+                    if props:
+                        dsrna_analysis.append({
+                            'Pair': i + 1,
+                            'dsRNA Length': f"{props.get('dsrna_length', 'N/A')} bp",
+                            'GC Content': f"{props.get('dsrna_gc_content', 'N/A'):.1f}%",
+                            'T7 Efficiency': props.get('transcription_efficiency', 'N/A'),
+                            'Optimal Length': '✅' if props.get('optimal_length') else '❌',
+                            'Moderate GC': '✅' if props.get('moderate_gc') else '❌',
+                            'Estimated Yield': props.get('estimated_yield', 'N/A')
+                        })
+            
+            if dsrna_analysis:
+                dsrna_df = pd.DataFrame(dsrna_analysis)
+                st.dataframe(dsrna_df, use_container_width=True)
+                
+                st.subheader("dsRNA Quality Summary")
+                total_pairs = len(dsrna_analysis)
+                optimal_length_count = sum(1 for row in dsrna_analysis if row['Optimal Length'] == '✅')
+                moderate_gc_count = sum(1 for row in dsrna_analysis if row['Moderate GC'] == '✅')
+                
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("Optimal Length", f"{optimal_length_count}/{total_pairs}")
+                with col2:
+                    st.metric("Moderate GC", f"{moderate_gc_count}/{total_pairs}")
+                with col3:
+                    quality_score = (optimal_length_count + moderate_gc_count) / (2 * total_pairs) * 100
+                    st.metric("Quality Score", f"{quality_score:.0f}%")
+        
         st.subheader("Statistics")
         if primers:
             col1, col2, col3, col4 = st.columns(4)
             
             with col1:
                 avg_tm = sum(p.forward_tm + p.reverse_tm for p in primers) / (2 * len(primers))
-                st.metric("Average Tm", f"{avg_tm:.1f}°C")
+                if t7_enabled:
+                    st.metric("Average Core Tm", f"{avg_tm:.1f}°C")
+                else:
+                    st.metric("Average Tm", f"{avg_tm:.1f}°C")
             
             with col2:
                 avg_gc = sum(p.gc_content_f + p.gc_content_r for p in primers) / (2 * len(primers))
-                st.metric("Average GC%", f"{avg_gc:.1f}%")
+                if t7_enabled:
+                    st.metric("Average Core GC%", f"{avg_gc:.1f}%")
+                else:
+                    st.metric("Average GC%", f"{avg_gc:.1f}%")
             
             with col3:
                 avg_product = sum(p.product_size for p in primers) / len(primers)
-                st.metric("Average Product Size", f"{avg_product:.0f} bp")
+                if t7_enabled:
+                    st.metric("Average dsRNA Size", f"{avg_product:.0f} bp")
+                else:
+                    st.metric("Average Product Size", f"{avg_product:.0f} bp")
             
+            with col4:
+                best_penalty = min(p.penalty for p in primers)
+                st.metric("Best Penalty Score", f"{best_penalty:.3f}")
+    
     with tab4:
         st.header("Export Results")
         
-        # Check session state - FIXED
         if not state_check['has_primers']:
             st.info("No primers to export. Please design primers first.")
             return
@@ -931,7 +1151,6 @@ def main():
         col1, col2 = st.columns(2)
         
         with col1:
-            # Excel export
             if st.button("📊 Download as Excel", type="primary"):
                 excel_data = export_to_excel(primers)
                 if excel_data:
@@ -944,12 +1163,10 @@ def main():
                     )
         
         with col2:
-            # CSV export
             try:
                 data = []
                 for i, primer in enumerate(primers):
                     if hasattr(primer, 'has_t7_promoter') and primer.has_t7_promoter:
-                        # T7 dsRNA primer format
                         row = {
                             'Primer_Pair': i + 1,
                             'Forward_T7_Sequence': primer.forward_seq,
@@ -967,21 +1184,7 @@ def main():
                             'T7_Promoter': primer.t7_promoter_seq,
                             'Primer_Type': 'T7_dsRNA'
                         }
-                        
-                        # Add dsRNA analysis if available
-                        if st.session_state.current_sequence:
-                            designer = PrimerDesigner()
-                            dsrna_props = designer.calculate_dsrna_properties(primer, st.session_state.current_sequence)
-                            if dsrna_props:
-                                row.update({
-                                    'dsRNA_GC_Content': round(dsrna_props.get('dsrna_gc_content', 0), 2),
-                                    'T7_Transcription_Efficiency': dsrna_props.get('transcription_efficiency', 'N/A'),
-                                    'Optimal_Length': dsrna_props.get('optimal_length', False),
-                                    'Moderate_GC': dsrna_props.get('moderate_gc', False),
-                                    'Estimated_Yield': dsrna_props.get('estimated_yield', 'N/A')
-                                })
                     else:
-                        # Standard primer format
                         row = {
                             'Primer_Pair': i + 1,
                             'Forward_Sequence': primer.forward_seq,
@@ -1012,7 +1215,6 @@ def main():
             except Exception as e:
                 st.error(f"Error creating CSV: {e}")
         
-        # Preview export data
         st.subheader("Export Preview")
         try:
             if 'df' in locals():
@@ -1020,7 +1222,6 @@ def main():
         except:
             st.warning("Could not create preview")
         
-        # Primer ordering format
         st.subheader("Primer Ordering Format")
         
         if t7_enabled:
@@ -1030,7 +1231,6 @@ def main():
                 ordering_data = []
                 for i, primer in enumerate(primers):
                     if hasattr(primer, 'has_t7_promoter') and primer.has_t7_promoter:
-                        # T7 primers for ordering
                         ordering_data.extend([
                             {
                                 'Name': f"T7_Forward_Primer_{i+1}",
@@ -1047,24 +1247,6 @@ def main():
                                 'Notes': f"T7 promoter + {len(primer.core_reverse_seq)}bp core"
                             }
                         ])
-                        
-                        # Also include core primers for reference
-                        ordering_data.extend([
-                            {
-                                'Name': f"Core_Forward_{i+1}",
-                                'Sequence': primer.core_forward_seq,
-                                'Length': len(primer.core_forward_seq),
-                                'Core_Tm': round(primer.forward_tm, 1),
-                                'Notes': "Core primer only (for reference)"
-                            },
-                            {
-                                'Name': f"Core_Reverse_{i+1}",
-                                'Sequence': primer.core_reverse_seq,
-                                'Length': len(primer.core_reverse_seq),
-                                'Core_Tm': round(primer.reverse_tm, 1),
-                                'Notes': "Core primer only (for reference)"
-                            }
-                        ])
                 
                 ordering_df = pd.DataFrame(ordering_data)
                 st.dataframe(ordering_df, use_container_width=True)
@@ -1077,30 +1259,6 @@ def main():
                     mime="text/csv"
                 )
                 
-                # Additional ordering notes
-                with st.expander("Ordering Notes and Tips"):
-                    st.markdown("""
-                    **For Synthesis Companies:**
-                    
-                    - **Scale:** 25-50 nmol is sufficient for most applications
-                    - **Purification:** Standard desalting is adequate for PCR
-                    - **Quality:** HPLC purification recommended for critical applications
-                    - **Storage:** Lyophilized primers stable at -20°C for years
-                    
-                    **T7 Primer Considerations:**
-                    
-                    - Longer primers (40+ bp) may have higher synthesis cost
-                    - T7 promoter sequence is critical - verify accuracy
-                    - Consider ordering both T7 and core primers for flexibility
-                    - Test core primers first, then proceed with T7 synthesis
-                    
-                    **Cost Optimization:**
-                    
-                    - Order core primers first for initial testing
-                    - Scale up T7 primer synthesis after optimization
-                    - Consider bulk ordering for multiple targets
-                    """)
-                    
             except Exception as e:
                 st.error(f"Error creating T7 ordering format: {e}")
         
@@ -1110,18 +1268,20 @@ def main():
             try:
                 ordering_data = []
                 for i, primer in enumerate(primers):
-                    ordering_data.append({
-                        'Name': f"Forward_Primer_{i+1}",
-                        'Sequence': primer.forward_seq,
-                        'Length': len(primer.forward_seq),
-                        'Tm': round(primer.forward_tm, 1)
-                    })
-                    ordering_data.append({
-                        'Name': f"Reverse_Primer_{i+1}",
-                        'Sequence': primer.reverse_seq,
-                        'Length': len(primer.reverse_seq),
-                        'Tm': round(primer.reverse_tm, 1)
-                    })
+                    ordering_data.extend([
+                        {
+                            'Name': f"Forward_Primer_{i+1}",
+                            'Sequence': primer.forward_seq,
+                            'Length': len(primer.forward_seq),
+                            'Tm': round(primer.forward_tm, 1)
+                        },
+                        {
+                            'Name': f"Reverse_Primer_{i+1}",
+                            'Sequence': primer.reverse_seq,
+                            'Length': len(primer.reverse_seq),
+                            'Tm': round(primer.reverse_tm, 1)
+                        }
+                    ])
                 
                 ordering_df = pd.DataFrame(ordering_data)
                 st.dataframe(ordering_df, use_container_width=True)
@@ -1210,6 +1370,12 @@ TROUBLESHOOTING:
 - Low yield: Check template quality, extend incubation
 - Degradation: Ensure RNase-free conditions
 - Poor annealing: Optimize cooling rate
+
+APPLICATION NOTES:
+- For RNAi in insects: 100-500 ng dsRNA per organism
+- For plant applications: 1-10 μg/mL in infiltration buffer
+- Store dsRNA at -80°C in single-use aliquots
+- Always use RNase-free conditions throughout protocol
 """
             
             st.download_button(
@@ -1218,104 +1384,6 @@ TROUBLESHOOTING:
                 file_name="t7_dsrna_protocol.txt",
                 mime="text/plain"
             )
-    
-    with tab4:
-        st.header("Export Results")
-        
-        # Check session state - FIXED
-        if not state_check['has_primers']:
-            st.info("No primers to export. Please design primers first.")
-            return
-        
-        primers = st.session_state.primers_designed
-        
-        st.subheader("Download Options")
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            # Excel export
-            if st.button("📊 Download as Excel", type="primary"):
-                excel_data = export_to_excel(primers)
-                if excel_data:
-                    st.download_button(
-                        label="Click to Download Excel File",
-                        data=excel_data,
-                        file_name="primer_results.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                    )
-        
-        with col2:
-            # CSV export
-            try:
-                data = []
-                for i, primer in enumerate(primers):
-                    data.append({
-                        'Primer_Pair': i + 1,
-                        'Forward_Sequence': primer.forward_seq,
-                        'Reverse_Sequence': primer.reverse_seq,
-                        'Forward_Tm': round(primer.forward_tm, 2),
-                        'Reverse_Tm': round(primer.reverse_tm, 2),
-                        'Product_Size': primer.product_size,
-                        'Forward_GC_Percent': round(primer.gc_content_f, 2),
-                        'Reverse_GC_Percent': round(primer.gc_content_r, 2),
-                        'Forward_Start': primer.forward_start,
-                        'Reverse_Start': primer.reverse_start,
-                        'Penalty_Score': round(primer.penalty, 4)
-                    })
-                
-                df = pd.DataFrame(data)
-                csv = df.to_csv(index=False)
-                
-                st.download_button(
-                    label="📄 Download as CSV",
-                    data=csv,
-                    file_name="primer_results.csv",
-                    mime="text/csv"
-                )
-            except Exception as e:
-                st.error(f"Error creating CSV: {e}")
-        
-        # Preview export data
-        st.subheader("Export Preview")
-        try:
-            if 'df' in locals():
-                st.dataframe(df, use_container_width=True)
-        except:
-            st.warning("Could not create preview")
-        
-        # Primer ordering format
-        st.subheader("Primer Ordering Format")
-        st.write("Format suitable for ordering from synthesis companies:")
-        
-        try:
-            ordering_data = []
-            for i, primer in enumerate(primers):
-                ordering_data.append({
-                    'Name': f"Forward_Primer_{i+1}",
-                    'Sequence': primer.forward_seq,
-                    'Length': len(primer.forward_seq),
-                    'Tm': round(primer.forward_tm, 1)
-                })
-                ordering_data.append({
-                    'Name': f"Reverse_Primer_{i+1}",
-                    'Sequence': primer.reverse_seq,
-                    'Length': len(primer.reverse_seq),
-                    'Tm': round(primer.reverse_tm, 1)
-                })
-            
-            ordering_df = pd.DataFrame(ordering_data)
-            st.dataframe(ordering_df, use_container_width=True)
-            
-            ordering_csv = ordering_df.to_csv(index=False)
-            st.download_button(
-                label="📋 Download Ordering Format",
-                data=ordering_csv,
-                file_name="primer_ordering.csv",
-                mime="text/csv"
-            )
-        except Exception as e:
-            st.error(f"Error creating ordering format: {e}")
     
     # Footer
     st.markdown("---")
