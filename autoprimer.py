@@ -27,8 +27,7 @@ from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 from Bio import Entrez, SeqIO
 from Bio.Seq import Seq
-from Bio.SeqUtils import Tm_NN
-from Bio.SeqUtils.MeltingTemp import Tm_staluc
+from Bio.SeqUtils.MeltingTemp import Tm_NN
 import primer3
 import re
 from pathlib import Path
@@ -164,8 +163,8 @@ class PrimerDesigner:
                 product_size = primer_results[f'PRIMER_PAIR_{i}_PRODUCT_SIZE']
                 penalty = primer_results[f'PRIMER_PAIR_{i}_PENALTY']
                 
-                forward_tm = Tm_staluc(forward_seq)
-                reverse_tm = Tm_staluc(reverse_seq)
+                forward_tm = Tm_NN(forward_seq)
+                reverse_tm = Tm_NN(reverse_seq)
                 
                 primer_pair = PrimerPair(
                     forward_seq=forward_seq,
