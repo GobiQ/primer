@@ -531,6 +531,10 @@ def main():
                         sequence_id = st.session_state.search_results[selected_genome]['ID']
                         
                         try:
+                            # Initialize NCBI connector for stored results
+                            ncbi = NCBIConnector(email, api_key)
+                            designer = PrimerDesigner()
+                            
                             if database_used == "genome":
                                 # For genome assemblies, search for nucleotide sequences
                                 assembly_query = f'"{sequence_id}"[Assembly]'
