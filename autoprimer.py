@@ -480,8 +480,16 @@ def main():
             
             col1, col2 = st.columns([2, 1])
             with col1:
+                # Initialize organism name from session state if available
+                default_organism = st.session_state.get('organism_name', '')
+                
                 organism_name = st.text_input("Enter organism name:", 
+                                            value=default_organism,
                                             placeholder="e.g., Fusarium oxysporum, Tetranychus urticae, Beet curly top virus")
+                
+                # Clear session state after using it
+                if 'organism_name' in st.session_state:
+                    del st.session_state.organism_name
                 
                 # Show organism suggestions
                 suggestions = get_organism_suggestions()
@@ -503,11 +511,6 @@ def main():
                         st.write("")  # Add spacing between subcategories
             with col2:
                 max_genomes = st.number_input("Max genomes to search", min_value=1, max_value=20, value=5)
-            
-            # Use session state for organism name if set
-            if 'organism_name' in st.session_state:
-                organism_name = st.session_state.organism_name
-                del st.session_state.organism_name
             
             # Additional search options
             with st.expander("Advanced Search Options"):
