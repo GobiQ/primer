@@ -841,7 +841,7 @@ def main():
                 
                 st.write(f"**Product Size:** {primer.product_size} bp")
             
-            st.write(f"**Penalty Score:** {primer.penalty:.4f}").forward_seq, language="text")
+            st.write(f"**Penalty Score:** {primer.penalty:.4f}")
                 st.write(f"- Position: {primer.forward_start}")
                 st.write(f"- Length: {len(primer.forward_seq)} bp")
                 st.write(f"- Tm: {primer.forward_tm:.2f}°C")
