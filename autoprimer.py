@@ -76,11 +76,13 @@ def get_organism_suggestions():
                 ("Cotton aphid", "Aphis gossypii")
             ]
         },
-        "Bacterial Pathogens": [
-            ("Bacterial wilt", "Ralstonia solanacearum"),
-            ("Fire blight", "Erwinia amylovora"),
-            ("Crown gall", "Agrobacterium tumefaciens")
-        ]
+        "Bacterial Pathogens": {
+            "Common bacteria": [
+                ("Bacterial wilt", "Ralstonia solanacearum"),
+                ("Fire blight", "Erwinia amylovora"),
+                ("Crown gall", "Agrobacterium tumefaciens")
+            ]
+        }
     }
 
 #!/usr/bin/env python3
@@ -849,25 +851,14 @@ def main():
             for category, subcategories in suggestions.items():
                 st.write(f"**{category}**")
                 
-                if isinstance(subcategories, dict):
-                    for subcategory, organisms in subcategories.items():
-                        st.write(f"*{subcategory}*")
-                        
-                        # Use more columns to reduce spacing
-                        cols = st.columns(min(len(organisms), 6))
-                        for i, (common_name, latin_name) in enumerate(organisms):
-                            with cols[i % 6]:
-                                if st.button(common_name, key=f"suggest_{category}_{subcategory}_{i}", 
-                                           help=f"Click to search for {latin_name}"):
-                                    # Set the organism name and trigger search
-                                    st.session_state.selected_organism = latin_name
-                                    st.rerun()
-                else:
-                    # Handle bacterial pathogens (list format)
-                    cols = st.columns(min(len(subcategories), 6))
-                    for i, (common_name, latin_name) in enumerate(subcategories):
+                for subcategory, organisms in subcategories.items():
+                    st.write(f"*{subcategory}*")
+                    
+                    # Use more columns to reduce spacing
+                    cols = st.columns(min(len(organisms), 6))
+                    for i, (common_name, latin_name) in enumerate(organisms):
                         with cols[i % 6]:
-                            if st.button(common_name, key=f"suggest_{category}_{i}", 
+                            if st.button(common_name, key=f"suggest_{category}_{subcategory}_{i}", 
                                        help=f"Click to search for {latin_name}"):
                                 # Set the organism name and trigger search
                                 st.session_state.selected_organism = latin_name
