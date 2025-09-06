@@ -481,15 +481,19 @@ def main():
             col1, col2 = st.columns([2, 1])
             with col1:
                 # Initialize organism name from session state if available
-                default_organism = st.session_state.get('organism_name', '')
+                if 'organism_name' in st.session_state:
+                    default_organism = st.session_state.organism_name
+                else:
+                    default_organism = ''
                 
                 organism_name = st.text_input("Enter organism name:", 
                                             value=default_organism,
+                                            key="organism_input",
                                             placeholder="e.g., Fusarium oxysporum, Tetranychus urticae, Beet curly top virus")
                 
-                # Clear session state after using it
-                if 'organism_name' in st.session_state:
-                    del st.session_state.organism_name
+                # Update session state with current input value
+                if organism_name:
+                    st.session_state.organism_name = organism_name
                 
                 # Show organism suggestions
                 suggestions = get_organism_suggestions()
@@ -530,7 +534,7 @@ def main():
                 if not email:
                     st.error("❌ **Email Required**: Please enter an email address in the sidebar to access NCBI databases. You can use any valid email address or click 'Use test email' for demo purposes.")
                 elif not organism_name:
-                    st.error("Please provide an organism name")
+                    st.error("❌ **Organism Name Required**: Please enter an organism name or click one of the suggested organisms above.")
                 else:
                     with st.spinner(f"Searching for {organism_name} genomes..."):
                         try:
@@ -613,6 +617,9 @@ def main():
                                                 
                                                 if primers:
                                                     st.success(f"Successfully designed {len(primers)} primer pairs!")
+                                                    # Clear session state after successful search
+                                                    if 'organism_name' in st.session_state:
+                                                        del st.session_state.organism_name
                                                 else:
                                                     st.warning("No suitable primers found with current parameters")
                                             else:
