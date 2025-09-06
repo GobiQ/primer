@@ -753,11 +753,95 @@ def main():
         if selected_primer < len(primers):
             primer = primers[selected_primer]
             
-            col1, col2 = st.columns(2)
+            # Check if this is a T7 dsRNA primer
+            if hasattr(primer, 'has_t7_promoter') and primer.has_t7_promoter:
+                st.info("🧬 **T7 dsRNA Primer Pair** - Includes T7 promoter for double-stranded RNA synthesis")
+                
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    st.write("**Forward Primer (with T7)**")
+                    st.code(primer.forward_seq, language="text")
+                    st.write("**Core Forward Primer**")
+                    st.code(primer.core_forward_seq, language="text")
+                    st.write(f"- Core Position: {primer.forward_start}")
+                    st.write(f"- Core Length: {len(primer.core_forward_seq)} bp")
+                    st.write(f"- Core Tm: {primer.forward_tm:.2f}°C")
+                    st.write(f"- Core GC Content: {primer.gc_content_f:.1f}%")
+                    st.write(f"- Full Length (with T7): {len(primer.forward_seq)} bp")
+                
+                with col2:
+                    st.write("**Reverse Primer (with T7)**")
+                    st.code(primer.reverse_seq, language="text")
+                    st.write("**Core Reverse Primer**")
+                    st.code(primer.core_reverse_seq, language="text")
+                    st.write(f"- Core Position: {primer.reverse_start}")
+                    st.write(f"- Core Length: {len(primer.core_reverse_seq)} bp")
+                    st.write(f"- Core Tm: {primer.reverse_tm:.2f}°C")
+                    st.write(f"- Core GC Content: {primer.gc_content_r:.1f}%")
+                    st.write(f"- Full Length (with T7): {len(primer.reverse_seq)} bp")
+                
+                st.write(f"**dsRNA Product Size:** {primer.product_size} bp")
+                st.write(f"**T7 Promoter:** {primer.t7_promoter_seq}")
+                
+                # dsRNA analysis
+                if st.session_state.current_sequence:
+                    designer = PrimerDesigner()
+                    dsrna_props = designer.calculate_dsrna_properties(primer, st.session_state.current_sequence)
+                    
+                    if dsrna_props:
+                        st.subheader("dsRNA Analysis")
+                        
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            st.metric("dsRNA Length", f"{dsrna_props.get('dsrna_length', 'N/A')} bp")
+                        with col2:
+                            st.metric("dsRNA GC Content", f"{dsrna_props.get('dsrna_gc_content', 'N/A'):.1f}%")
+                        with col3:
+                            st.metric("T7 Efficiency", dsrna_props.get('transcription_efficiency', 'N/A'))
+                        
+                        # Quality indicators
+                        st.write("**dsRNA Quality Indicators:**")
+                        if dsrna_props.get('optimal_length'):
+                            st.success("✅ Optimal length for RNAi (100-500 bp)")
+                        else:
+                            st.warning("⚠️ Length outside optimal range for RNAi")
+                        
+                        if dsrna_props.get('moderate_gc'):
+                            st.success("✅ Moderate GC content (40-60%)")
+                        else:
+                            st.warning("⚠️ Extreme GC content may affect efficiency")
+                        
+                        st.write(f"**Transcription Start:** {dsrna_props.get('transcription_start', 'N/A')} (G is optimal for T7)")
+                        st.write(f"**Estimated Yield:** {dsrna_props.get('estimated_yield', 'N/A')}")
+                        
+                        # Show target sequence
+                        if 'target_sequence' in dsrna_props:
+                            st.write("**Target Sequence (first 100 bp):**")
+                            st.code(dsrna_props['target_sequence'], language="text")
+            else:
+                # Standard primer display
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    st.write("**Forward Primer**")
+                    st.code(primer.forward_seq, language="text")
+                    st.write(f"- Position: {primer.forward_start}")
+                    st.write(f"- Length: {len(primer.forward_seq)} bp")
+                    st.write(f"- Tm: {primer.forward_tm:.2f}°C")
+                    st.write(f"- GC Content: {primer.gc_content_f:.1f}%")
+                
+                with col2:
+                    st.write("**Reverse Primer**")
+                    st.code(primer.reverse_seq, language="text")
+                    st.write(f"- Position: {primer.reverse_start}")
+                    st.write(f"- Length: {len(primer.reverse_seq)} bp")
+                    st.write(f"- Tm: {primer.reverse_tm:.2f}°C")
+                    st.write(f"- GC Content: {primer.gc_content_r:.1f}%")
+                
+                st.write(f"**Product Size:** {primer.product_size} bp")
             
-            with col1:
-                st.write("**Forward Primer**")
-                st.code(primer.forward_seq, language="text")
+            st.write(f"**Penalty Score:** {primer.penalty:.4f}").forward_seq, language="text")
                 st.write(f"- Position: {primer.forward_start}")
                 st.write(f"- Length: {len(primer.forward_seq)} bp")
                 st.write(f"- Tm: {primer.forward_tm:.2f}°C")
@@ -828,9 +912,312 @@ def main():
                 avg_product = sum(p.product_size for p in primers) / len(primers)
                 st.metric("Average Product Size", f"{avg_product:.0f} bp")
             
-            with col4:
-                best_penalty = min(p.penalty for p in primers)
-                st.metric("Best Penalty Score", f"{best_penalty:.3f}")
+    with tab4:
+        st.header("Export Results")
+        
+        # Check session state - FIXED
+        if not state_check['has_primers']:
+            st.info("No primers to export. Please design primers first.")
+            return
+        
+        primers = st.session_state.primers_designed
+        t7_enabled = st.session_state.get('t7_dsrna_enabled', False)
+        
+        if t7_enabled:
+            st.info("🧬 **T7 dsRNA Export Mode** - Export includes both full T7 primers and core sequences")
+        
+        st.subheader("Download Options")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            # Excel export
+            if st.button("📊 Download as Excel", type="primary"):
+                excel_data = export_to_excel(primers)
+                if excel_data:
+                    filename = "t7_dsrna_primers.xlsx" if t7_enabled else "primer_results.xlsx"
+                    st.download_button(
+                        label="Click to Download Excel File",
+                        data=excel_data,
+                        file_name=filename,
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    )
+        
+        with col2:
+            # CSV export
+            try:
+                data = []
+                for i, primer in enumerate(primers):
+                    if hasattr(primer, 'has_t7_promoter') and primer.has_t7_promoter:
+                        # T7 dsRNA primer format
+                        row = {
+                            'Primer_Pair': i + 1,
+                            'Forward_T7_Sequence': primer.forward_seq,
+                            'Reverse_T7_Sequence': primer.reverse_seq,
+                            'Forward_Core_Sequence': primer.core_forward_seq,
+                            'Reverse_Core_Sequence': primer.core_reverse_seq,
+                            'Core_Forward_Tm': round(primer.forward_tm, 2),
+                            'Core_Reverse_Tm': round(primer.reverse_tm, 2),
+                            'dsRNA_Size': primer.product_size,
+                            'Core_Forward_GC_Percent': round(primer.gc_content_f, 2),
+                            'Core_Reverse_GC_Percent': round(primer.gc_content_r, 2),
+                            'Forward_Start': primer.forward_start,
+                            'Reverse_Start': primer.reverse_start,
+                            'Penalty_Score': round(primer.penalty, 4),
+                            'T7_Promoter': primer.t7_promoter_seq,
+                            'Primer_Type': 'T7_dsRNA'
+                        }
+                        
+                        # Add dsRNA analysis if available
+                        if st.session_state.current_sequence:
+                            designer = PrimerDesigner()
+                            dsrna_props = designer.calculate_dsrna_properties(primer, st.session_state.current_sequence)
+                            if dsrna_props:
+                                row.update({
+                                    'dsRNA_GC_Content': round(dsrna_props.get('dsrna_gc_content', 0), 2),
+                                    'T7_Transcription_Efficiency': dsrna_props.get('transcription_efficiency', 'N/A'),
+                                    'Optimal_Length': dsrna_props.get('optimal_length', False),
+                                    'Moderate_GC': dsrna_props.get('moderate_gc', False),
+                                    'Estimated_Yield': dsrna_props.get('estimated_yield', 'N/A')
+                                })
+                    else:
+                        # Standard primer format
+                        row = {
+                            'Primer_Pair': i + 1,
+                            'Forward_Sequence': primer.forward_seq,
+                            'Reverse_Sequence': primer.reverse_seq,
+                            'Forward_Tm': round(primer.forward_tm, 2),
+                            'Reverse_Tm': round(primer.reverse_tm, 2),
+                            'Product_Size': primer.product_size,
+                            'Forward_GC_Percent': round(primer.gc_content_f, 2),
+                            'Reverse_GC_Percent': round(primer.gc_content_r, 2),
+                            'Forward_Start': primer.forward_start,
+                            'Reverse_Start': primer.reverse_start,
+                            'Penalty_Score': round(primer.penalty, 4),
+                            'Primer_Type': 'Standard'
+                        }
+                    
+                    data.append(row)
+                
+                df = pd.DataFrame(data)
+                csv = df.to_csv(index=False)
+                
+                filename = "t7_dsrna_primers.csv" if t7_enabled else "primer_results.csv"
+                st.download_button(
+                    label="📄 Download as CSV",
+                    data=csv,
+                    file_name=filename,
+                    mime="text/csv"
+                )
+            except Exception as e:
+                st.error(f"Error creating CSV: {e}")
+        
+        # Preview export data
+        st.subheader("Export Preview")
+        try:
+            if 'df' in locals():
+                st.dataframe(df, use_container_width=True)
+        except:
+            st.warning("Could not create preview")
+        
+        # Primer ordering format
+        st.subheader("Primer Ordering Format")
+        
+        if t7_enabled:
+            st.write("**T7 dsRNA Primer Ordering Format** - Optimized for synthesis companies:")
+            
+            try:
+                ordering_data = []
+                for i, primer in enumerate(primers):
+                    if hasattr(primer, 'has_t7_promoter') and primer.has_t7_promoter:
+                        # T7 primers for ordering
+                        ordering_data.extend([
+                            {
+                                'Name': f"T7_Forward_Primer_{i+1}",
+                                'Sequence': primer.forward_seq,
+                                'Length': len(primer.forward_seq),
+                                'Core_Tm': round(primer.forward_tm, 1),
+                                'Notes': f"T7 promoter + {len(primer.core_forward_seq)}bp core"
+                            },
+                            {
+                                'Name': f"T7_Reverse_Primer_{i+1}",
+                                'Sequence': primer.reverse_seq,
+                                'Length': len(primer.reverse_seq),
+                                'Core_Tm': round(primer.reverse_tm, 1),
+                                'Notes': f"T7 promoter + {len(primer.core_reverse_seq)}bp core"
+                            }
+                        ])
+                        
+                        # Also include core primers for reference
+                        ordering_data.extend([
+                            {
+                                'Name': f"Core_Forward_{i+1}",
+                                'Sequence': primer.core_forward_seq,
+                                'Length': len(primer.core_forward_seq),
+                                'Core_Tm': round(primer.forward_tm, 1),
+                                'Notes': "Core primer only (for reference)"
+                            },
+                            {
+                                'Name': f"Core_Reverse_{i+1}",
+                                'Sequence': primer.core_reverse_seq,
+                                'Length': len(primer.core_reverse_seq),
+                                'Core_Tm': round(primer.reverse_tm, 1),
+                                'Notes': "Core primer only (for reference)"
+                            }
+                        ])
+                
+                ordering_df = pd.DataFrame(ordering_data)
+                st.dataframe(ordering_df, use_container_width=True)
+                
+                ordering_csv = ordering_df.to_csv(index=False)
+                st.download_button(
+                    label="📋 Download T7 Ordering Format",
+                    data=ordering_csv,
+                    file_name="t7_dsrna_primer_ordering.csv",
+                    mime="text/csv"
+                )
+                
+                # Additional ordering notes
+                with st.expander("Ordering Notes and Tips"):
+                    st.markdown("""
+                    **For Synthesis Companies:**
+                    
+                    - **Scale:** 25-50 nmol is sufficient for most applications
+                    - **Purification:** Standard desalting is adequate for PCR
+                    - **Quality:** HPLC purification recommended for critical applications
+                    - **Storage:** Lyophilized primers stable at -20°C for years
+                    
+                    **T7 Primer Considerations:**
+                    
+                    - Longer primers (40+ bp) may have higher synthesis cost
+                    - T7 promoter sequence is critical - verify accuracy
+                    - Consider ordering both T7 and core primers for flexibility
+                    - Test core primers first, then proceed with T7 synthesis
+                    
+                    **Cost Optimization:**
+                    
+                    - Order core primers first for initial testing
+                    - Scale up T7 primer synthesis after optimization
+                    - Consider bulk ordering for multiple targets
+                    """)
+                    
+            except Exception as e:
+                st.error(f"Error creating T7 ordering format: {e}")
+        
+        else:
+            st.write("Format suitable for ordering from synthesis companies:")
+            
+            try:
+                ordering_data = []
+                for i, primer in enumerate(primers):
+                    ordering_data.append({
+                        'Name': f"Forward_Primer_{i+1}",
+                        'Sequence': primer.forward_seq,
+                        'Length': len(primer.forward_seq),
+                        'Tm': round(primer.forward_tm, 1)
+                    })
+                    ordering_data.append({
+                        'Name': f"Reverse_Primer_{i+1}",
+                        'Sequence': primer.reverse_seq,
+                        'Length': len(primer.reverse_seq),
+                        'Tm': round(primer.reverse_tm, 1)
+                    })
+                
+                ordering_df = pd.DataFrame(ordering_data)
+                st.dataframe(ordering_df, use_container_width=True)
+                
+                ordering_csv = ordering_df.to_csv(index=False)
+                st.download_button(
+                    label="📋 Download Ordering Format",
+                    data=ordering_csv,
+                    file_name="primer_ordering.csv",
+                    mime="text/csv"
+                )
+            except Exception as e:
+                st.error(f"Error creating ordering format: {e}")
+        
+        # Protocol export for T7 dsRNA
+        if t7_enabled:
+            st.subheader("Protocol Export")
+            
+            protocol_text = f"""
+T7 dsRNA Production Protocol
+============================
+
+Generated for {len(primers)} primer pairs designed for dsRNA synthesis.
+
+MATERIALS REQUIRED:
+- T7 RNA Polymerase (40 U/μL)
+- 10× T7 Transcription Buffer
+- NTP Mix (25 mM each ATP, CTP, GTP, UTP)
+- DNase I (2 U/μL)
+- RNase-free water
+- 0.5 M EDTA
+- Phenol:chloroform:isoamyl alcohol (25:24:1)
+- 3 M sodium acetate (pH 5.2)
+- 100% ethanol
+- 70% ethanol
+
+PROTOCOL:
+
+1. PCR AMPLIFICATION:
+   - Use T7-tagged primers to amplify target regions
+   - Verify products by gel electrophoresis
+   - Purify PCR products using standard methods
+
+2. T7 TRANSCRIPTION SETUP (20 μL reaction):
+   - 1-2 μg purified PCR template
+   - 2 μL 10× T7 Transcription Buffer
+   - 2 μL NTP Mix (2 mM final each)
+   - 1 μL T7 RNA Polymerase (40 units)
+   - RNase-free water to 20 μL
+
+3. INCUBATION:
+   - 37°C for 2-4 hours
+   - Optional: Add additional 20 units T7 polymerase after 2h
+
+4. DNASE TREATMENT:
+   - Add 1 μL DNase I (2 units)
+   - Incubate 37°C for 15 minutes
+   - Add 1 μL 0.5 M EDTA to stop reaction
+
+5. dsRNA ANNEALING:
+   - Heat to 95°C for 5 minutes
+   - Cool slowly to room temperature (30-60 minutes)
+   - This allows complementary strands to anneal
+
+6. PURIFICATION:
+   - Add equal volume phenol:chloroform
+   - Vortex and centrifuge 15,000g for 5 minutes
+   - Transfer aqueous phase to new tube
+   - Add 1/10 volume 3 M sodium acetate
+   - Add 2.5 volumes cold 100% ethanol
+   - Precipitate at -20°C for 30 minutes
+   - Centrifuge 15,000g for 15 minutes at 4°C
+   - Wash pellet with 70% ethanol
+   - Air dry and resuspend in RNase-free water
+
+7. QUALITY CONTROL:
+   - Analyze by agarose gel electrophoresis
+   - Quantify using spectrophotometer (A260/A280 ratio ~2.0)
+   - Store at -80°C in small aliquots
+
+EXPECTED YIELDS:
+- 10-50 μg dsRNA per 20 μL reaction
+- Higher yields with optimal templates (G at +1 position)
+
+TROUBLESHOOTING:
+- Low yield: Check template quality, extend incubation
+- Degradation: Ensure RNase-free conditions
+- Poor annealing: Optimize cooling rate
+"""
+            
+            st.download_button(
+                label="📄 Download Complete Protocol",
+                data=protocol_text,
+                file_name="t7_dsrna_protocol.txt",
+                mime="text/plain"
+            )
     
     with tab4:
         st.header("Export Results")
