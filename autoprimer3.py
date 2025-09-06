@@ -1885,7 +1885,13 @@ def main():
                         num_cols = min(len(organisms), 4)  # Max 4 columns for better readability
                         cols = st.columns(num_cols)
                         
-                        for i, (common_name, latin_name) in enumerate(organisms):
+                        for i, organism_item in enumerate(organisms):
+                            # Handle both old format (common_name, latin_name) and new format (common_name, latin_name, gene_targets)
+                            if len(organism_item) == 3:
+                                common_name, latin_name, gene_targets = organism_item
+                            else:
+                                common_name, latin_name = organism_item
+                            
                             with cols[i % num_cols]:
                                 if st.button(
                                     common_name, 
