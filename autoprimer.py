@@ -383,13 +383,12 @@ def main():
     # Initialize session state
     init_session_state()
     
+    # Initialize email variable
+    email = ""
+    
     # Header
     st.title("🧬 Automated Primer Design Tool")
     st.markdown("### Design PCR primers with NCBI database integration")
-    
-    # Quick start guide
-    if not email:
-        st.warning("🚀 **Quick Start**: Enter an email address in the sidebar to begin searching for organisms and designing primers. NCBI requires this for database access.")
     
     # Sidebar configuration
     st.sidebar.header("⚙️ Configuration")
@@ -417,6 +416,10 @@ def main():
     api_key = st.sidebar.text_input("NCBI API Key (optional)", 
                                    type="password",
                                    help="For increased rate limits (not required)")
+    
+    # Quick start guide (moved after email is defined)
+    if not email:
+        st.warning("🚀 **Quick Start**: Enter an email address in the sidebar to begin searching for organisms and designing primers. NCBI requires this for database access.")
     
     # Primer Design Parameters
     st.sidebar.subheader("Primer Parameters")
