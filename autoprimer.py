@@ -583,31 +583,6 @@ def export_to_excel(primers: List[PrimerPair]) -> bytes:
         st.error(f"Error exporting to Excel: {e}")
         return b""
 
-def get_organism_suggestions():
-    """Get agricultural pest and pathogen suggestions"""
-    return {
-        "Arthropods": {
-            "Mites": ["Aculops lycopersici", "Tetranychus urticae", "Polyphagotarsonemus latus"],
-            "Other, walking": ["Pemphigus betae", "Thrips tabaci", "Liriomyza trifolii", "Planococcus citri"],
-            "Other, flying": ["Bemisia tabaci", "Bradysia impatiens", "Diaphorina citri"]
-        },
-        "Fungi": {
-            "Fusarium species": ["Fusarium oxysporum", "Fusarium solani", "Fusarium proliferatum", "Fusarium"],
-            "Botrytis species": ["Botrytis cinerea", "Botrytis"],
-            "Powdery mildew": ["Golovinomyces ambrosiae", "Golovinomyces"]
-        },
-        "Pseudofungi/Oomycetes": {
-            "Water molds": ["Pythium myriotylum", "Pythium"]
-        },
-        "Viruses": {
-            "Plant viruses": ["Beet curly top virus", "Alfalfa mosaic virus", "Arabis mosaic virus", 
-                               "Lettuce chlorosis virus", "Cannabis cryptic virus", "Tomato ringspot virus",
-                               "Tomato mosaic virus", "Tobacco mosaic virus"]
-        },
-        "Viroids": {
-            "RNA pathogens": ["Hop latent viroid"]
-        }
-    }
 
 def check_session_state_validity():
     """Check if session state has valid data"""
