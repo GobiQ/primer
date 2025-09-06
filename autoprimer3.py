@@ -1515,15 +1515,30 @@ def create_sequence_diagram(sequence: str, primers: List[PrimerPair], selected_p
 def export_to_excel(primers: List[PrimerPair]) -> bytes:
     """Export primer results to Excel format"""
     try:
-        # Get gene target information
+        # Get gene target information - show specific gene names instead of categories
         gene_target_info = ""
         if 'selected_gene_targets' in st.session_state:
             target_info = st.session_state.selected_gene_targets
-            selected_categories = target_info.get('selected_categories', [])
-            if selected_categories:
-                gene_target_info = f"Targeting: {', '.join(selected_categories[:2])}"
-                if len(selected_categories) > 2:
-                    gene_target_info += f" (+{len(selected_categories)-2} more)"
+            selected_genes = target_info.get('selected_genes', [])
+            if selected_genes:
+                # Extract just the gene names (remove category prefixes)
+                gene_names = []
+                for gene_info in selected_genes:
+                    if ': ' in gene_info:
+                        # Format: "Category: Gene name (description)"
+                        gene_name = gene_info.split(': ', 1)[1]
+                        # Remove description in parentheses if present
+                        if ' (' in gene_name:
+                            gene_name = gene_name.split(' (')[0]
+                        gene_names.append(gene_name.strip())
+                    else:
+                        gene_names.append(gene_info.strip())
+                
+                # Show first 3 specific gene names
+                if len(gene_names) <= 3:
+                    gene_target_info = f"Targeting: {', '.join(gene_names)}"
+                else:
+                    gene_target_info = f"Targeting: {', '.join(gene_names[:3])} (+{len(gene_names)-3} more)"
         
         data = []
         for i, primer in enumerate(primers):
@@ -2551,15 +2566,30 @@ def main():
         # Primer results table
         st.subheader("Primer Pairs")
         
-        # Get gene target information
+        # Get gene target information - show specific gene names instead of categories
         gene_target_info = ""
         if 'selected_gene_targets' in st.session_state:
             target_info = st.session_state.selected_gene_targets
-            selected_categories = target_info.get('selected_categories', [])
-            if selected_categories:
-                gene_target_info = f"Targeting: {', '.join(selected_categories[:2])}"  # Show first 2 categories
-                if len(selected_categories) > 2:
-                    gene_target_info += f" (+{len(selected_categories)-2} more)"
+            selected_genes = target_info.get('selected_genes', [])
+            if selected_genes:
+                # Extract just the gene names (remove category prefixes)
+                gene_names = []
+                for gene_info in selected_genes:
+                    if ': ' in gene_info:
+                        # Format: "Category: Gene name (description)"
+                        gene_name = gene_info.split(': ', 1)[1]
+                        # Remove description in parentheses if present
+                        if ' (' in gene_name:
+                            gene_name = gene_name.split(' (')[0]
+                        gene_names.append(gene_name.strip())
+                    else:
+                        gene_names.append(gene_info.strip())
+                
+                # Show first 3 specific gene names
+                if len(gene_names) <= 3:
+                    gene_target_info = f"Targeting: {', '.join(gene_names)}"
+                else:
+                    gene_target_info = f"Targeting: {', '.join(gene_names[:3])} (+{len(gene_names)-3} more)"
         
         data = []
         for i, primer in enumerate(primers):
@@ -3000,15 +3030,30 @@ def main():
         
         with col2:
             try:
-                # Get gene target information
+                # Get gene target information - show specific gene names instead of categories
                 gene_target_info = ""
                 if 'selected_gene_targets' in st.session_state:
                     target_info = st.session_state.selected_gene_targets
-                    selected_categories = target_info.get('selected_categories', [])
-                    if selected_categories:
-                        gene_target_info = f"Targeting: {', '.join(selected_categories[:2])}"
-                        if len(selected_categories) > 2:
-                            gene_target_info += f" (+{len(selected_categories)-2} more)"
+                    selected_genes = target_info.get('selected_genes', [])
+                    if selected_genes:
+                        # Extract just the gene names (remove category prefixes)
+                        gene_names = []
+                        for gene_info in selected_genes:
+                            if ': ' in gene_info:
+                                # Format: "Category: Gene name (description)"
+                                gene_name = gene_info.split(': ', 1)[1]
+                                # Remove description in parentheses if present
+                                if ' (' in gene_name:
+                                    gene_name = gene_name.split(' (')[0]
+                                gene_names.append(gene_name.strip())
+                            else:
+                                gene_names.append(gene_info.strip())
+                        
+                        # Show first 3 specific gene names
+                        if len(gene_names) <= 3:
+                            gene_target_info = f"Targeting: {', '.join(gene_names)}"
+                        else:
+                            gene_target_info = f"Targeting: {', '.join(gene_names[:3])} (+{len(gene_names)-3} more)"
                 
                 data = []
                 for i, primer in enumerate(primers):
