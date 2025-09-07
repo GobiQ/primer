@@ -1,71 +1,113 @@
-def get_related_organisms(target_organism):
-    """Get related organisms for specificity testing"""
+def get_related_organisms(target_organism, max_organisms=100):
+    """Get comprehensive list of related organisms for specificity testing (100+ organisms)"""
     organism_lower = target_organism.lower()
     
-    # Comprehensive organism relationships including viruses
-    related_map = {
-        # Fungi
-        'fusarium': ['Trichoderma harzianum', 'Aspergillus niger', 'Penicillium chrysogenum', 'Alternaria alternata'],
-        'botrytis': ['Sclerotinia sclerotiorum', 'Alternaria alternata', 'Fusarium oxysporum', 'Rhizoctonia solani'],
-        'pythium': ['Phytophthora infestans', 'Fusarium oxysporum', 'Rhizoctonia solani'],
-        'alternaria': ['Stemphylium vesicarium', 'Botrytis cinerea', 'Fusarium oxysporum'],
-        'rhizoctonia': ['Fusarium oxysporum', 'Pythium ultimum', 'Sclerotinia sclerotiorum'],
-        'aspergillus': ['Penicillium chrysogenum', 'Trichoderma harzianum', 'Fusarium oxysporum'],
-        'penicillium': ['Aspergillus niger', 'Trichoderma harzianum', 'Fusarium oxysporum'],
-        'sclerotinia': ['Botrytis cinerea', 'Fusarium oxysporum', 'Rhizoctonia solani'],
-        'phytophthora': ['Pythium ultimum', 'Fusarium oxysporum', 'Rhizoctonia solani'],
-        'erysiphe': ['Puccinia graminis', 'Ustilago maydis', 'Botrytis cinerea'],
-        'puccinia': ['Ustilago maydis', 'Erysiphe necator', 'Phytophthora infestans'],
-        'ustilago': ['Puccinia graminis', 'Erysiphe necator', 'Fusarium oxysporum'],
+    # Comprehensive organism database with 100+ organisms across all major taxonomic groups
+    comprehensive_organisms = {
+        # Fungi (40+ organisms)
+        'fungi': [
+            'Fusarium oxysporum', 'Fusarium solani', 'Fusarium graminearum', 'Fusarium verticillioides',
+            'Aspergillus niger', 'Aspergillus flavus', 'Aspergillus fumigatus', 'Aspergillus terreus',
+            'Penicillium chrysogenum', 'Penicillium expansum', 'Penicillium digitatum', 'Penicillium italicum',
+            'Botrytis cinerea', 'Sclerotinia sclerotiorum', 'Alternaria alternata', 'Alternaria solani',
+            'Rhizoctonia solani', 'Pythium ultimum', 'Phytophthora infestans', 'Phytophthora capsici',
+            'Trichoderma harzianum', 'Trichoderma viride', 'Trichoderma reesei', 'Trichoderma atroviride',
+            'Erysiphe necator', 'Puccinia graminis', 'Ustilago maydis', 'Magnaporthe oryzae',
+            'Colletotrichum gloeosporioides', 'Verticillium dahliae', 'Verticillium albo-atrum',
+            'Cercospora beticola', 'Septoria tritici', 'Mycosphaerella graminicola', 'Cladosporium fulvum',
+            'Monilinia fructicola', 'Monilinia laxa', 'Monilinia fructigena', 'Sclerotium rolfsii',
+            'Armillaria mellea', 'Ganoderma lucidum', 'Pleurotus ostreatus', 'Agaricus bisporus'
+        ],
         
-        # Arthropods
-        'tetranychus': ['Panonychus ulmi', 'Oligonychus ilicis', 'Aculops lycopersici'],
-        'bemisia': ['Trialeurodes vaporariorum', 'Aphis gossypii', 'Myzus persicae'],
-        'thrips': ['Frankliniella occidentalis', 'Thrips palmi', 'Scirtothrips dorsalis'],
-        'myzus': ['Aphis gossypii', 'Bemisia tabaci', 'Trialeurodes vaporariorum'],
-        'aphis': ['Myzus persicae', 'Bemisia tabaci', 'Diaphorina citri'],
-        'diaphorina': ['Aphis gossypii', 'Myzus persicae', 'Bemisia tabaci'],
-        'frankliniella': ['Thrips tabaci', 'Thrips palmi', 'Scirtothrips dorsalis'],
-        'polyphagotarsonemus': ['Tetranychus urticae', 'Panonychus ulmi', 'Aculops lycopersici'],
-        'aculops': ['Tetranychus urticae', 'Panonychus ulmi', 'Polyphagotarsonemus latus'],
+        # Bacteria (30+ organisms)
+        'bacteria': [
+            'Pseudomonas syringae', 'Pseudomonas aeruginosa', 'Pseudomonas fluorescens', 'Pseudomonas putida',
+            'Xanthomonas campestris', 'Xanthomonas oryzae', 'Xanthomonas axonopodis', 'Xanthomonas citri',
+            'Erwinia amylovora', 'Erwinia carotovora', 'Erwinia chrysanthemi', 'Erwinia pyrifoliae',
+            'Ralstonia solanacearum', 'Agrobacterium tumefaciens', 'Rhizobium leguminosarum', 'Sinorhizobium meliloti',
+            'Bacillus subtilis', 'Bacillus thuringiensis', 'Bacillus cereus', 'Bacillus anthracis',
+            'Staphylococcus aureus', 'Streptococcus pneumoniae', 'Escherichia coli', 'Salmonella enterica',
+            'Listeria monocytogenes', 'Clostridium botulinum', 'Mycobacterium tuberculosis', 'Corynebacterium diphtheriae',
+            'Streptomyces coelicolor', 'Actinomyces israelii', 'Propionibacterium acnes', 'Lactobacillus acidophilus'
+        ],
         
-        # Viruses - KEY ADDITION
-        'coronavirus': ['Influenza A virus', 'Rhinovirus', 'Adenovirus', 'Respiratory syncytial virus'],
-        'sars': ['MERS-CoV', 'Human coronavirus 229E', 'Human coronavirus OC43', 'Influenza A virus'],
-        'influenza': ['Coronavirus', 'Rhinovirus', 'Parainfluenza virus', 'Respiratory syncytial virus'],
-        'tobacco mosaic': ['Tomato mosaic virus', 'Cucumber mosaic virus', 'Potato virus X'],
-        'tomato': ['Tobacco mosaic virus', 'Cucumber mosaic virus', 'Potato virus Y'],
-        'potato virus': ['Tobacco mosaic virus', 'Cucumber mosaic virus', 'Tomato mosaic virus'],
-        'cucumber mosaic': ['Tobacco mosaic virus', 'Tomato mosaic virus', 'Potato virus Y'],
-        'beet curly top': ['Tomato mosaic virus', 'Cucumber mosaic virus', 'Potato virus Y'],
-        'arabis mosaic': ['Tomato mosaic virus', 'Cucumber mosaic virus', 'Alfalfa mosaic virus'],
-        'alfalfa mosaic': ['Cucumber mosaic virus', 'Arabis mosaic virus', 'Potato virus Y'],
-        'lettuce chlorosis': ['Cucumber mosaic virus', 'Tomato mosaic virus', 'Potato virus Y'],
-        'cannabis cryptic': ['Cucumber mosaic virus', 'Arabis mosaic virus', 'Alfalfa mosaic virus'],
+        # Viruses (25+ organisms)
+        'viruses': [
+            'Tobacco mosaic virus', 'Tomato mosaic virus', 'Cucumber mosaic virus', 'Potato virus X',
+            'Potato virus Y', 'Beet curly top virus', 'Arabis mosaic virus', 'Alfalfa mosaic virus',
+            'Lettuce chlorosis virus', 'Cannabis cryptic virus', 'Hop latent viroid', 'Potato spindle tuber viroid',
+            'Influenza A virus', 'Coronavirus', 'Rhinovirus', 'Adenovirus', 'Respiratory syncytial virus',
+            'MERS-CoV', 'Human coronavirus 229E', 'Human coronavirus OC43', 'Parainfluenza virus',
+            'Measles virus', 'Mumps virus', 'Rubella virus', 'Varicella-zoster virus', 'Herpes simplex virus'
+        ],
         
-        # Bacteria
-        'ralstonia': ['Pseudomonas syringae', 'Xanthomonas campestris', 'Erwinia amylovora'],
-        'erwinia': ['Pseudomonas syringae', 'Xanthomonas campestris', 'Ralstonia solanacearum'],
-        'agrobacterium': ['Rhizobium leguminosarum', 'Sinorhizobium meliloti', 'Pseudomonas syringae'],
-        'pseudomonas': ['Xanthomonas campestris', 'Erwinia amylovora', 'Ralstonia solanacearum'],
-        'xanthomonas': ['Pseudomonas syringae', 'Erwinia amylovora', 'Ralstonia solanacearum'],
+        # Arthropods (25+ organisms)
+        'arthropods': [
+            'Tetranychus urticae', 'Panonychus ulmi', 'Oligonychus ilicis', 'Aculops lycopersici',
+            'Bemisia tabaci', 'Trialeurodes vaporariorum', 'Aphis gossypii', 'Myzus persicae',
+            'Diaphorina citri', 'Frankliniella occidentalis', 'Thrips tabaci', 'Thrips palmi',
+            'Scirtothrips dorsalis', 'Polyphagotarsonemus latus', 'Tarsonemus pallidus',
+            'Drosophila melanogaster', 'Musca domestica', 'Lucilia sericata', 'Calliphora vicina',
+            'Tribolium castaneum', 'Sitophilus oryzae', 'Plodia interpunctella', 'Ephestia kuehniella',
+            'Helicoverpa armigera', 'Spodoptera frugiperda', 'Plutella xylostella', 'Pieris rapae'
+        ],
         
-        # Oomycetes
-        'pythium': ['Phytophthora infestans', 'Fusarium oxysporum', 'Rhizoctonia solani'],
-        'phytophthora': ['Pythium ultimum', 'Fusarium oxysporum', 'Rhizoctonia solani'],
+        # Plants (20+ organisms)
+        'plants': [
+            'Arabidopsis thaliana', 'Oryza sativa', 'Zea mays', 'Triticum aestivum',
+            'Hordeum vulgare', 'Solanum lycopersicum', 'Solanum tuberosum', 'Capsicum annuum',
+            'Nicotiana tabacum', 'Gossypium hirsutum', 'Glycine max', 'Phaseolus vulgaris',
+            'Vitis vinifera', 'Malus domestica', 'Prunus persica', 'Citrus sinensis',
+            'Brassica oleracea', 'Daucus carota', 'Lactuca sativa', 'Spinacia oleracea',
+            'Helianthus annuus', 'Beta vulgaris', 'Saccharum officinarum', 'Manihot esculenta'
+        ],
         
-        # Viroids
-        'hop latent': ['Cucumber mosaic virus', 'Arabis mosaic virus', 'Alfalfa mosaic virus'],
-        'viroid': ['Cucumber mosaic virus', 'Arabis mosaic virus', 'Alfalfa mosaic virus']
+        # Nematodes (10+ organisms)
+        'nematodes': [
+            'Caenorhabditis elegans', 'Meloidogyne incognita', 'Meloidogyne javanica', 'Meloidogyne hapla',
+            'Heterodera glycines', 'Globodera rostochiensis', 'Pratylenchus penetrans', 'Radopholus similis',
+            'Ditylenchus dipsaci', 'Aphelenchoides fragariae', 'Bursaphelenchus xylophilus', 'Steinernema carpocapsae'
+        ]
     }
     
-    # Find matching genus
-    for genus, related in related_map.items():
-        if genus in organism_lower:
-            return related
+    # Try to find specific matches first
+    specific_matches = []
+    for category, organisms in comprehensive_organisms.items():
+        for organism in organisms:
+            organism_lower_check = organism.lower()
+            # Check for genus or species matches
+            if any(part in organism_lower_check for part in organism_lower.split()):
+                specific_matches.append(organism)
     
-    # Default related organisms for general testing
-    return ['Aspergillus niger', 'Penicillium chrysogenum', 'Trichoderma harzianum', 'Fusarium oxysporum']
+    # If we found specific matches, return them plus related organisms
+    if specific_matches:
+        result = specific_matches[:]
+        # Add organisms from the same category
+        for category, organisms in comprehensive_organisms.items():
+            if any(match.lower() in [org.lower() for org in organisms] for match in specific_matches):
+                result.extend([org for org in organisms if org not in result])
+                break
+        return result[:max_organisms]
+    
+    # If no specific matches, return a diverse set from all categories
+    diverse_set = []
+    for category, organisms in comprehensive_organisms.items():
+        diverse_set.extend(organisms[:max_organisms//len(comprehensive_organisms)])
+    
+    # Add more organisms to reach the target number
+    remaining_needed = max_organisms - len(diverse_set)
+    if remaining_needed > 0:
+        all_organisms = []
+        for organisms in comprehensive_organisms.values():
+            all_organisms.extend(organisms)
+        
+        # Add random selection from remaining organisms
+        import random
+        remaining_organisms = [org for org in all_organisms if org not in diverse_set]
+        if remaining_organisms:
+            diverse_set.extend(random.sample(remaining_organisms, min(remaining_needed, len(remaining_organisms))))
+    
+    return diverse_set[:max_organisms]
 
 def check_session_state_validity():
     """Check if session state has valid data"""
@@ -1359,12 +1401,23 @@ def init_session_state():
         'analysis_metadata': {},
         # GENE TARGET VARIABLES:
         'selected_gene_targets': {},
-        'gene_target_stats': {}
+        'gene_target_stats': {},
+        # ADDITIONAL PERSISTENCE VARIABLES:
+        'session_initialized': True,
+        'last_activity': None
     }
     
     for var, default_value in session_vars.items():
         if var not in st.session_state:
             st.session_state[var] = default_value
+    
+    # Ensure critical variables are never None
+    if st.session_state.get('primers_designed') is None:
+        st.session_state.primers_designed = []
+    if st.session_state.get('sequence_info') is None:
+        st.session_state.sequence_info = {}
+    if st.session_state.get('specificity_results') is None:
+        st.session_state.specificity_results = {}
 
 def debug_session_state():
     """Debug function to show session state"""
@@ -1755,13 +1808,18 @@ def perform_gene_targeted_design(organism_name, email, api_key, max_sequences, c
                 # Step 3: Specificity testing for gene-targeted primers
                 st.write("🎯 **Step 3: Testing primer specificity...**")
                 
-                # Get related organisms for specificity testing
-                related_organisms = get_related_organisms(organism_name)
-                st.write(f"Testing against related organisms: {', '.join(related_organisms)}")
+                # Get related organisms for specificity testing (100+ organisms)
+                related_organisms = get_related_organisms(organism_name, max_organisms=100)
+                st.write(f"Testing against {len(related_organisms)} related organisms for comprehensive specificity analysis...")
                 
                 # Test specificity for the best primer from each gene
                 specificity_results = {}
                 analyzer = ConservationAnalyzer(NCBIConnector(email, api_key))
+                
+                # Add progress bar for specificity testing
+                progress_bar = st.progress(0)
+                total_tests = len(primers_by_gene) * len(related_organisms)
+                current_test = 0
                 
                 # Group primers by gene target
                 primers_by_gene = {}
@@ -1788,8 +1846,15 @@ def perform_gene_targeted_design(organism_name, email, api_key, max_sequences, c
                                     max_similarity=0.7  # 70% similarity threshold
                                 )
                                 specificity_results[gene_target] = gene_specificity
+                                
+                                # Update progress bar
+                                current_test += len(related_organisms)
+                                progress_bar.progress(min(current_test / total_tests, 1.0))
+                                
                             except Exception as e:
                                 st.warning(f"Could not test specificity for {gene_target}: {e}")
+                                current_test += len(related_organisms)
+                                progress_bar.progress(min(current_test / total_tests, 1.0))
                 
                 # Store specificity results
                 st.session_state.specificity_results = specificity_results
@@ -1924,15 +1989,21 @@ def perform_conservation_based_design(organism_name, email, api_key, max_sequenc
                 if comparison_organisms.strip():
                     comp_orgs = [org.strip() for org in comparison_organisms.split(',')]
                 else:
-                    comp_orgs = get_related_organisms(organism_name)
+                    comp_orgs = get_related_organisms(organism_name, max_organisms=100)
                 
-                st.write(f"Testing against: {', '.join(comp_orgs)}")
+                st.write(f"Testing against {len(comp_orgs)} organisms for comprehensive specificity analysis...")
+                
+                # Add progress bar for specificity testing
+                progress_bar = st.progress(0)
+                st.write("Running specificity analysis...")
                 
                 specificity_results = analyzer.test_specificity(
                     consensus_seq,
                     comp_orgs,
                     max_similarity=specificity_threshold
                 )
+                
+                progress_bar.progress(1.0)
                 
                 # Display specificity results
                 specificity_data = []
@@ -2086,13 +2157,18 @@ def perform_standard_design(organism_name, email, api_key, max_sequences, custom
                             # Step 2: Specificity testing for standard primers
                             st.write("🎯 **Step 2: Testing primer specificity...**")
                             
-                            # Get related organisms for specificity testing
-                            related_organisms = get_related_organisms(organism_name)
-                            st.write(f"Testing against related organisms: {', '.join(related_organisms)}")
+                            # Get related organisms for specificity testing (100+ organisms)
+                            related_organisms = get_related_organisms(organism_name, max_organisms=100)
+                            st.write(f"Testing against {len(related_organisms)} related organisms for comprehensive specificity analysis...")
                             
                             # Test specificity for the best primers
                             specificity_results = {}
                             analyzer = ConservationAnalyzer(NCBIConnector(email, api_key))
+                            
+                            # Add progress bar for specificity testing
+                            progress_bar = st.progress(0)
+                            total_tests = 3 * len(related_organisms)  # Testing top 3 primers
+                            current_test = 0
                             
                             # Test the top 3 primers (best penalty scores)
                             best_primers = sorted(primers, key=lambda p: p.penalty)[:3]
@@ -2109,8 +2185,15 @@ def perform_standard_design(organism_name, email, api_key, max_sequences, custom
                                             max_similarity=0.7  # 70% similarity threshold
                                         )
                                         specificity_results[f"Primer Pair {i+1}"] = primer_specificity
+                                        
+                                        # Update progress bar
+                                        current_test += len(related_organisms)
+                                        progress_bar.progress(min(current_test / total_tests, 1.0))
+                                        
                                     except Exception as e:
                                         st.warning(f"Could not test specificity for Primer Pair {i+1}: {e}")
+                                        current_test += len(related_organisms)
+                                        progress_bar.progress(min(current_test / total_tests, 1.0))
                             
                             # Store specificity results
                             st.session_state.specificity_results = specificity_results
@@ -2457,7 +2540,7 @@ def main():
                         enable_specificity_testing = st.checkbox(
                             "Enable specificity testing",
                             value=True,
-                            help="Test primer specificity against related organisms"
+                            help="Test primer specificity against 100+ related organisms across diverse taxonomic groups for comprehensive analysis"
                         )
                         
                         if enable_specificity_testing:
@@ -2629,7 +2712,7 @@ def main():
         
         if not state_check['has_primers']:
             st.info("No primers designed yet. Please use the Input tab to design primers.")
-            return
+            st.stop()
         
         primers = st.session_state.primers_designed
         t7_enabled = st.session_state.get('t7_dsrna_enabled', False)
@@ -2966,7 +3049,7 @@ def main():
         
         if not state_check['has_primers']:
             st.info("No primers designed yet. Please use the Input tab to design primers.")
-            return
+            st.stop()
         
         primers = st.session_state.primers_designed
         t7_enabled = st.session_state.get('t7_dsrna_enabled', False)
@@ -3070,7 +3153,7 @@ def main():
         
         if not state_check['has_primers']:
             st.info("No primers to export. Please design primers first.")
-            return
+            st.stop()
         
         primers = st.session_state.primers_designed
         t7_enabled = st.session_state.get('t7_dsrna_enabled', False)
