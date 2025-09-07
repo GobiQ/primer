@@ -2563,6 +2563,15 @@ def main():
                                             placeholder="e.g., Fusarium oxysporum, Coronavirus, Tetranychus urticae",
                                             key="organism_input")
                 
+                # Debug: Show current organism name state
+                st.write(f"🔍 Debug: organism_name = '{organism_name}'")
+                st.write(f"🔍 Debug: selected_organism_name = '{st.session_state.get('selected_organism_name', 'None')}'")
+                st.write(f"🔍 Debug: stored_organism_name = '{st.session_state.get('stored_organism_name', 'None')}'")
+                
+                # Store the current organism name in session state for persistence
+                if organism_name:
+                    st.session_state.stored_organism_name = organism_name
+                
                 # Clear the selected organism after setting it, but preserve the input
                 if 'selected_organism_name' in st.session_state:
                     del st.session_state['selected_organism_name']
@@ -2615,6 +2624,8 @@ def main():
                     # Simple gene target loading
                     if st.button("🔍 Load Gene Targets", type="secondary"):
                         st.write(f"🔍 Debug: Button clicked for organism: '{organism_name}'")
+                        st.write(f"🔍 Debug: organism_name type: {type(organism_name)}")
+                        st.write(f"🔍 Debug: organism_name length: {len(organism_name) if organism_name else 0}")
                         with st.spinner(f"Loading gene targets for {organism_name}..."):
                             organism_targets = search_organism_with_gene_targets(organism_name, email, api_key)
                             
