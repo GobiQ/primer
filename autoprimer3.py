@@ -1821,18 +1821,18 @@ def perform_gene_targeted_design(organism_name, email, api_key, max_sequences, c
                 specificity_results = {}
                 analyzer = ConservationAnalyzer(NCBIConnector(email, api_key))
                 
-                # Add progress bar for specificity testing
-                progress_bar = st.progress(0)
-                total_tests = len(primers_by_gene) * len(related_organisms)
-                current_test = 0
-                
-                # Group primers by gene target
+                # Group primers by gene target first
                 primers_by_gene = {}
                 for primer in all_primers:
                     gene_target = getattr(primer, 'gene_target', 'Standard Design')
                     if gene_target not in primers_by_gene:
                         primers_by_gene[gene_target] = []
                     primers_by_gene[gene_target].append(primer)
+                
+                # Add progress bar for specificity testing (after primers are grouped)
+                progress_bar = st.progress(0)
+                total_tests = len(primers_by_gene) * len(related_organisms)
+                current_test = 0
                 
                 # Test the best primer from each gene
                 for gene_target, gene_primers in primers_by_gene.items():
