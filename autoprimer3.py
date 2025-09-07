@@ -111,16 +111,21 @@ def get_related_organisms(target_organism, max_organisms=100):
 
 def check_session_state_validity():
     """Check if session state has valid data"""
-    has_primers = bool(st.session_state.get('primers_designed'))
-    has_sequence = bool(st.session_state.get('current_sequence'))
-    has_seq_info = bool(st.session_state.get('sequence_info'))
+    # Ensure all required keys exist with safe defaults
+    primers = st.session_state.get('primers_designed', [])
+    sequence = st.session_state.get('current_sequence', '')
+    seq_info = st.session_state.get('sequence_info', {})
+    
+    has_primers = bool(primers)
+    has_sequence = bool(sequence)
+    has_seq_info = bool(seq_info)
     
     return {
         'has_primers': has_primers,
         'has_sequence': has_sequence,
         'has_seq_info': has_seq_info,
-        'primer_count': len(st.session_state.get('primers_designed', [])),
-        'sequence_length': len(st.session_state.get('current_sequence', ''))
+        'primer_count': len(primers),
+        'sequence_length': len(sequence)
     }
 
 def get_gene_priority(category):
@@ -597,7 +602,7 @@ def display_results_with_gene_context():
     design_mode = st.session_state.get('sequence_info', {}).get('design_mode', 'unknown')
     
     if design_mode == 'gene_targeted' and 'selected_gene_targets' in st.session_state:
-        target_info = st.session_state.selected_gene_targets
+        target_info = st.session_state.get('selected_gene_targets', {})
         
         st.subheader("🎯 Gene-Targeted Design Context")
         
@@ -2254,7 +2259,35 @@ def perform_standard_design(organism_name, email, api_key, max_sequences, custom
 def main():
     """Main Streamlit application"""
     
+    # Initialize session state first
     init_session_state()
+    
+    # Ensure ALL critical session state variables exist with safe defaults
+    required_vars = {
+        't7_dsrna_enabled': False,
+        'primers_designed': [],
+        'sequence_info': {},
+        'specificity_results': {},
+        'selected_gene_targets': {},
+        'analysis_metadata': {},
+        'found_sequences': [],
+        'target_organism': '',
+        'conserved_regions': [],
+        'conservation_sequences': [],
+        'gene_target_stats': {},
+        'search_results': None,
+        'database_used': None,
+        'comprehensive_analysis_results': None,
+        't7_results': None,
+        't7_settings': {},
+        'current_sequence': '',
+        'session_initialized': True,
+        'last_activity': None
+    }
+    
+    for var, default_value in required_vars.items():
+        if var not in st.session_state:
+            st.session_state[var] = default_value
     
     st.title("🧬 Automated Primer Design Tool")
     st.markdown("### Design PCR primers with NCBI database integration and T7 dsRNA functionality")
@@ -2714,7 +2747,7 @@ def main():
             st.info("No primers designed yet. Please use the Input tab to design primers.")
             st.stop()
         
-        primers = st.session_state.primers_designed
+        primers = st.session_state.get('primers_designed', [])
         t7_enabled = st.session_state.get('t7_dsrna_enabled', False)
         
         # Display gene target context if available
@@ -3051,7 +3084,7 @@ def main():
             st.info("No primers designed yet. Please use the Input tab to design primers.")
             st.stop()
         
-        primers = st.session_state.primers_designed
+        primers = st.session_state.get('primers_designed', [])
         t7_enabled = st.session_state.get('t7_dsrna_enabled', False)
         
         if t7_enabled:
@@ -3155,7 +3188,7 @@ def main():
             st.info("No primers to export. Please design primers first.")
             st.stop()
         
-        primers = st.session_state.primers_designed
+        primers = st.session_state.get('primers_designed', [])
         t7_enabled = st.session_state.get('t7_dsrna_enabled', False)
         gene_targets_available = 'selected_gene_targets' in st.session_state
         
