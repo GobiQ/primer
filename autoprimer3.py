@@ -1247,19 +1247,6 @@ Streamlit Web Application for Automated Primer Design - COMPLETE FIXED VERSION
 
 Complete version with T7 dsRNA functionality and all bug fixes.
 
-Key features:
-1. Fixed session state management
-2. T7 promoter addition for dsRNA production
-3. Comprehensive analysis and export options
-4. Agricultural pest/pathogen focus
-
-Installation:
-pip install streamlit biopython primer3-py requests pandas openpyxl plotly
-
-Run with:
-streamlit run autoprimer.py
-
-Author: Automated Primer Design System
 """
 
 import streamlit as st
@@ -2421,20 +2408,6 @@ def check_session_state_validity():
             'sequence_length': 0
         }
 
-def debug_session_state():
-    """Debug function to show session state"""
-    with st.expander("🔍 Debug: Session State"):
-        st.write("**Session State Variables:**")
-        for key, value in st.session_state.items():
-            if key.startswith(('primers', 'sequence', 'current', 'search', 'database', 'comprehensive', 't7')):
-                if isinstance(value, list):
-                    st.write(f"- {key}: {len(value)} items")
-                elif isinstance(value, str):
-                    st.write(f"- {key}: {len(value)} characters")
-                elif isinstance(value, dict):
-                    st.write(f"- {key}: {len(value)} keys")
-                else:
-                    st.write(f"- {key}: {type(value)} - {value}")
 
 def create_primer_visualization(primers: List[PrimerPair]):
     """Create interactive visualizations for primer pairs"""
@@ -2637,8 +2610,6 @@ def search_organism_with_gene_targets(organism_name, email, api_key=None):
         # Normalize the input organism name
         organism_name_lower = organism_name.lower().strip()
         
-        # Debug: Print what we're searching for
-        print(f"DEBUG: Searching for organism: '{organism_name}' (normalized: '{organism_name_lower}')")
         
         # Find matching organism and extract gene targets
         for category, subcategories in suggestions.items():
@@ -2664,7 +2635,6 @@ def search_organism_with_gene_targets(organism_name, email, api_key=None):
                         (scientific_lower in organism_name_lower and len(scientific_lower) > 2) or
                         (common_lower in organism_name_lower and len(common_lower) > 2)):
                         
-                        print(f"DEBUG: Found match - Scientific: '{scientific_name}', Common: '{common_name}'")
                         
                         organism_targets = {
                             'organism': scientific_name,
@@ -2680,7 +2650,6 @@ def search_organism_with_gene_targets(organism_name, email, api_key=None):
                 break
         
         if not organism_targets:
-            print(f"DEBUG: No match found for '{organism_name}'")
             # Try to find similar organisms for suggestions
             similar_organisms = []
             for category, subcategories in suggestions.items():
@@ -2697,7 +2666,7 @@ def search_organism_with_gene_targets(organism_name, email, api_key=None):
                                 similar_organisms.append(f"{common_name} ({scientific_name})")
             
             if similar_organisms:
-                print(f"DEBUG: Found similar organisms: {similar_organisms[:5]}")
+                pass  # Could show suggestions here if needed
         
         return organism_targets
         
@@ -3526,7 +3495,6 @@ def main():
     st.title("🧬 Automated Primer Design Tool")
     st.markdown("### Design PCR primers with NCBI database integration and T7 dsRNA functionality")
     
-    debug_session_state()
     
     # Sidebar configuration
     st.sidebar.header("⚙️ Configuration")
@@ -3641,7 +3609,7 @@ def main():
         
         input_method = st.radio(
             "Choose input method:",
-            ["Organism Name", "GenBank ID", "NCBI Search", "Direct Sequence", "Upload File"]
+            ["Organism Name", "Direct Sequence"]
         )
         
         if input_method == "Organism Name":
@@ -3665,10 +3633,6 @@ def main():
                                             placeholder="e.g., Fusarium oxysporum, Coronavirus, Tetranychus urticae",
                                             key="organism_input")
                 
-                # Debug: Show current organism name state
-                st.write(f"🔍 Debug: organism_name = '{organism_name}'")
-                st.write(f"🔍 Debug: selected_organism_name = '{st.session_state.get('selected_organism_name', 'None')}'")
-                st.write(f"🔍 Debug: stored_organism_name = '{st.session_state.get('stored_organism_name', 'None')}'")
                 
                 # Store the current organism name in session state for persistence
                 if organism_name:
@@ -3707,38 +3671,31 @@ def main():
             if gene_targets_workflow:
                 st.info("🎯 **Gene-Targeted Design Mode**\nDesign primers for specific genes with known biological functions.")
                 
-                # Debug: Show available organisms
-                with st.expander("🔍 Debug: Available Organisms", expanded=False):
-                    suggestions = get_organism_suggestions_with_gene_targets()
-                    st.write("**Available organisms with gene targets:**")
-                    for category, subcategories in suggestions.items():
-                        st.write(f"**{category}:**")
-                        for subcategory, organisms in subcategories.items():
-                            st.write(f"  {subcategory}:")
-                            for item in organisms[:3]:  # Show first 3 organisms per subcategory
-                                if len(item) == 3:
-                                    common_name, scientific_name, gene_targets = item
-                                    st.write(f"    - {common_name} ({scientific_name})")
-                                else:
-                                    st.write(f"    - {item}")
+                suggestions = get_organism_suggestions_with_gene_targets()
+                st.write("**Available organisms with gene targets:**")
+                for category, subcategories in suggestions.items():
+                    st.write(f"**{category}:**")
+                    for subcategory, organisms in subcategories.items():
+                        st.write(f"  {subcategory}:")
+                        for item in organisms[:3]:  # Show first 3 organisms per subcategory
+                            if len(item) == 3:
+                                common_name, scientific_name, gene_targets = item
+                                st.write(f"    - {common_name} ({scientific_name})")
+                            else:
+                                st.write(f"    - {item}")
                 
                 if organism_name and email:
                     # Simple gene target loading
                     if st.button("🔍 Load Gene Targets", type="secondary"):
-                        st.write(f"🔍 Debug: Button clicked for organism: '{organism_name}'")
-                        st.write(f"🔍 Debug: organism_name type: {type(organism_name)}")
-                        st.write(f"🔍 Debug: organism_name length: {len(organism_name) if organism_name else 0}")
                         with st.spinner(f"Loading gene targets for {organism_name}..."):
                             organism_targets = search_organism_with_gene_targets(organism_name, email, api_key)
                             
-                            st.write(f"🔍 Debug: search_organism_with_gene_targets returned: {organism_targets}")
                             
                             if organism_targets:
                                 st.session_state.current_organism_targets = organism_targets
                                 st.success(f"Found gene targets for {organism_targets['common_name']}")
                             else:
                                 st.warning("No specific gene targets found for this organism.")
-                                st.write("🔍 Debug: No organism targets found. Check the console for debug output.")
                                 
                                 # Show some suggestions
                                 st.info("💡 **Try these examples:**")
@@ -3784,8 +3741,6 @@ def main():
                                                      for gene in organism_targets['gene_targets'][cat]]
                                 }
                                 
-                                # Debug: Print what organism name we're passing
-                                print(f"DEBUG: Calling perform_gene_targeted_design with organism_name: '{organism_name}'")
                                 
                                 # Call the design function
                                 perform_gene_targeted_design(
@@ -3973,32 +3928,6 @@ def main():
         
         # Check session state validity fresh for this tab
         current_state_check = check_session_state_validity()
-        
-        # Debug information
-        with st.expander("🔍 Debug Information", expanded=True):
-            st.write("**Session State Check:**")
-            st.write(f"- Has primers: {current_state_check['has_primers']}")
-            st.write(f"- Has sequence: {current_state_check['has_sequence']}")
-            st.write(f"- Has sequence info: {current_state_check['has_seq_info']}")
-            st.write(f"- Primer count: {current_state_check['primer_count']}")
-            st.write(f"- Sequence length: {current_state_check['sequence_length']}")
-            
-            if 'primers_designed' in st.session_state:
-                primers_data = st.session_state['primers_designed']
-                # Handle compressed data from OptimizedSessionManager
-                if isinstance(primers_data, dict) and primers_data.get('_compressed'):
-                    st.write(f"- Primers in session state: {primers_data.get('_size', 0)} (compressed)")
-                elif isinstance(primers_data, list):
-                    st.write(f"- Primers in session state: {len(primers_data)}")
-                    if primers_data:
-                        st.write(f"- First primer: {primers_data[0]}")
-                else:
-                    st.write(f"- Primers in session state: {type(primers_data)}")
-            else:
-                st.write("- No primers in session state")
-        
-            st.write("**All session state keys:**")
-            st.write(list(st.session_state.keys()))
         
         if not current_state_check['has_primers']:
             st.info("No primers designed yet. Please use the Input tab to design primers.")
@@ -4425,12 +4354,6 @@ def main():
         # Check session state validity fresh for this tab
         current_state_check = check_session_state_validity()
         
-        # Debug information
-        with st.expander("🔍 Analysis Debug Information", expanded=True):
-            st.write("**Session State Check:**")
-            st.write(f"- Has primers: {current_state_check['has_primers']}")
-            st.write(f"- Primer count: {current_state_check['primer_count']}")
-            st.write(f"- All session state keys: {list(st.session_state.keys())}")
         
         if not current_state_check['has_primers']:
             st.info("No primers designed yet. Please use the Input tab to design primers.")
@@ -4539,12 +4462,6 @@ def main():
         # Check session state validity fresh for this tab
         current_state_check = check_session_state_validity()
         
-        # Debug information
-        with st.expander("🔍 Export Debug Information", expanded=True):
-            st.write("**Session State Check:**")
-            st.write(f"- Has primers: {current_state_check['has_primers']}")
-            st.write(f"- Primer count: {current_state_check['primer_count']}")
-            st.write(f"- All session state keys: {list(st.session_state.keys())}")
         
         if not current_state_check['has_primers']:
             st.info("No primers to export. Please design primers first.")
