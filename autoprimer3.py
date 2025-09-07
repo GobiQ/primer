@@ -1770,20 +1770,24 @@ def perform_gene_targeted_design(organism_name, email, api_key, max_sequences, c
             if 'selected_gene_targets' not in st.session_state:
                 st.error("❌ Please select gene targets first before designing primers.")
                 st.info("💡 Scroll up to select your desired gene categories and targets.")
+                st.write("🔍 Debug: Early return - no selected_gene_targets in session state")
                 return
             
             # Get selected gene targets
             gene_targets = st.session_state.selected_gene_targets
+            st.write(f"🔍 Debug: gene_targets = {gene_targets}")
             
             # Check if selected_genes exists in the gene_targets
             if 'selected_genes' not in gene_targets:
                 st.error("❌ Gene target selection incomplete. Please reselect your gene targets.")
+                st.write("🔍 Debug: Early return - no selected_genes in gene_targets")
                 return
                 
             selected_genes = gene_targets['selected_genes']
             
             if not selected_genes:
                 st.error("❌ No gene targets selected. Please select at least one gene target.")
+                st.write("🔍 Debug: Early return - selected_genes is empty")
                 return
             
             ncbi = NCBIConnector(email, api_key)
