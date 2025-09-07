@@ -980,6 +980,33 @@ class PrimerPair:
     penalty: float = 0.0
     gene_target: str = "Standard Design"  # Specific gene target for this primer pair
 
+def retry_with_backoff(max_retries=3, base_delay=0.34):
+    """Decorator factory for NCBI operations with retry logic"""
+    def decorator(func):
+        @wraps(func)
+        def wrapper(self, *args, **kwargs):
+            last_exception = None
+            
+            for attempt in range(max_retries):
+                try:
+                    if attempt > 0:
+                        delay = base_delay * (2 ** (attempt - 1)) + random.uniform(0.1, 0.3)
+                        st.info(f"Retrying NCBI request in {delay:.1f}s (attempt {attempt + 1}/{max_retries})")
+                        time.sleep(delay)
+                    
+                    return func(self, *args, **kwargs)
+                    
+                except (HTTPError, requests.exceptions.RequestException, Exception) as e:
+                    last_exception = e
+                    if attempt == max_retries - 1:
+                        st.error(f"NCBI request failed after {max_retries} attempts: {e}")
+                        break
+                    st.warning(f"NCBI request failed (attempt {attempt + 1}): {e}")
+            
+            return None
+        return wrapper
+    return decorator
+
 class ResilientNCBIConnector:
     """Resilient NCBI connector with exponential backoff and retry logic"""
     
@@ -997,32 +1024,7 @@ class ResilientNCBIConnector:
         jitter = random.uniform(0.1, 0.3)
         return delay + jitter
     
-    def _retry_with_backoff(self, func):
-        """Decorator for NCBI operations with retry logic"""
-        @wraps(func)
-        def wrapper(*args, **kwargs):
-            last_exception = None
-            
-            for attempt in range(self.max_retries):
-                try:
-                    if attempt > 0:
-                        delay = self._exponential_backoff(attempt - 1)
-                        st.info(f"Retrying NCBI request in {delay:.1f}s (attempt {attempt + 1}/{self.max_retries})")
-                        time.sleep(delay)
-                    
-                    return func(*args, **kwargs)
-                    
-                except (HTTPError, requests.exceptions.RequestException, Exception) as e:
-                    last_exception = e
-                    if attempt == self.max_retries - 1:
-                        st.error(f"NCBI request failed after {self.max_retries} attempts: {e}")
-                        break
-                    st.warning(f"NCBI request failed (attempt {attempt + 1}): {e}")
-            
-            return None
-        return wrapper
-    
-    @_retry_with_backoff
+    @retry_with_backoff(max_retries=3, base_delay=0.34)
     def search_sequences(self, query: str, database: str = "nucleotide", max_results: int = 100) -> List[str]:
         """Search with timeout and retry logic"""
         handle = Entrez.esearch(
@@ -1035,7 +1037,7 @@ class ResilientNCBIConnector:
         handle.close()
         return search_results["IdList"]
     
-    @_retry_with_backoff
+    @retry_with_backoff(max_retries=3, base_delay=0.34)
     def fetch_sequence(self, seq_id: str, database: str = "nucleotide") -> Optional[str]:
         """Fetch with timeout and retry logic"""
         handle = Entrez.efetch(
@@ -1049,7 +1051,7 @@ class ResilientNCBIConnector:
         handle.close()
         return str(record.seq)
     
-    @_retry_with_backoff
+    @retry_with_backoff(max_retries=3, base_delay=0.34)
     def fetch_sequence_info(self, seq_id: str, database: str = "nucleotide") -> Dict:
         """Fetch sequence info with timeout and retry logic"""
         handle = Entrez.efetch(
