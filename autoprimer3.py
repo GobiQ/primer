@@ -488,6 +488,9 @@ def search_organism_with_gene_targets(organism_name, email, api_key=None, max_se
     suggestions = get_organism_suggestions_with_gene_targets()
     organism_targets = None
     
+    # Normalize the input organism name
+    organism_name_lower = organism_name.lower().strip()
+    
     # Find matching organism and extract gene targets
     for category, subcategories in suggestions.items():
         for subcategory, organisms in subcategories.items():
@@ -498,7 +501,18 @@ def search_organism_with_gene_targets(organism_name, email, api_key=None, max_se
                     common_name, scientific_name = item
                     gene_targets = {"Essential genes": ["16S rRNA", "18S rRNA", "ACT1", "TUB1", "EF1A"]}
                 
-                if scientific_name.lower() in organism_name.lower() or organism_name.lower() in scientific_name.lower():
+                # Improved matching logic
+                scientific_lower = scientific_name.lower().strip()
+                common_lower = common_name.lower().strip()
+                
+                # Check for exact matches or partial matches
+                if (organism_name_lower == scientific_lower or 
+                    organism_name_lower == common_lower or
+                    organism_name_lower in scientific_lower or 
+                    scientific_lower in organism_name_lower or
+                    organism_name_lower in common_lower or
+                    common_lower in organism_name_lower):
+                    
                     organism_targets = {
                         'organism': scientific_name,
                         'common_name': common_name,
@@ -2385,7 +2399,11 @@ def main():
         't7_settings': {},
         'current_sequence': '',
         'session_initialized': True,
-        'last_activity': None
+        'last_activity': None,
+        # ORGANISM SELECTION VARIABLES:
+        'organism_name_input': '',
+        'trigger_gene_search': False,
+        'current_organism_targets': {}
     }
     
     for var, default_value in required_vars.items():
@@ -2554,6 +2572,19 @@ def main():
             # ==========================================
             if gene_targets_workflow:
                 st.info("🎯 **Gene-Targeted Design Mode**\nDesign primers for specific genes with known biological functions. Ideal for pathogenicity studies, resistance monitoring, and functional genomics.")
+                
+                # Handle gene target search trigger from button clicks
+                if st.session_state.get('trigger_gene_search', False):
+                    organism_name = st.session_state.get('organism_name_input', '')
+                    st.session_state.trigger_gene_search = False
+                    
+                    if organism_name and email:
+                        # Proceed with gene target search
+                        organism_targets = search_organism_with_gene_targets(organism_name, email, api_key)
+                        if organism_targets:
+                            # Store the results and display interface
+                            st.session_state.current_organism_targets = organism_targets
+                            gene_targets_selected = display_gene_targets_interface(organism_targets)
                 
                 # Gene target integration (only for this workflow)
                 if organism_name:
@@ -2748,14 +2779,19 @@ def main():
                                 common_name, latin_name = organism_item
                             
                             with cols[i % num_cols]:
+                                # Create a unique key and use callback to set organism name directly
+                                button_key = f"suggest_{category}_{subcategory}_{i}_{latin_name.replace(' ', '_')}"
+                                
                                 if st.button(
                                     common_name, 
-                                    key=f"suggest_{category}_{subcategory}_{i}", 
+                                    key=button_key, 
                                     help=f"Search for {latin_name}",
                                     use_container_width=True
                                 ):
-                                    # Set the organism name and trigger search
+                                    # Set both the organism name and a flag to trigger gene target search
                                     st.session_state.selected_organism = latin_name
+                                    st.session_state.organism_name_input = latin_name
+                                    st.session_state.trigger_gene_search = True
                                     st.rerun()
                         
                         # Add small spacing between subcategories
@@ -2767,16 +2803,8 @@ def main():
                 organism_name = st.session_state.selected_organism
                 del st.session_state.selected_organism
                 
-                if not email:
-                    st.error("❌ **Email Required**: Please enter an email address in the sidebar.")
-                else:
-                    # Use the currently selected workflow
-                    if gene_targets_workflow:
-                        st.info("🎯 **Gene-Targeted Mode Selected** - Please select gene targets above after organism selection.")
-                    elif conservation_workflow:
-                        st.info("🧬 **Conservation Mode Selected** - Click the conservation button above to proceed.")
-                    else:  # standard workflow
-                        perform_standard_design(organism_name, email, api_key, max_sequences, custom_params, enable_t7_dsrna, optimal_dsrna_length, check_transcription_efficiency)
+                # Force a rerun to update the organism_name text input
+                st.rerun()
         
         elif input_method == "Direct Sequence":
             sequence_input = st.text_area("Enter DNA sequence:", 
