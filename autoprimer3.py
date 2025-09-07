@@ -1972,7 +1972,7 @@ def perform_gene_targeted_design(organism_name, email, api_key, max_sequences, c
                         return
                     
                     # Clean and prepare sequence
-                    clean_sequence = re.sub(r'[^ATGCatgc]', '', sequence.upper())
+                        clean_sequence = re.sub(r'[^ATGCatgc]', '', sequence.upper())
                     if len(clean_sequence) < 100:
                         st.error("Sequence too short for primer design")
                         return
@@ -1984,6 +1984,62 @@ def perform_gene_targeted_design(organism_name, email, api_key, max_sequences, c
                     
                     st.success(f"Found general sequence: {len(clean_sequence)} bp")
                     sequence_source = "General organism sequence (fallback)"
+                    
+                    # Design primers for fallback sequence
+                    st.write("🧬 **Step 2: Designing primers for general sequence...**")
+                    
+                    gene_target_name = "Gene-Targeted Design (Fallback)"
+                    st.write(f"Designing primers for: {gene_target_name}")
+                    
+                    primers = designer.design_primers(
+                        clean_sequence, 
+                        custom_params=custom_params,
+                        add_t7_promoter=enable_t7_dsrna,
+                        gene_target=gene_target_name
+                    )
+                    
+                    if not primers:
+                        st.warning("No suitable primers found. Try adjusting parameters.")
+                        return
+                    
+                    # Store fallback results
+                    st.session_state.current_sequence = clean_sequence
+                    st.session_state.sequence_info = {
+                        "id": seq_ids[0],
+                        "description": f"Gene-targeted design for {organism_name} (fallback)",
+                        "length": len(clean_sequence),
+                        "organism": organism_name,
+                        "design_mode": "gene_targeted_fallback",
+                        "gene_target_info": {
+                            'gene_name': 'General organism sequence',
+                            'gene_category': 'Fallback',
+                            'sequence_source': sequence_source
+                        }
+                    }
+                    st.session_state.primers_designed = primers
+                    
+                    if enable_t7_dsrna:
+                        st.session_state.t7_dsrna_enabled = True
+                        st.session_state.t7_settings = {
+                            'optimal_length': optimal_dsrna_length,
+                            'check_efficiency': check_transcription_efficiency
+                        }
+                    
+                    st.success(f"✅ Successfully designed {len(primers)} primer pairs for {gene_target_name}!")
+                    st.info("📊 Go to Results tab to view detailed analysis!")
+                    
+                    # Show fallback preview
+                    preview_data = []
+                    for i, primer in enumerate(primers[:3]):
+                        preview_data.append({
+                            'Pair': i + 1,
+                            'Gene Target': gene_target_name,
+                            'Forward': primer.forward_seq[:30] + '...' if len(primer.forward_seq) > 30 else primer.forward_seq,
+                            'Reverse': primer.reverse_seq[:30] + '...' if len(primer.reverse_seq) > 30 else primer.reverse_seq,
+                            'Product Size': f"{primer.product_size} bp"
+                        })
+                    
+                    st.dataframe(pd.DataFrame(preview_data), use_container_width=True)
                     
                 except Exception as e:
                     st.error(f"Error fetching sequences: {e}")
@@ -2004,94 +2060,113 @@ def perform_gene_targeted_design(organism_name, email, api_key, max_sequences, c
                 gene_df = pd.DataFrame(gene_data)
                 st.dataframe(gene_df, use_container_width=True)
                 
-                # Use the longest gene sequence for primer design
-                best_gene = max(gene_sequences, key=lambda x: len(x['sequence']))
-                clean_sequence = re.sub(r'[^ATGCatgc]', '', best_gene['sequence'].upper())
-                if len(clean_sequence) > 10000:
-                    clean_sequence = clean_sequence[:10000]
-                sequence_source = f"Gene-specific sequence: {best_gene['gene']}"
-                selected_gene_info = best_gene
-            
-            st.write("🧬 **Step 2: Designing primers...**")
-            
-            try:
-                # Determine the gene target for primer design
-                if 'selected_gene_info' in locals():
-                    gene_target_name = f"{selected_gene_info['gene']} ({selected_gene_info['category']})"
-                else:
-                    gene_target_name = "Gene-Targeted Design (Fallback)"
+                # Design primers for ALL found gene targets
+                all_primers = []
+                all_sequences = []
+                gene_target_info_list = []
                 
-                st.write(f"Designing primers for: {gene_target_name}")
+                st.write("🧬 **Step 2: Designing primers for all gene targets...**")
                 
-                # Design primers
-                primers = designer.design_primers(
-                    clean_sequence, 
-                    custom_params=custom_params,
-                    add_t7_promoter=enable_t7_dsrna,
-                    gene_target=gene_target_name
-                )
+                for i, gene_seq in enumerate(gene_sequences):
+                    gene_name = gene_seq['gene']
+                    gene_category = gene_seq['category']
+                    gene_target_name = f"{gene_name} ({gene_category})"
+                    
+                    st.write(f"**Designing primers for {i+1}/{len(gene_sequences)}: {gene_target_name}**")
+                    
+                    # Clean and prepare sequence
+                    clean_sequence = re.sub(r'[^ATGCatgc]', '', gene_seq['sequence'].upper())
+                    if len(clean_sequence) > 10000:
+                        clean_sequence = clean_sequence[:10000]
+                        st.info(f"Using first 10kb of {gene_name} sequence for primer design")
+                    
+                    # Design primers for this gene
+                    gene_primers = designer.design_primers(
+                        clean_sequence, 
+                        custom_params=custom_params,
+                        add_t7_promoter=enable_t7_dsrna,
+                        gene_target=gene_target_name
+                    )
+                    
+                    if gene_primers:
+                        st.success(f"✅ Designed {len(gene_primers)} primer pairs for {gene_name}")
+                        all_primers.extend(gene_primers)
+                        all_sequences.append({
+                            'gene': gene_name,
+                            'category': gene_category,
+                            'sequence': clean_sequence,
+                            'length': len(clean_sequence),
+                            'id': gene_seq['id']
+                        })
+                        gene_target_info_list.append({
+                            'gene_name': gene_name,
+                            'gene_category': gene_category,
+                            'sequence_source': f"Gene-specific sequence: {gene_name}",
+                            'primer_count': len(gene_primers)
+                        })
+                    else:
+                        st.warning(f"⚠️ No suitable primers found for {gene_name}")
                 
-                if not primers:
-                    st.warning("No suitable primers found. Try adjusting parameters.")
+                if not all_primers:
+                    st.warning("No suitable primers found for any gene targets. Try adjusting parameters.")
                     return
                 
-                # Store results with gene target information
-                st.session_state.current_sequence = clean_sequence
-                
-                # Determine sequence ID and description based on whether we found gene-specific sequences
-                if 'selected_gene_info' in locals():
-                    seq_id = selected_gene_info['id']
-                    description = f"Gene-targeted design for {selected_gene_info['gene']} in {organism_name}"
-                    gene_target_info = {
-                        'gene_name': selected_gene_info['gene'],
-                        'gene_category': selected_gene_info['category'],
-                        'sequence_source': sequence_source
-                    }
-                else:
-                    seq_id = seq_ids[0] if 'seq_ids' in locals() else "unknown"
-                    description = f"Gene-targeted design for {organism_name} (fallback)"
-                    gene_target_info = {
-                        'gene_name': 'General organism sequence',
-                        'gene_category': 'Fallback',
-                        'sequence_source': sequence_source
-                    }
+                # Store comprehensive results
+                st.session_state.current_sequence = all_sequences[0]['sequence']  # Store first sequence as primary
+                st.session_state.all_gene_sequences = all_sequences  # Store all sequences
                 
                 st.session_state.sequence_info = {
-                    "id": seq_id,
-                    "description": description,
-                    "length": len(clean_sequence),
+                    "id": "multi_gene_design",
+                    "description": f"Multi-gene targeted design for {organism_name}",
+                    "length": sum(seq['length'] for seq in all_sequences),
                     "organism": organism_name,
-                    "design_mode": "gene_targeted",
-                    "gene_target_info": gene_target_info
+                    "design_mode": "multi_gene_targeted",
+                    "gene_targets": gene_target_info_list,
+                    "total_genes": len(gene_sequences),
+                    "total_primers": len(all_primers)
                 }
-                st.session_state.primers_designed = primers
-                
-                if enable_t7_dsrna:
-                    st.session_state.t7_dsrna_enabled = True
-                    st.session_state.t7_settings = {
-                        'optimal_length': optimal_dsrna_length,
-                        'check_efficiency': check_transcription_efficiency
-                    }
-                
-                st.success(f"✅ Successfully designed {len(primers)} primer pairs for {gene_target_name}!")
+            st.session_state.primers_designed = all_primers
+            
+            if enable_t7_dsrna:
+                st.session_state.t7_dsrna_enabled = True
+                st.session_state.t7_settings = {
+                    'optimal_length': optimal_dsrna_length,
+                    'check_efficiency': check_transcription_efficiency
+                }
+            
+                st.success(f"🎯 **Successfully designed {len(all_primers)} primer pairs across {len(gene_sequences)} gene targets!**")
                 st.info("📊 Go to Results tab to view detailed analysis!")
                 
-                # Show preview with gene target information
-                preview_data = []
-                for i, primer in enumerate(primers[:3]):
-                    preview_data.append({
-                        'Pair': i + 1,
-                        'Gene Target': gene_target_name,
-                        'Forward': primer.forward_seq[:30] + '...' if len(primer.forward_seq) > 30 else primer.forward_seq,
-                        'Reverse': primer.reverse_seq[:30] + '...' if len(primer.reverse_seq) > 30 else primer.reverse_seq,
-                        'Product Size': f"{primer.product_size} bp"
+                # Show comprehensive preview
+                st.subheader("📋 Primer Design Summary")
+                summary_data = []
+                for info in gene_target_info_list:
+                    summary_data.append({
+                        'Gene Target': f"{info['gene_name']} ({info['gene_category']})",
+                        'Primers Designed': info['primer_count'],
+                        'Sequence Length': f"{next(seq['length'] for seq in all_sequences if seq['gene'] == info['gene_name']):,} bp"
                     })
                 
-                st.dataframe(pd.DataFrame(preview_data), use_container_width=True)
+                summary_df = pd.DataFrame(summary_data)
+                st.dataframe(summary_df, use_container_width=True)
                 
-            except Exception as e:
-                st.error(f"Error in primer design: {e}")
-                return
+                # Show sample primers from each gene
+                st.subheader("🔬 Sample Primers (First 2 pairs from each gene)")
+                preview_data = []
+                primer_count = 0
+                for info in gene_target_info_list:
+                    gene_primers = [p for p in all_primers if p.gene_target == f"{info['gene_name']} ({info['gene_category']})"]
+                    for i, primer in enumerate(gene_primers[:2]):  # Show first 2 from each gene
+                        preview_data.append({
+                            'Gene Target': f"{info['gene_name']} ({info['gene_category']})",
+                            'Pair': f"{info['gene_name']}-{i+1}",
+                            'Forward': primer.forward_seq[:30] + '...' if len(primer.forward_seq) > 30 else primer.forward_seq,
+                            'Reverse': primer.reverse_seq[:30] + '...' if len(primer.reverse_seq) > 30 else primer.reverse_seq,
+                            'Product Size': f"{primer.product_size} bp"
+                        })
+                
+                if preview_data:
+                    st.dataframe(pd.DataFrame(preview_data), use_container_width=True)
                 
         except Exception as e:
             st.error(f"Gene-targeted design error: {e}")
@@ -2537,8 +2612,8 @@ def main():
         max_gc = st.slider("Maximum GC content (%)", 50.0, 80.0, 60.0, 1.0)
         max_poly_x = st.slider("Max poly-X runs", 3, 6, 4)
         salt_conc = st.slider("Salt concentration (mM)", 10.0, 100.0, 50.0, 1.0)
-        num_primers = st.number_input("Number of primer pairs to design", 1, 50, 20, 
-                                     help="Maximum number of primer pairs to return")
+        num_primers = st.number_input("Number of primer pairs to design", 1, 100, 30, 
+                                     help="Maximum number of primer pairs to return per gene target")
         
         st.write("Product size ranges:")
         min_product = st.number_input("Minimum product size", 50, 500, 75)
@@ -2762,13 +2837,13 @@ def main():
                                     custom_params, enable_t7_dsrna, 
                                     optimal_dsrna_length, check_transcription_efficiency
                                 )
+                            else:
+                                st.info("Select at least one gene category to proceed.")
                         else:
-                            st.info("Select at least one gene category to proceed.")
-                else:
-                    if not email:
-                        st.error("Email required for gene target search")
-                    if not organism_name:
-                        st.info("Enter an organism name above to search for gene targets.")
+                            if not email:
+                                st.error("Email required for gene target search")
+                            if not organism_name:
+                                st.info("Enter an organism name above to search for gene targets.")
             
             # ==========================================
             # WORKFLOW 2: CONSERVATION-BASED DESIGN  
@@ -2958,7 +3033,7 @@ def main():
                     st.write(f"- First primer: {st.session_state['primers_designed'][0]}")
             else:
                 st.write("- No primers in session state")
-            
+        
             st.write("**All session state keys:**")
             st.write(list(st.session_state.keys()))
         
@@ -3019,6 +3094,35 @@ def main():
             # Show conservation information if available
             if 'conservation_score' in info:
                 st.metric("Conservation Score", f"{info['conservation_score']:.1%}")
+            
+            # Show multi-gene information if available
+            if info.get('design_mode') == 'multi_gene_targeted':
+                st.success("🎯 **Multi-Gene Targeted Design** - Primers designed across multiple gene targets")
+                
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    st.metric("Total Genes", info.get('total_genes', 'N/A'))
+                with col2:
+                    st.metric("Total Primers", info.get('total_primers', 'N/A'))
+                with col3:
+                    avg_primers_per_gene = info.get('total_primers', 0) / info.get('total_genes', 1)
+                    st.metric("Avg Primers/Gene", f"{avg_primers_per_gene:.1f}")
+                with col4:
+                    st.metric("Total Sequence Length", f"{info.get('length', 0):,} bp")
+                
+                # Show gene target breakdown
+                if 'gene_targets' in info:
+                    st.subheader("Gene Target Breakdown")
+                    gene_breakdown_data = []
+                    for target in info['gene_targets']:
+                        gene_breakdown_data.append({
+                            'Gene': target['gene_name'],
+                            'Category': target['gene_category'],
+                            'Primers Designed': target['primer_count']
+                        })
+                    
+                    gene_breakdown_df = pd.DataFrame(gene_breakdown_data)
+                    st.dataframe(gene_breakdown_df, use_container_width=True)
         
         # Show conserved regions if available
         if hasattr(st.session_state, 'conserved_regions') and st.session_state.conserved_regions:
