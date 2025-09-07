@@ -1757,8 +1757,11 @@ def check_session_state_validity():
 def perform_gene_targeted_design(organism_name, email, api_key, max_sequences, custom_params, enable_t7_dsrna, optimal_dsrna_length, check_transcription_efficiency):
     """Perform gene-targeted primer design workflow"""
     
+    st.write("🚀 Function called: perform_gene_targeted_design")
+    
     # Prevent function from running if already processing
     if st.session_state.get('processing_gene_design', False):
+        st.write("⚠️ Already processing, returning early")
         return
     
     with st.spinner(f"Designing gene-targeted primers for {organism_name}..."):
@@ -2652,12 +2655,21 @@ def main():
                                         'selected_gene_targets' in st.session_state and
                                         st.session_state.selected_gene_targets.get('selected_categories'))
                         
+                        # Debug information
+                        st.write(f"🔍 Debug: selected_categories = {selected_categories}")
+                        st.write(f"🔍 Debug: has_selections = {has_selections}")
+                        st.write(f"🔍 Debug: selected_gene_targets in session = {'selected_gene_targets' in st.session_state}")
+                        if 'selected_gene_targets' in st.session_state:
+                            st.write(f"🔍 Debug: gene_targets keys = {list(st.session_state.selected_gene_targets.keys())}")
+                        
                         if has_selections:
                             st.success("✅ Gene targets selected. Ready to design primers!")
                             
                             if st.button("🎯 Design Gene-Targeted Primers", type="primary", use_container_width=True, key="gene_design_btn"):
+                                st.write("🔘 Button clicked!")
                                 # Prevent multiple simultaneous executions
                                 if not st.session_state.get('processing_gene_design', False):
+                                    st.write("🚀 Starting primer design...")
                                     st.session_state.processing_gene_design = True
                                     try:
                                         perform_gene_targeted_design(organism_name, email, api_key, max_sequences, custom_params, enable_t7_dsrna, optimal_dsrna_length, check_transcription_efficiency)
