@@ -3148,7 +3148,7 @@ def perform_standard_design(organism_name, email, api_key, max_sequences, custom
                 st.info("📊 Go to other tabs to view detailed analysis with specificity results!")
                         else:
                             st.warning("No suitable primers found. Try adjusting parameters.")
-                    else:
+                else:
                         st.error("Failed to fetch sequence")
             else:
                 st.warning(f"No sequences found for {organism_name}")
