@@ -1367,11 +1367,25 @@ class ConservationAnalyzer:
         merged.append(current)
         return merged
     
-    def test_specificity(self, target_sequence, comparison_organisms, max_similarity=0.7):
+    def test_specificity(self, target_sequence, comparison_organisms, target_organism=None, max_similarity=0.7):
         """Test sequence specificity against other organisms"""
         specificity_results = {}
         
-        for organism in comparison_organisms:
+        # Filter out target organism from comparison list
+        filtered_organisms = []
+        if target_organism:
+            target_organism_lower = target_organism.lower().strip()
+            for organism in comparison_organisms:
+                organism_lower = organism.lower().strip()
+                # Skip if it's the same organism (exact match or genus match)
+                if (organism_lower == target_organism_lower or 
+                    organism_lower.split()[0] == target_organism_lower.split()[0]):
+                    continue
+                filtered_organisms.append(organism)
+        else:
+            filtered_organisms = comparison_organisms
+        
+        for organism in filtered_organisms:
             try:
                 # Search for sequences from comparison organism
                 query = f'"{organism}"[organism]'
@@ -1490,6 +1504,7 @@ class EnhancedSpecificityAnalyzer:
     def comprehensive_specificity_test(self, primer_pair: PrimerPair, 
                                      target_sequence: str, 
                                      comparison_organisms: List[str],
+                                     target_organism: str = None,
                                      pcr_temp: float = 60.0) -> Dict:
         """Enhanced specificity testing with thermodynamic considerations"""
         
@@ -1508,8 +1523,22 @@ class EnhancedSpecificityAnalyzer:
             forward_seq = primer_pair.forward_seq
             reverse_seq = primer_pair.reverse_seq
         
-        # Test against each organism
-        for organism in comparison_organisms:
+        # Filter out target organism from comparison list
+        filtered_organisms = []
+        if target_organism:
+            target_organism_lower = target_organism.lower().strip()
+            for organism in comparison_organisms:
+                organism_lower = organism.lower().strip()
+                # Skip if it's the same organism (exact match or genus match)
+                if (organism_lower == target_organism_lower or 
+                    organism_lower.split()[0] == target_organism_lower.split()[0]):
+                    continue
+                filtered_organisms.append(organism)
+        else:
+            filtered_organisms = comparison_organisms
+        
+        # Test against each organism (excluding target organism)
+        for organism in filtered_organisms:
             try:
                 # Fetch sequences for organism
                 seq_ids = self.ncbi.search_sequences(f'"{organism}"[organism]', max_results=3)
@@ -2725,7 +2754,8 @@ def display_enhanced_gene_targets_interface(organism_targets):
                             st.info("Essential")
 
 def perform_enhanced_specificity_testing(primers: List[PrimerPair], target_sequence: str, 
-                                       comparison_organisms: List[str], email: str, api_key: str = None):
+                                       comparison_organisms: List[str], email: str, api_key: str = None, 
+                                       target_organism: str = None):
     """Perform enhanced specificity testing with thermodynamic considerations"""
     if not primers or not comparison_organisms:
         return {}
@@ -2736,12 +2766,16 @@ def perform_enhanced_specificity_testing(primers: List[PrimerPair], target_seque
         
         specificity_results = {}
         
+        # Inform user about target organism exclusion
+        if target_organism:
+            st.info(f"🎯 **Specificity Testing**: Excluding target organism '{target_organism}' from comparison to avoid self-matches")
+        
         # Test each primer pair
         for i, primer_pair in enumerate(primers[:3]):  # Test first 3 primer pairs
             st.write(f"Testing specificity for primer pair {i+1}...")
             
             result = analyzer.comprehensive_specificity_test(
-                primer_pair, target_sequence, comparison_organisms
+                primer_pair, target_sequence, comparison_organisms, target_organism
             )
             
             specificity_results[f"primer_pair_{i+1}"] = result
@@ -2843,6 +2877,7 @@ def perform_conservation_based_design(organism_name, email, api_key, max_sequenc
                     comp_orgs = get_related_organisms(organism_name, max_organisms=100)
                 
                 st.write(f"Testing against {len(comp_orgs)} organisms for comprehensive specificity analysis...")
+                st.info(f"🎯 **Specificity Testing**: Excluding target organism '{organism_name}' from comparison to avoid self-matches")
                 
                 # Add progress bar for specificity testing
                 progress_bar = st.progress(0)
@@ -2851,6 +2886,7 @@ def perform_conservation_based_design(organism_name, email, api_key, max_sequenc
                 specificity_results = analyzer.test_specificity(
                     consensus_seq,
                     comp_orgs,
+                    target_organism=organism_name,
                     max_similarity=specificity_threshold
                 )
                 
@@ -3016,6 +3052,7 @@ def perform_standard_design(organism_name, email, api_key, max_sequences, custom
                             # Get related organisms for specificity testing (100+ organisms)
                             related_organisms = get_related_organisms(organism_name, max_organisms=100)
                             st.write(f"Testing against {len(related_organisms)} related organisms for comprehensive specificity analysis...")
+                            st.info(f"🎯 **Specificity Testing**: Excluding target organism '{organism_name}' from comparison to avoid self-matches")
                             
                             # Test specificity for the best primers
                             specificity_results = {}
@@ -3038,6 +3075,7 @@ def perform_standard_design(organism_name, email, api_key, max_sequences, custom
                                         primer_specificity = analyzer.test_specificity(
                                             test_sequence,
                                             related_organisms,
+                                            target_organism=organism_name,
                                             max_similarity=0.7  # 70% similarity threshold
                                         )
                                         specificity_results[f"Primer Pair {i+1}"] = primer_specificity
