@@ -2940,14 +2940,17 @@ def main():
     with tab2:
         st.header("Primer Design Results")
         
+        # Check session state validity fresh for this tab
+        current_state_check = check_session_state_validity()
+        
         # Debug information
         with st.expander("🔍 Debug Information", expanded=True):
             st.write("**Session State Check:**")
-            st.write(f"- Has primers: {state_check['has_primers']}")
-            st.write(f"- Has sequence: {state_check['has_sequence']}")
-            st.write(f"- Has sequence info: {state_check['has_seq_info']}")
-            st.write(f"- Primer count: {state_check['primer_count']}")
-            st.write(f"- Sequence length: {state_check['sequence_length']}")
+            st.write(f"- Has primers: {current_state_check['has_primers']}")
+            st.write(f"- Has sequence: {current_state_check['has_sequence']}")
+            st.write(f"- Has sequence info: {current_state_check['has_seq_info']}")
+            st.write(f"- Primer count: {current_state_check['primer_count']}")
+            st.write(f"- Sequence length: {current_state_check['sequence_length']}")
             
             if 'primers_designed' in st.session_state:
                 st.write(f"- Primers in session state: {len(st.session_state['primers_designed'])}")
@@ -2959,7 +2962,7 @@ def main():
             st.write("**All session state keys:**")
             st.write(list(st.session_state.keys()))
         
-        if not state_check['has_primers']:
+        if not current_state_check['has_primers']:
             st.info("No primers designed yet. Please use the Input tab to design primers.")
             st.stop()
         
@@ -3301,14 +3304,17 @@ def main():
     with tab3:
         st.header("Primer Analysis")
         
+        # Check session state validity fresh for this tab
+        current_state_check = check_session_state_validity()
+        
         # Debug information
         with st.expander("🔍 Analysis Debug Information", expanded=True):
             st.write("**Session State Check:**")
-            st.write(f"- Has primers: {state_check['has_primers']}")
-            st.write(f"- Primer count: {state_check['primer_count']}")
+            st.write(f"- Has primers: {current_state_check['has_primers']}")
+            st.write(f"- Primer count: {current_state_check['primer_count']}")
             st.write(f"- All session state keys: {list(st.session_state.keys())}")
         
-        if not state_check['has_primers']:
+        if not current_state_check['has_primers']:
             st.info("No primers designed yet. Please use the Input tab to design primers.")
             st.stop()
         
@@ -3324,7 +3330,7 @@ def main():
         else:
             st.warning("Could not create primer visualization")
         
-        if state_check['has_sequence']:
+        if current_state_check['has_sequence']:
             st.subheader("Primer Binding Sites")
             selected_for_diagram = st.selectbox(
                 "Select primer pair for binding site visualization:", 
@@ -3412,14 +3418,17 @@ def main():
     with tab4:
         st.header("Export Results")
         
+        # Check session state validity fresh for this tab
+        current_state_check = check_session_state_validity()
+        
         # Debug information
         with st.expander("🔍 Export Debug Information", expanded=True):
             st.write("**Session State Check:**")
-            st.write(f"- Has primers: {state_check['has_primers']}")
-            st.write(f"- Primer count: {state_check['primer_count']}")
+            st.write(f"- Has primers: {current_state_check['has_primers']}")
+            st.write(f"- Primer count: {current_state_check['primer_count']}")
             st.write(f"- All session state keys: {list(st.session_state.keys())}")
         
-        if not state_check['has_primers']:
+        if not current_state_check['has_primers']:
             st.info("No primers to export. Please design primers first.")
             st.stop()
         
