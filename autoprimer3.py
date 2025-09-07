@@ -137,7 +137,7 @@ def get_gene_priority(category):
         return "High"
     
     # Medium priority categories
-    elif any(keyword in category_lower for keyword in ['pathogenicity', 'virulence', 'effector', 'resistance', 'detoxification']):
+    elif any(keyword in category_lower for keyword in ['pathogenicity', 'virulence', 'effector', 'resistance', 'detoxification', 'rnai pathway']):
         return "Medium"
     
     # Low priority categories
@@ -153,6 +153,9 @@ def get_gene_use_recommendation(category):
     
     elif 'pathogenicity' in category_lower or 'virulence' in category_lower:
         return "Useful for detecting pathogenic strains and studying disease mechanisms. May not be present in all isolates."
+    
+    elif 'rnai pathway' in category_lower:
+        return "Critical for gene silencing studies and RNAi-based control strategies. Essential for understanding RNA interference machinery and developing dsRNA-based treatments."
     
     elif 'resistance' in category_lower:
         return "Important for monitoring resistance development and screening for resistant strains. Critical for management decisions."
@@ -172,7 +175,339 @@ def get_gene_use_recommendation(category):
     else:
         return "General purpose gene category. Consider specific research objectives when selecting targets."
 
+def get_species_prefix(scientific_name):
+    """Generate species prefix for gene names (e.g., 'Botrytis cinerea' -> 'Bc')"""
+    parts = scientific_name.split()
+    if len(parts) >= 2:
+        return parts[0][0].upper() + parts[1][0].lower()
+    elif len(parts) == 1:
+        return parts[0][:2].capitalize()
+    return "Sp"  # Generic prefix
+
+def generate_rnai_genes(species_prefix, organism_type="fungus"):
+    """Generate RNAi pathway genes based on organism type"""
+    
+    if organism_type == "fungus":
+        return [
+            f"{species_prefix}DCL1 (dicer-like 1)",
+            f"{species_prefix}DCL2 (dicer-like 2)",
+            f"{species_prefix}AGO1 (argonaute 1)",
+            f"{species_prefix}AGO2 (argonaute 2)",
+            f"{species_prefix}RDRP1 (RNA-dependent RNA polymerase 1)",
+            f"{species_prefix}RDRP2 (RNA-dependent RNA polymerase 2)",
+            f"{species_prefix}QDE2 (RecQ helicase)",
+            f"{species_prefix}SAD1 (RNAi deficient 1)",
+            f"{species_prefix}SMS2 (suppressor of meiotic silencing)",
+            f"{species_prefix}RRP44 (exoribonuclease)"
+        ]
+    
+    elif organism_type == "virus":
+        return [
+            f"{species_prefix}VSR1 (viral suppressor of RNAi 1)",
+            f"{species_prefix}VSR2 (viral suppressor of RNAi 2)",
+            f"{species_prefix}P19 (silencing suppressor)",
+            f"{species_prefix}2b (silencing suppressor)",
+            f"{species_prefix}HC-Pro (helper component protease)",
+            f"{species_prefix}P1 (silencing suppressor)"
+        ]
+    
+    elif organism_type == "insect":
+        return [
+            f"{species_prefix}DCR1 (dicer 1)",
+            f"{species_prefix}DCR2 (dicer 2)",
+            f"{species_prefix}AGO1 (argonaute 1)",
+            f"{species_prefix}AGO2 (argonaute 2)",
+            f"{species_prefix}AGO3 (argonaute 3)",
+            f"{species_prefix}PIWI (piwi protein)",
+            f"{species_prefix}AUB (aubergine)",
+            f"{species_prefix}R2D2 (dsRNA binding protein)",
+            f"{species_prefix}LOQUACIOUS (dsRNA binding protein)",
+            f"{species_prefix}DROSHA (RNase III enzyme)"
+        ]
+    
+    elif organism_type == "plant":
+        return [
+            f"{species_prefix}DCL1 (dicer-like 1)",
+            f"{species_prefix}DCL2 (dicer-like 2)",
+            f"{species_prefix}DCL3 (dicer-like 3)",
+            f"{species_prefix}DCL4 (dicer-like 4)",
+            f"{species_prefix}AGO1 (argonaute 1)",
+            f"{species_prefix}AGO4 (argonaute 4)",
+            f"{species_prefix}AGO7 (argonaute 7)",
+            f"{species_prefix}RDR1 (RNA-dependent RNA polymerase 1)",
+            f"{species_prefix}RDR2 (RNA-dependent RNA polymerase 2)",
+            f"{species_prefix}RDR6 (RNA-dependent RNA polymerase 6)"
+        ]
+    
+    elif organism_type == "bacteria":
+        return [
+            f"{species_prefix}CAS1 (CRISPR-associated protein 1)",
+            f"{species_prefix}CAS2 (CRISPR-associated protein 2)",
+            f"{species_prefix}CAS3 (CRISPR-associated protein 3)",
+            f"{species_prefix}CAS9 (CRISPR-associated protein 9)",
+            f"{species_prefix}CSPA (cold shock protein A)",
+            f"{species_prefix}RNaseE (ribonuclease E)",
+            f"{species_prefix}RNaseIII (ribonuclease III)",
+            f"{species_prefix}sRNA1 (small regulatory RNA 1)"
+        ]
+    
+    elif organism_type == "oomycete":
+        return [
+            f"{species_prefix}DCL1 (dicer-like 1)",
+            f"{species_prefix}DCL2 (dicer-like 2)",
+            f"{species_prefix}AGO1 (argonaute 1)",
+            f"{species_prefix}RRP6 (exoribonuclease)",
+            f"{species_prefix}RRP44 (exoribonuclease)",
+            f"{species_prefix}RDRP1 (RNA-dependent RNA polymerase)"
+        ]
+    
+    elif organism_type == "nematode":
+        return [
+            f"{species_prefix}DCR1 (dicer 1)",
+            f"{species_prefix}RDE1 (RNAi deficient 1)",
+            f"{species_prefix}RDE4 (RNAi deficient 4)",
+            f"{species_prefix}RRF1 (RNA-directed RNA polymerase 1)",
+            f"{species_prefix}RRF3 (RNA-directed RNA polymerase 3)",
+            f"{species_prefix}ALG1 (argonaute-like gene 1)",
+            f"{species_prefix}ALG2 (argonaute-like gene 2)",
+            f"{species_prefix}EGO1 (enhancer of glp-1)",
+            f"{species_prefix}MUT7 (mutator 7)",
+            f"{species_prefix}SID1 (systemic RNAi deficient 1)"
+        ]
+    
+    else:
+        # Generic RNAi genes for unknown organism types
+        return [
+            f"{species_prefix}DCL1 (dicer-like 1)",
+            f"{species_prefix}AGO1 (argonaute 1)",
+            f"{species_prefix}RDRP1 (RNA-dependent RNA polymerase)"
+        ]
+
+def determine_organism_type(category, subcategory, scientific_name):
+    """Determine organism type based on category and taxonomy"""
+    
+    category_lower = category.lower()
+    subcategory_lower = subcategory.lower()
+    name_lower = scientific_name.lower()
+    
+    if "fungi" in category_lower or "fungal" in category_lower:
+        return "fungus"
+    elif "virus" in category_lower or "viral" in category_lower:
+        return "virus"
+    elif "insect" in category_lower or "arthropod" in category_lower or "mite" in subcategory_lower or "thrips" in subcategory_lower:
+        return "insect"
+    elif "bacteria" in category_lower or "bacterial" in category_lower:
+        return "bacteria"
+    elif "plant" in category_lower:
+        return "plant"
+    elif "oomycete" in category_lower or "pythium" in name_lower or "phytophthora" in name_lower:
+        return "oomycete"
+    elif "nematode" in category_lower or "caenorhabditis" in name_lower or "meloidogyne" in name_lower:
+        return "nematode"
+    else:
+        return "unknown"
+
+def enhanced_gene_search_variations(clean_gene):
+    """Generate search variations including comprehensive RNAi terms"""
+    gene_variations = [clean_gene]
+    
+    # Existing gene variations
+    if clean_gene.upper() in ['ACT1', 'ACTIN']:
+        gene_variations.extend(['actin', 'ACT', 'Actin'])
+    elif clean_gene.upper() in ['TUB1', 'TUBULIN']:
+        gene_variations.extend(['tubulin', 'TUB', 'Tubulin'])
+    elif clean_gene.upper() in ['EF1A', 'ELONGATION']:
+        gene_variations.extend(['elongation factor', 'EF1', 'EF-1'])
+    elif 'RPL' in clean_gene.upper():
+        gene_variations.extend([clean_gene.replace('RPL', 'ribosomal protein L'), 'ribosomal protein'])
+    elif 'RPS' in clean_gene.upper():
+        gene_variations.extend([clean_gene.replace('RPS', 'ribosomal protein S'), 'ribosomal protein'])
+    
+    # RNAi gene variations - Dicer genes
+    elif any(dcl in clean_gene.upper() for dcl in ['DCL1', 'DCR1']):
+        gene_variations.extend([
+            'dicer-like 1', 'dicer like 1', 'DCL1', 'DCR1', 'dicer1', 'dicer 1',
+            'RNase III', 'ribonuclease III', 'endoribonuclease'
+        ])
+    elif any(dcl in clean_gene.upper() for dcl in ['DCL2', 'DCR2']):
+        gene_variations.extend([
+            'dicer-like 2', 'dicer like 2', 'DCL2', 'DCR2', 'dicer2', 'dicer 2',
+            'RNase III', 'ribonuclease III'
+        ])
+    elif any(dcl in clean_gene.upper() for dcl in ['DCL3']):
+        gene_variations.extend(['dicer-like 3', 'dicer like 3', 'DCL3', 'dicer3'])
+    elif any(dcl in clean_gene.upper() for dcl in ['DCL4']):
+        gene_variations.extend(['dicer-like 4', 'dicer like 4', 'DCL4', 'dicer4'])
+    
+    # Argonaute genes
+    elif 'AGO1' in clean_gene.upper():
+        gene_variations.extend([
+            'argonaute 1', 'argonaute1', 'AGO1', 'RISC', 'slicer',
+            'RNA-induced silencing complex'
+        ])
+    elif 'AGO2' in clean_gene.upper():
+        gene_variations.extend(['argonaute 2', 'argonaute2', 'AGO2', 'RISC'])
+    elif 'AGO3' in clean_gene.upper():
+        gene_variations.extend(['argonaute 3', 'argonaute3', 'AGO3'])
+    elif 'AGO4' in clean_gene.upper():
+        gene_variations.extend(['argonaute 4', 'argonaute4', 'AGO4'])
+    elif 'AGO7' in clean_gene.upper():
+        gene_variations.extend(['argonaute 7', 'argonaute7', 'AGO7'])
+    
+    # RNA-dependent RNA polymerase genes
+    elif any(rdrp in clean_gene.upper() for rdrp in ['RDRP1', 'RDR1', 'RRF1']):
+        gene_variations.extend([
+            'RNA-dependent RNA polymerase 1', 'RdRP1', 'RDR1', 'RRF1',
+            'RNA polymerase', 'RNA-directed RNA polymerase'
+        ])
+    elif any(rdrp in clean_gene.upper() for rdrp in ['RDRP2', 'RDR2', 'RRF2']):
+        gene_variations.extend([
+            'RNA-dependent RNA polymerase 2', 'RdRP2', 'RDR2', 'RRF2'
+        ])
+    elif any(rdrp in clean_gene.upper() for rdrp in ['RDRP3', 'RDR6', 'RRF3']):
+        gene_variations.extend([
+            'RNA-dependent RNA polymerase 6', 'RdRP6', 'RDR6', 'RRF3'
+        ])
+    
+    # Helicase genes
+    elif 'QDE2' in clean_gene.upper():
+        gene_variations.extend([
+            'RecQ helicase', 'QDE2', 'helicase', 'DNA helicase',
+            'ATP-dependent helicase'
+        ])
+    
+    # PIWI genes
+    elif 'PIWI' in clean_gene.upper():
+        gene_variations.extend(['piwi protein', 'PIWI', 'P-element induced wimpy'])
+    elif 'AUB' in clean_gene.upper():
+        gene_variations.extend(['aubergine', 'AUB', 'piwi protein'])
+    
+    # Other RNAi components
+    elif 'R2D2' in clean_gene.upper():
+        gene_variations.extend(['R2D2', 'dsRNA binding protein', 'double-stranded RNA binding'])
+    elif 'LOQUACIOUS' in clean_gene.upper():
+        gene_variations.extend(['loquacious', 'LOQS', 'dsRNA binding protein'])
+    elif 'DROSHA' in clean_gene.upper():
+        gene_variations.extend(['drosha', 'RNase III enzyme', 'microprocessor'])
+    
+    # RNAi deficient genes
+    elif any(rde in clean_gene.upper() for rde in ['RDE1', 'RDE4']):
+        gene_variations.extend([
+            'RNAi deficient', 'RDE1', 'RDE4', 'RNA interference deficient'
+        ])
+    elif 'SAD1' in clean_gene.upper():
+        gene_variations.extend(['RNAi deficient 1', 'SAD1', 'suppressor'])
+    elif 'SMS2' in clean_gene.upper():
+        gene_variations.extend(['suppressor of meiotic silencing', 'SMS2'])
+    
+    # Viral suppressors
+    elif 'VSR' in clean_gene.upper():
+        gene_variations.extend([
+            'viral suppressor of RNAi', 'VSR', 'silencing suppressor',
+            'RNA silencing suppressor'
+        ])
+    elif 'P19' in clean_gene.upper():
+        gene_variations.extend(['P19', 'silencing suppressor', 'p19 protein'])
+    elif 'HC-PRO' in clean_gene.upper():
+        gene_variations.extend([
+            'helper component protease', 'HC-Pro', 'helper component proteinase',
+            'silencing suppressor'
+        ])
+    
+    # CRISPR genes (for bacteria)
+    elif 'CAS' in clean_gene.upper():
+        gene_variations.extend([
+            'CRISPR-associated protein', 'CAS', 'CRISPR protein',
+            'clustered regularly interspaced short palindromic repeats'
+        ])
+    
+    # Exoribonuclease genes
+    elif any(rrp in clean_gene.upper() for rrp in ['RRP44', 'RRP6']):
+        gene_variations.extend([
+            'exoribonuclease', 'RRP44', 'RRP6', '3 to 5 exoribonuclease',
+            'RNA processing'
+        ])
+    
+    # Systemic RNAi genes
+    elif 'SID1' in clean_gene.upper():
+        gene_variations.extend([
+            'systemic RNAi deficient 1', 'SID1', 'dsRNA transporter',
+            'RNA interference systemic'
+        ])
+    elif 'EGO1' in clean_gene.upper():
+        gene_variations.extend(['enhancer of glp-1', 'EGO1', 'RNA polymerase'])
+    elif 'MUT7' in clean_gene.upper():
+        gene_variations.extend(['mutator 7', 'MUT7', 'RNAi pathway'])
+    
+    return gene_variations
+
+def add_rnai_genes_to_all_organisms():
+    """Add RNAi pathway genes to all organisms in the system"""
+    
+    # Get the original organism suggestions
+    original_suggestions = get_organism_suggestions_with_gene_targets_original()
+    
+    # Create a deep copy to modify
+    enhanced_suggestions = {}
+    
+    for category, subcategories in original_suggestions.items():
+        enhanced_suggestions[category] = {}
+        
+        for subcategory, organisms in subcategories.items():
+            enhanced_suggestions[category][subcategory] = []
+            
+            for organism_item in organisms:
+                if len(organism_item) == 3:
+                    common_name, scientific_name, gene_targets = organism_item
+                    
+                    # Determine organism type
+                    organism_type = determine_organism_type(category, subcategory, scientific_name)
+                    
+                    # Generate species prefix
+                    species_prefix = get_species_prefix(scientific_name)
+                    
+                    # Generate RNAi genes for this organism type
+                    rnai_genes = generate_rnai_genes(species_prefix, organism_type)
+                    
+                    # Add RNAi genes to gene targets
+                    enhanced_gene_targets = gene_targets.copy()
+                    enhanced_gene_targets["RNAi pathway genes"] = rnai_genes
+                    
+                    # Add the enhanced organism to the list
+                    enhanced_suggestions[category][subcategory].append(
+                        (common_name, scientific_name, enhanced_gene_targets)
+                    )
+                    
+                else:
+                    # Handle old format organisms (without gene targets)
+                    common_name, scientific_name = organism_item
+                    
+                    # Determine organism type
+                    organism_type = determine_organism_type(category, subcategory, scientific_name)
+                    
+                    # Generate species prefix
+                    species_prefix = get_species_prefix(scientific_name)
+                    
+                    # Create basic gene targets with RNAi genes
+                    basic_gene_targets = {
+                        "Essential genes": ["16S rRNA", "18S rRNA", "ACT1", "TUB1", "EF1A"],
+                        "RNAi pathway genes": generate_rnai_genes(species_prefix, organism_type)
+                    }
+                    
+                    # Add the enhanced organism to the list
+                    enhanced_suggestions[category][subcategory].append(
+                        (common_name, scientific_name, basic_gene_targets)
+                    )
+    
+    return enhanced_suggestions
+
 def get_organism_suggestions_with_gene_targets():
+    """Get agricultural pest and pathogen suggestions with comprehensive RNAi pathway genes"""
+    
+    # Call the function that adds RNAi genes to all organisms
+    return add_rnai_genes_to_all_organisms()
+
+def get_organism_suggestions_with_gene_targets_original():
     """Get agricultural pest and pathogen suggestions organized by category with comprehensive gene targets"""
     return {
         "🍄 Fungal Pathogens": {
@@ -736,7 +1071,7 @@ def export_with_gene_targets(primers, format_type="excel"):
 def get_gene_priority(category):
     """Get priority level for gene category"""
     high_priority = ["Essential genes", "Pathogenicity genes", "Resistance targets", "Insecticide resistance", "Acaricide resistance"]
-    medium_priority = ["Secondary metabolite genes", "Detoxification genes", "Development genes", "Effector genes", "Type III secretion"]
+    medium_priority = ["Secondary metabolite genes", "Detoxification genes", "Development genes", "Effector genes", "Type III secretion", "RNAi pathway genes"]
     
     if category in high_priority:
         return "High"
@@ -760,7 +1095,8 @@ def get_gene_use_recommendation(category):
         "Effector genes": "Highly specific pathogenicity targets",
         "Cell wall degrading": "Virulence factors for disease mechanism studies",
         "Type III secretion": "Pathogenicity system targets",
-        "Virulence regulation": "Regulatory control of disease development"
+        "Virulence regulation": "Regulatory control of disease development",
+        "RNAi pathway genes": "Critical for gene silencing studies and RNAi-based control strategies. Essential for understanding RNA interference machinery and developing dsRNA-based treatments."
     }
     return recommendations.get(category, "General research and diagnostic applications")
 
@@ -2425,20 +2761,8 @@ def perform_gene_targeted_design(organism_name, email, api_key, max_sequences, c
                         # Clean gene name for search
                         clean_gene = gene_name.split('(')[0].strip()
                         
-                        # Create gene name variations for better matching
-                        gene_variations = [clean_gene]
-                        
-                        # Add common gene name variations
-                        if clean_gene.upper() in ['ACT1', 'ACTIN']:
-                            gene_variations.extend(['actin', 'ACT', 'Actin'])
-                        elif clean_gene.upper() in ['TUB1', 'TUBULIN']:
-                            gene_variations.extend(['tubulin', 'TUB', 'Tubulin'])
-                        elif clean_gene.upper() in ['EF1A', 'ELONGATION']:
-                            gene_variations.extend(['elongation factor', 'EF1', 'EF-1'])
-                        elif 'RPL' in clean_gene.upper():
-                            gene_variations.extend([clean_gene.replace('RPL', 'ribosomal protein L'), 'ribosomal protein'])
-                        elif 'RPS' in clean_gene.upper():
-                            gene_variations.extend([clean_gene.replace('RPS', 'ribosomal protein S'), 'ribosomal protein'])
+                        # Create gene name variations for better matching using enhanced function
+                        gene_variations = enhanced_gene_search_variations(clean_gene)
                         
                         # Search for gene-specific sequences with multiple strategies
                         seq_ids = []
