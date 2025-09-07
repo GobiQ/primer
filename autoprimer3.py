@@ -1740,19 +1740,6 @@ def export_to_excel(primers: List[PrimerPair]) -> bytes:
         return b""
 
 
-def check_session_state_validity():
-    """Check if session state has valid data"""
-    has_primers = bool(st.session_state.get('primers_designed'))
-    has_sequence = bool(st.session_state.get('current_sequence'))
-    has_seq_info = bool(st.session_state.get('sequence_info'))
-    
-    return {
-        'has_primers': has_primers,
-        'has_sequence': has_sequence, 
-        'has_seq_info': has_seq_info,
-        'primer_count': len(st.session_state.get('primers_designed', [])),
-        'sequence_length': len(st.session_state.get('current_sequence', ''))
-    }
 
 def search_organism_with_gene_targets(organism_name, email, api_key=None):
     """Search for organism and return gene targets if available"""
@@ -1764,6 +1751,9 @@ def search_organism_with_gene_targets(organism_name, email, api_key=None):
         # Normalize the input organism name
         organism_name_lower = organism_name.lower().strip()
         
+        # Debug: Print what we're searching for
+        print(f"DEBUG: Searching for organism: '{organism_name}' (normalized: '{organism_name_lower}')")
+        
         # Find matching organism and extract gene targets
         for category, subcategories in suggestions.items():
             for subcategory, organisms in subcategories.items():
@@ -1774,17 +1764,21 @@ def search_organism_with_gene_targets(organism_name, email, api_key=None):
                         common_name, scientific_name = item
                         gene_targets = {"Essential genes": ["16S rRNA", "18S rRNA", "ACT1", "TUB1", "EF1A"]}
                     
-                    # Improved matching logic
+                    # Improved matching logic - more strict
                     scientific_lower = scientific_name.lower().strip()
                     common_lower = common_name.lower().strip()
                     
-                    # Check for exact matches or partial matches
+                    # Check for exact matches first, then more flexible partial matches
                     if (organism_name_lower == scientific_lower or 
                         organism_name_lower == common_lower or
-                        organism_name_lower in scientific_lower or 
-                        scientific_lower in organism_name_lower or
-                        organism_name_lower in common_lower or
-                        common_lower in organism_name_lower):
+                        # Allow partial matches for genus names (e.g., "fusarium" matches "Fusarium oxysporum")
+                        (organism_name_lower in scientific_lower and len(organism_name_lower) > 2) or
+                        (organism_name_lower in common_lower and len(organism_name_lower) > 2) or
+                        # Allow reverse partial matches (e.g., "oxysporum" matches "Fusarium oxysporum")
+                        (scientific_lower in organism_name_lower and len(scientific_lower) > 2) or
+                        (common_lower in organism_name_lower and len(common_lower) > 2)):
+                        
+                        print(f"DEBUG: Found match - Scientific: '{scientific_name}', Common: '{common_name}'")
                         
                         organism_targets = {
                             'organism': scientific_name,
@@ -1799,6 +1793,26 @@ def search_organism_with_gene_targets(organism_name, email, api_key=None):
             if organism_targets:
                 break
         
+        if not organism_targets:
+            print(f"DEBUG: No match found for '{organism_name}'")
+            # Try to find similar organisms for suggestions
+            similar_organisms = []
+            for category, subcategories in suggestions.items():
+                for subcategory, organisms in subcategories.items():
+                    for item in organisms:
+                        if len(item) == 3:
+                            common_name, scientific_name, gene_targets = item
+                            # Check if any word from the input matches any word from the organism names
+                            input_words = set(organism_name_lower.split())
+                            scientific_words = set(scientific_name.lower().split())
+                            common_words = set(common_name.lower().split())
+                            
+                            if input_words.intersection(scientific_words) or input_words.intersection(common_words):
+                                similar_organisms.append(f"{common_name} ({scientific_name})")
+            
+            if similar_organisms:
+                print(f"DEBUG: Found similar organisms: {similar_organisms[:5]}")
+        
         return organism_targets
         
     except Exception as e:
@@ -1807,6 +1821,9 @@ def search_organism_with_gene_targets(organism_name, email, api_key=None):
 
 def perform_gene_targeted_design(organism_name, email, api_key, max_sequences, custom_params, enable_t7_dsrna, optimal_dsrna_length, check_transcription_efficiency):
     """Perform gene-targeted primer design workflow with better error handling"""
+    
+    # Debug: Print what organism we're designing primers for
+    print(f"DEBUG: perform_gene_targeted_design called with organism: '{organism_name}'")
     
     with st.spinner(f"Designing gene-targeted primers for {organism_name}..."):
         try:
@@ -1830,63 +1847,151 @@ def perform_gene_targeted_design(organism_name, email, api_key, max_sequences, c
                 st.error(f"Failed to initialize NCBI connection: {e}")
                 return
             
-            st.write("🔍 **Step 1: Searching for sequences...**")
+            st.write("🔍 **Step 1: Searching for gene-specific sequences...**")
             
-            # Simple fallback approach - search for organism sequences
-            try:
-                search_query = f'"{organism_name}"[organism]'
-                seq_ids = ncbi.search_sequences(search_query, database="nucleotide", max_results=min(max_sequences, 5))
-                
-                if not seq_ids:
-                    st.error(f"No sequences found for {organism_name}")
+            # Try to find sequences for selected genes
+            gene_sequences = []
+            for gene_info in selected_genes[:5]:  # Limit to first 5 genes
+                try:
+                    # Parse gene info: "Category: Gene name"
+                    if ': ' in gene_info:
+                        category, gene_name = gene_info.split(': ', 1)
+                        # Clean gene name for search
+                        clean_gene = gene_name.split('(')[0].strip()
+                        
+                        st.write(f"Searching for {clean_gene} in {organism_name}...")
+                        
+                        # Search for gene-specific sequences
+                        search_query = f'"{organism_name}"[organism] AND "{clean_gene}"'
+                        seq_ids = ncbi.search_sequences(search_query, database="nucleotide", max_results=2)
+                        
+                        if seq_ids:
+                            for seq_id in seq_ids[:1]:  # Take first sequence per gene
+                                sequence = ncbi.fetch_sequence(seq_id)
+                                if sequence and len(sequence) > 100:
+                                    gene_sequences.append({
+                                        'gene': clean_gene,
+                                        'category': category,
+                                        'sequence': sequence,
+                                        'id': seq_id
+                                    })
+                                    st.write(f"✅ Found {clean_gene} sequence: {len(sequence)} bp")
+                                    break
+                        else:
+                            st.write(f"⚠️ No specific sequence found for {clean_gene}")
+                except Exception as e:
+                    st.write(f"⚠️ Error searching for {gene_info}: {e}")
+                    continue
+            
+            if not gene_sequences:
+                st.warning("No gene-specific sequences found. Falling back to general organism search...")
+                # Fallback to general organism search
+                try:
+                    search_query = f'"{organism_name}"[organism]'
+                    seq_ids = ncbi.search_sequences(search_query, database="nucleotide", max_results=min(max_sequences, 5))
+                    
+                    if not seq_ids:
+                        st.error(f"No sequences found for {organism_name}")
+                        return
+                    
+                    # Use the first sequence
+                    sequence = ncbi.fetch_sequence(seq_ids[0])
+                    if not sequence:
+                        st.error("Failed to fetch sequence")
+                        return
+                    
+                    # Clean and prepare sequence
+                    clean_sequence = re.sub(r'[^ATGCatgc]', '', sequence.upper())
+                    if len(clean_sequence) < 100:
+                        st.error("Sequence too short for primer design")
+                        return
+                    
+                    # Limit sequence size for performance
+                    if len(clean_sequence) > 10000:
+                        clean_sequence = clean_sequence[:10000]
+                        st.info("Using first 10kb of sequence for primer design")
+                    
+                    st.success(f"Found general sequence: {len(clean_sequence)} bp")
+                    sequence_source = "General organism sequence (fallback)"
+                    
+                except Exception as e:
+                    st.error(f"Error fetching sequences: {e}")
                     return
+            else:
+                st.success(f"Found {len(gene_sequences)} gene-specific sequences!")
                 
-                # Use the first sequence
-                sequence = ncbi.fetch_sequence(seq_ids[0])
-                if not sequence:
-                    st.error("Failed to fetch sequence")
-                    return
+                # Display found genes
+                gene_data = []
+                for gene_seq in gene_sequences:
+                    gene_data.append({
+                        'Gene': gene_seq['gene'],
+                        'Category': gene_seq['category'],
+                        'Sequence ID': gene_seq['id'],
+                        'Length': f"{len(gene_seq['sequence']):,} bp"
+                    })
                 
-                # Clean and prepare sequence
-                clean_sequence = re.sub(r'[^ATGCatgc]', '', sequence.upper())
-                if len(clean_sequence) < 100:
-                    st.error("Sequence too short for primer design")
-                    return
+                gene_df = pd.DataFrame(gene_data)
+                st.dataframe(gene_df, use_container_width=True)
                 
-                # Limit sequence size for performance
+                # Use the longest gene sequence for primer design
+                best_gene = max(gene_sequences, key=lambda x: len(x['sequence']))
+                clean_sequence = re.sub(r'[^ATGCatgc]', '', best_gene['sequence'].upper())
                 if len(clean_sequence) > 10000:
                     clean_sequence = clean_sequence[:10000]
-                    st.info("Using first 10kb of sequence for primer design")
-                
-                st.success(f"Found sequence: {len(clean_sequence)} bp")
-                
-            except Exception as e:
-                st.error(f"Error fetching sequences: {e}")
-                return
+                sequence_source = f"Gene-specific sequence: {best_gene['gene']}"
+                selected_gene_info = best_gene
             
             st.write("🧬 **Step 2: Designing primers...**")
             
             try:
+                # Determine the gene target for primer design
+                if 'selected_gene_info' in locals():
+                    gene_target_name = f"{selected_gene_info['gene']} ({selected_gene_info['category']})"
+                else:
+                    gene_target_name = "Gene-Targeted Design (Fallback)"
+                
+                st.write(f"Designing primers for: {gene_target_name}")
+                
                 # Design primers
                 primers = designer.design_primers(
                     clean_sequence, 
                     custom_params=custom_params,
                     add_t7_promoter=enable_t7_dsrna,
-                    gene_target="Gene-Targeted Design"
+                    gene_target=gene_target_name
                 )
                 
                 if not primers:
                     st.warning("No suitable primers found. Try adjusting parameters.")
                     return
                 
-                # Store results
+                # Store results with gene target information
                 st.session_state.current_sequence = clean_sequence
+                
+                # Determine sequence ID and description based on whether we found gene-specific sequences
+                if 'selected_gene_info' in locals():
+                    seq_id = selected_gene_info['id']
+                    description = f"Gene-targeted design for {selected_gene_info['gene']} in {organism_name}"
+                    gene_target_info = {
+                        'gene_name': selected_gene_info['gene'],
+                        'gene_category': selected_gene_info['category'],
+                        'sequence_source': sequence_source
+                    }
+                else:
+                    seq_id = seq_ids[0] if 'seq_ids' in locals() else "unknown"
+                    description = f"Gene-targeted design for {organism_name} (fallback)"
+                    gene_target_info = {
+                        'gene_name': 'General organism sequence',
+                        'gene_category': 'Fallback',
+                        'sequence_source': sequence_source
+                    }
+                
                 st.session_state.sequence_info = {
-                    "id": seq_ids[0],
-                    "description": f"Gene-targeted design for {organism_name}",
+                    "id": seq_id,
+                    "description": description,
                     "length": len(clean_sequence),
                     "organism": organism_name,
-                    "design_mode": "gene_targeted"
+                    "design_mode": "gene_targeted",
+                    "gene_target_info": gene_target_info
                 }
                 st.session_state.primers_designed = primers
                 
@@ -1897,14 +2002,15 @@ def perform_gene_targeted_design(organism_name, email, api_key, max_sequences, c
                         'check_efficiency': check_transcription_efficiency
                     }
                 
-                st.success(f"✅ Successfully designed {len(primers)} primer pairs!")
+                st.success(f"✅ Successfully designed {len(primers)} primer pairs for {gene_target_name}!")
                 st.info("📊 Go to Results tab to view detailed analysis!")
                 
-                # Show preview
+                # Show preview with gene target information
                 preview_data = []
                 for i, primer in enumerate(primers[:3]):
                     preview_data.append({
                         'Pair': i + 1,
+                        'Gene Target': gene_target_name,
                         'Forward': primer.forward_seq[:30] + '...' if len(primer.forward_seq) > 30 else primer.forward_seq,
                         'Reverse': primer.reverse_seq[:30] + '...' if len(primer.reverse_seq) > 30 else primer.reverse_seq,
                         'Product Size': f"{primer.product_size} bp"
@@ -2490,16 +2596,44 @@ def main():
             if gene_targets_workflow:
                 st.info("🎯 **Gene-Targeted Design Mode**\nDesign primers for specific genes with known biological functions.")
                 
+                # Debug: Show available organisms
+                with st.expander("🔍 Debug: Available Organisms", expanded=False):
+                    suggestions = get_organism_suggestions_with_gene_targets()
+                    st.write("**Available organisms with gene targets:**")
+                    for category, subcategories in suggestions.items():
+                        st.write(f"**{category}:**")
+                        for subcategory, organisms in subcategories.items():
+                            st.write(f"  {subcategory}:")
+                            for item in organisms[:3]:  # Show first 3 organisms per subcategory
+                                if len(item) == 3:
+                                    common_name, scientific_name, gene_targets = item
+                                    st.write(f"    - {common_name} ({scientific_name})")
+                                else:
+                                    st.write(f"    - {item}")
+                
                 if organism_name and email:
                     # Simple gene target loading
                     if st.button("🔍 Load Gene Targets", type="secondary"):
+                        st.write(f"🔍 Debug: Button clicked for organism: '{organism_name}'")
                         with st.spinner(f"Loading gene targets for {organism_name}..."):
                             organism_targets = search_organism_with_gene_targets(organism_name, email, api_key)
+                            
+                            st.write(f"🔍 Debug: search_organism_with_gene_targets returned: {organism_targets}")
+                            
                             if organism_targets:
                                 st.session_state.current_organism_targets = organism_targets
                                 st.success(f"Found gene targets for {organism_targets['common_name']}")
                             else:
                                 st.warning("No specific gene targets found for this organism.")
+                                st.write("🔍 Debug: No organism targets found. Check the console for debug output.")
+                                
+                                # Show some suggestions
+                                st.info("💡 **Try these examples:**")
+                                st.write("- Fusarium oxysporum")
+                                st.write("- Fusarium graminearum") 
+                                st.write("- Aspergillus niger")
+                                st.write("- Botrytis cinerea")
+                                st.write("- Or click on one of the organism buttons above")
                 
                     # Display gene targets if available
                     if 'current_organism_targets' in st.session_state and st.session_state.current_organism_targets:
@@ -2536,6 +2670,9 @@ def main():
                                     'selected_genes': [f"{cat}: {gene}" for cat in selected_categories 
                                                      for gene in organism_targets['gene_targets'][cat]]
                                 }
+                                
+                                # Debug: Print what organism name we're passing
+                                print(f"DEBUG: Calling perform_gene_targeted_design with organism_name: '{organism_name}'")
                                 
                                 # Call the design function
                                 perform_gene_targeted_design(
@@ -2722,7 +2859,7 @@ def main():
         st.header("Primer Design Results")
         
         # Debug information
-        with st.expander("🔍 Debug Information", expanded=False):
+        with st.expander("🔍 Debug Information", expanded=True):
             st.write("**Session State Check:**")
             st.write(f"- Has primers: {state_check['has_primers']}")
             st.write(f"- Has sequence: {state_check['has_sequence']}")
@@ -2732,8 +2869,13 @@ def main():
             
             if 'primers_designed' in st.session_state:
                 st.write(f"- Primers in session state: {len(st.session_state['primers_designed'])}")
+                if st.session_state['primers_designed']:
+                    st.write(f"- First primer: {st.session_state['primers_designed'][0]}")
             else:
                 st.write("- No primers in session state")
+            
+            st.write("**All session state keys:**")
+            st.write(list(st.session_state.keys()))
         
         if not state_check['has_primers']:
             st.info("No primers designed yet. Please use the Input tab to design primers.")
@@ -3077,6 +3219,13 @@ def main():
     with tab3:
         st.header("Primer Analysis")
         
+        # Debug information
+        with st.expander("🔍 Analysis Debug Information", expanded=True):
+            st.write("**Session State Check:**")
+            st.write(f"- Has primers: {state_check['has_primers']}")
+            st.write(f"- Primer count: {state_check['primer_count']}")
+            st.write(f"- All session state keys: {list(st.session_state.keys())}")
+        
         if not state_check['has_primers']:
             st.info("No primers designed yet. Please use the Input tab to design primers.")
             st.stop()
@@ -3180,6 +3329,13 @@ def main():
     
     with tab4:
         st.header("Export Results")
+        
+        # Debug information
+        with st.expander("🔍 Export Debug Information", expanded=True):
+            st.write("**Session State Check:**")
+            st.write(f"- Has primers: {state_check['has_primers']}")
+            st.write(f"- Primer count: {state_check['primer_count']}")
+            st.write(f"- All session state keys: {list(st.session_state.keys())}")
         
         if not state_check['has_primers']:
             st.info("No primers to export. Please design primers first.")
