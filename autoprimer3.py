@@ -552,8 +552,9 @@ def display_gene_targets_interface(organism_targets):
             pathogen_cats = [cat for cat in organism_targets['gene_targets'].keys() if any(x in cat.lower() for x in ['pathogen', 'virulence', 'effector'])]
             resistance_cats = [cat for cat in organism_targets['gene_targets'].keys() if 'resistance' in cat.lower()]
             
-            # Default selection logic - but check if user already has selections
-            if 'selected_gene_categories' not in st.session_state:
+            # Initialize default categories only once per organism
+            organism_key = f"gene_categories_{organism_targets['organism']}"
+            if organism_key not in st.session_state:
                 default_categories = []
                 if essential_cats:
                     default_categories.extend(essential_cats[:2])  # First 2 essential categories
@@ -566,19 +567,19 @@ def display_gene_targets_interface(organism_targets):
                 if not default_categories:
                     default_categories = [list(organism_targets['gene_targets'].keys())[0]]
                 
-                st.session_state.selected_gene_categories = default_categories
+                st.session_state[organism_key] = default_categories
             
-            # Use the stored selection as default, but allow user to override
+            # Use organism-specific stored selection
             selected_categories = st.multiselect(
                 "Choose gene categories to target:",
                 list(organism_targets['gene_targets'].keys()),
-                default=st.session_state.get('selected_gene_categories', []),
+                default=st.session_state.get(organism_key, []),
                 help="Select which gene categories to focus on for primer design. Essential genes are recommended for reliable detection.",
-                key="gene_category_selector"
+                key=f"gene_category_selector_{organism_targets['organism']}"
             )
             
-            # Update session state with current selection
-            st.session_state.selected_gene_categories = selected_categories
+            # Update organism-specific session state
+            st.session_state[organism_key] = selected_categories
             
             if selected_categories:
                 # Display selection summary
@@ -2637,15 +2638,26 @@ def main():
                         # Display gene targets interface
                         gene_targets_selected = display_gene_targets_interface(organism_targets)
                         
-                        # Design button logic
-                        if gene_targets_selected and 'selected_gene_targets' in st.session_state:
+                        # Get current selections from session state
+                        organism_key = f"gene_categories_{organism_targets['organism']}"
+                        selected_categories = st.session_state.get(organism_key, [])
+                        
+                        # Design button logic - simplified condition checking
+                        has_selections = selected_categories and len(selected_categories) > 0
+                        
+                        if has_selections:
                             st.success("✅ Gene targets selected. Ready to design primers!")
                             
                             if st.button("🎯 Design Gene-Targeted Primers", type="primary", use_container_width=True, key="gene_design_btn"):
-                                # Add a flag to prevent UI disappearing during processing
-                                st.session_state.processing_gene_design = True
-                                perform_gene_targeted_design(organism_name, email, api_key, max_sequences, custom_params, enable_t7_dsrna, optimal_dsrna_length, check_transcription_efficiency)
-                                st.session_state.processing_gene_design = False
+                                # Prevent multiple simultaneous executions
+                                if not st.session_state.get('processing_gene_design', False):
+                                    st.session_state.processing_gene_design = True
+                                    try:
+                                        perform_gene_targeted_design(organism_name, email, api_key, max_sequences, custom_params, enable_t7_dsrna, optimal_dsrna_length, check_transcription_efficiency)
+                                    finally:
+                                        st.session_state.processing_gene_design = False
+                                else:
+                                    st.info("⏳ Primer design is already in progress...")
                         else:
                             st.info("⚠️ Please select gene targets above to enable primer design.")
                             st.button("🎯 Design Gene-Targeted Primers", disabled=True, help="Select gene targets first", key="gene_design_btn_disabled")
@@ -2741,6 +2753,14 @@ def main():
                     st.write(f"Current targets available: {st.session_state.get('current_organism_targets') is not None}")
                     st.write(f"Selected gene targets: {'selected_gene_targets' in st.session_state}")
                     st.write(f"Processing: {st.session_state.get('processing_gene_design', False)}")
+                    
+                    # Debug multiselect state
+                    if organism_name and st.session_state.get('current_organism_targets'):
+                        organism_key = f"gene_categories_{st.session_state.current_organism_targets['organism']}"
+                        selected_cats = st.session_state.get(organism_key, [])
+                        st.write(f"Organism key: {organism_key}")
+                        st.write(f"Selected categories: {selected_cats}")
+                        st.write(f"Has selections: {selected_cats and len(selected_cats) > 0}")
             
             # ==========================================
             # WORKFLOW 2: CONSERVATION-BASED DESIGN  
