@@ -1821,7 +1821,7 @@ class OptimizedSessionManager:
     @staticmethod
     def get_primers_optimized() -> List[PrimerPair]:
         """Retrieve primers with decompression"""
-        compressed_primers = OptimizedSessionManager.get_primers_optimized()
+        compressed_primers = st.session_state.get('primers_designed', [])
         return OptimizedSessionManager.decompress_session_data(compressed_primers)
 
 class TargetSpecificFilterManager:
