@@ -3621,6 +3621,7 @@ def main():
     st.markdown("---")
     st.markdown("### 🎯 Quick Select: Agricultural Pests & Pathogens")
     st.markdown("*Click any button below to automatically search for that organism*")
+    st.info("💡 **Tip**: Expand the categories below to see all available organism buttons. The first category is expanded by default.")
     
     suggestions = get_organism_suggestions()
     
@@ -3629,8 +3630,10 @@ def main():
     st.info(f"📊 **{total_organisms} organisms** available across {len(suggestions)} categories")
     
     # Create expandable sections for better organization
-    for category, subcategories in suggestions.items():
-        with st.expander(f"{category} ({sum(len(orgs) for orgs in subcategories.values())} organisms)", expanded=False):
+    for i, (category, subcategories) in enumerate(suggestions.items()):
+        # Make the first category expanded by default
+        expanded = (i == 0)
+        with st.expander(f"{category} ({sum(len(orgs) for orgs in subcategories.values())} organisms)", expanded=expanded):
             for subcategory, organisms in subcategories.items():
                 st.markdown(f"**{subcategory}**")
                 
