@@ -1383,6 +1383,89 @@ class SequenceManager:
         except Exception as e:
             st.error(f"Error fetching sequences: {e}")
             return []
+    
+    def fetch_complete_genomes(self, organism_name, max_sequences=10):
+        """Fetch complete genomes/sequences for conservation analysis"""
+        try:
+            # Search for complete genomes and complete sequences only
+            complete_genome_query = f'"{organism_name}"[organism] AND (complete genome[title] OR complete sequence[title] OR whole genome[title] OR chromosome[title] OR genome[title])'
+            
+            seq_ids = self.ncbi.search_sequences(
+                complete_genome_query, 
+                database="nucleotide", 
+                max_results=max_sequences * 2  # Get more results to filter
+            )
+            
+            sequences = []
+            for seq_id in seq_ids:
+                seq_info = self.ncbi.fetch_sequence_info(seq_id)
+                if seq_info and seq_info.get('sequence'):
+                    description = seq_info.get('description', '').lower()
+                    
+                    # Filter for complete genomes/sequences only
+                    is_complete = any(keyword in description for keyword in [
+                        'complete genome', 'complete sequence', 'whole genome', 
+                        'chromosome', 'genome sequence', 'complete'
+                    ])
+                    
+                    # Also check sequence length - complete genomes are typically much longer
+                    clean_seq = re.sub(r'[^ATGCatgc]', '', seq_info['sequence'].upper())
+                    is_long_enough = len(clean_seq) >= 100000  # At least 100kb for complete genomes
+                    
+                    if is_complete and is_long_enough:
+                        sequences.append({
+                            'id': seq_id,
+                            'description': seq_info.get('description', ''),
+                            'organism': seq_info.get('organism', ''),
+                            'length': len(clean_seq),
+                            'sequence': clean_seq[:50000],  # Use larger sample for conservation analysis
+                            'full_length': len(clean_seq),
+                            'type': 'complete_genome'
+                        })
+                        
+                        if len(sequences) >= max_sequences:
+                            break
+            
+            # If we didn't find enough complete genomes, try a broader search but still filter
+            if len(sequences) < max_sequences:
+                st.warning(f"Found only {len(sequences)} complete genomes. Searching for additional complete sequences...")
+                
+                # Broader search for complete sequences
+                broader_query = f'"{organism_name}"[organism] AND complete[title]'
+                additional_ids = self.ncbi.search_sequences(
+                    broader_query, 
+                    database="nucleotide", 
+                    max_results=max_sequences
+                )
+                
+                for seq_id in additional_ids:
+                    if len(sequences) >= max_sequences:
+                        break
+                        
+                    seq_info = self.ncbi.fetch_sequence_info(seq_id)
+                    if seq_info and seq_info.get('sequence'):
+                        description = seq_info.get('description', '').lower()
+                        clean_seq = re.sub(r'[^ATGCatgc]', '', seq_info['sequence'].upper())
+                        
+                        # More lenient filtering for complete sequences
+                        is_complete = 'complete' in description and len(clean_seq) >= 10000  # At least 10kb
+                        
+                        if is_complete and not any(seq['id'] == seq_id for seq in sequences):
+                            sequences.append({
+                                'id': seq_id,
+                                'description': seq_info.get('description', ''),
+                                'organism': seq_info.get('organism', ''),
+                                'length': len(clean_seq),
+                                'sequence': clean_seq[:50000],
+                                'full_length': len(clean_seq),
+                                'type': 'complete_sequence'
+                            })
+            
+            return sequences
+            
+        except Exception as e:
+            st.error(f"Error fetching complete genomes: {e}")
+            return []
 
 # Streamlit App Functions
 def init_session_state():
@@ -1934,9 +2017,10 @@ def perform_conservation_based_design(organism_name, email, api_key, max_sequenc
             sequence_manager = SequenceManager(NCBIConnector(email, api_key))
             analyzer = ConservationAnalyzer(NCBIConnector(email, api_key))
             
-            # Step 1: Fetch sequences
-            st.write("🔍 **Step 1: Fetching sequences...**")
-            sequences = sequence_manager.fetch_organism_sequences(organism_name, max_sequences)
+            # Step 1: Fetch complete genomes/sequences for conservation analysis
+            st.write("🔍 **Step 1: Fetching complete genomes/sequences...**")
+            st.info("🧬 **Conservation Analysis**: Only complete genomes and complete sequences are used for accurate conservation analysis. Partial sequences and specific genes are excluded.")
+            sequences = sequence_manager.fetch_complete_genomes(organism_name, max_sequences)
             
             if not sequences:
                 st.warning(f"No sequences found for {organism_name}")
@@ -1947,8 +2031,12 @@ def perform_conservation_based_design(organism_name, email, api_key, max_sequenc
             # Display sequence summary
             sequence_data = []
             for i, seq in enumerate(sequences):
+                sequence_type = seq.get('type', 'unknown')
+                type_emoji = "🧬" if sequence_type == 'complete_genome' else "📄" if sequence_type == 'complete_sequence' else "❓"
+                
                 sequence_data.append({
                     'ID': seq['id'],
+                    'Type': f"{type_emoji} {sequence_type.replace('_', ' ').title()}",
                     'Description': seq['description'][:80] + '...' if len(seq['description']) > 80 else seq['description'],
                     'Length': f"{seq['length']:,} bp"
                 })
@@ -2567,7 +2655,8 @@ def main():
             # WORKFLOW 2: CONSERVATION-BASED DESIGN  
             # ==========================================
             elif conservation_workflow:
-                st.info("🧬 **Conservation-Based Design Mode**\nAnalyze multiple sequences to find conserved regions for robust, broad-spectrum primers. Ideal for species identification and population studies.")
+                st.info("🧬 **Conservation-Based Design Mode**\nAnalyze multiple complete genomes/sequences to find conserved regions for robust, broad-spectrum primers. Ideal for species identification and population studies.")
+                st.warning("⚠️ **Important**: Conservation analysis requires complete genomes or complete sequences only. Partial sequences and specific genes are excluded to ensure accurate conservation patterns.")
                 
                 with st.expander("Conservation Analysis Parameters", expanded=True):
                     col1, col2 = st.columns(2)
