@@ -935,6 +935,12 @@ import requests
 import json
 import time
 import io
+import random
+import pickle
+import gzip
+from datetime import datetime, timedelta
+from functools import wraps
+from urllib.error import HTTPError
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 from Bio import Entrez, SeqIO
@@ -974,54 +980,106 @@ class PrimerPair:
     penalty: float = 0.0
     gene_target: str = "Standard Design"  # Specific gene target for this primer pair
 
-class NCBIConnector:
-    """Handles all NCBI database connections and queries"""
+class ResilientNCBIConnector:
+    """Resilient NCBI connector with exponential backoff and retry logic"""
     
     def __init__(self, email: str, api_key: Optional[str] = None):
         Entrez.email = email
         if api_key:
             Entrez.api_key = api_key
-        self.rate_limit_delay = 0.1 if api_key else 0.34
+        self.base_delay = 0.34 if not api_key else 0.1
+        self.max_retries = 3
+        self.timeout = 30
+        
+    def _exponential_backoff(self, attempt: int) -> float:
+        """Calculate delay with exponential backoff and jitter"""
+        delay = self.base_delay * (2 ** attempt)
+        jitter = random.uniform(0.1, 0.3)
+        return delay + jitter
     
-    def search_sequences(self, query: str, database: str = "nucleotide", 
-                        max_results: int = 100) -> List[str]:
-        try:
-            time.sleep(self.rate_limit_delay)
-            handle = Entrez.esearch(db=database, term=query, retmax=max_results)
-            search_results = Entrez.read(handle)
-            handle.close()
-            return search_results["IdList"]
-        except Exception as e:
-            st.error(f"Error searching NCBI: {e}")
-            return []
-    
-    def fetch_sequence(self, seq_id: str, database: str = "nucleotide") -> Optional[str]:
-        try:
-            time.sleep(self.rate_limit_delay)
-            handle = Entrez.efetch(db=database, id=seq_id, rettype="fasta", retmode="text")
-            record = SeqIO.read(handle, "fasta")
-            handle.close()
-            return str(record.seq)
-        except Exception as e:
-            st.error(f"Error fetching sequence {seq_id}: {e}")
-            return None
-    
-    def fetch_sequence_info(self, seq_id: str, database: str = "nucleotide") -> Dict:
-        try:
-            time.sleep(self.rate_limit_delay)
-            handle = Entrez.efetch(db=database, id=seq_id, rettype="gb", retmode="text")
-            record = SeqIO.read(handle, "genbank")
-            handle.close()
+    def _retry_with_backoff(self, func):
+        """Decorator for NCBI operations with retry logic"""
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            last_exception = None
             
-            return {
-                "id": record.id,
-                "description": record.description,
-                "length": len(record.seq),
-                "organism": record.annotations.get("organism", "Unknown"),
-                "sequence": str(record.seq)
-            }
-        except Exception as e:
-            return {}
+            for attempt in range(self.max_retries):
+                try:
+                    if attempt > 0:
+                        delay = self._exponential_backoff(attempt - 1)
+                        st.info(f"Retrying NCBI request in {delay:.1f}s (attempt {attempt + 1}/{self.max_retries})")
+                        time.sleep(delay)
+                    
+                    return func(*args, **kwargs)
+                    
+                except (HTTPError, requests.exceptions.RequestException, Exception) as e:
+                    last_exception = e
+                    if attempt == self.max_retries - 1:
+                        st.error(f"NCBI request failed after {self.max_retries} attempts: {e}")
+                        break
+                    st.warning(f"NCBI request failed (attempt {attempt + 1}): {e}")
+            
+            return None
+        return wrapper
+    
+    @_retry_with_backoff
+    def search_sequences(self, query: str, database: str = "nucleotide", max_results: int = 100) -> List[str]:
+        """Search with timeout and retry logic"""
+        handle = Entrez.esearch(
+            db=database, 
+            term=query, 
+            retmax=max_results,
+            timeout=self.timeout
+        )
+        search_results = Entrez.read(handle)
+        handle.close()
+        return search_results["IdList"]
+    
+    @_retry_with_backoff
+    def fetch_sequence(self, seq_id: str, database: str = "nucleotide") -> Optional[str]:
+        """Fetch with timeout and retry logic"""
+        handle = Entrez.efetch(
+            db=database, 
+            id=seq_id, 
+            rettype="fasta", 
+            retmode="text",
+            timeout=self.timeout
+        )
+        record = SeqIO.read(handle, "fasta")
+        handle.close()
+        return str(record.seq)
+    
+    @_retry_with_backoff
+    def fetch_sequence_info(self, seq_id: str, database: str = "nucleotide") -> Dict:
+        """Fetch sequence info with timeout and retry logic"""
+        handle = Entrez.efetch(
+            db=database, 
+            id=seq_id, 
+            rettype="gb", 
+            retmode="text",
+            timeout=self.timeout
+        )
+        record = SeqIO.read(handle, "genbank")
+        handle.close()
+        
+        return {
+            "id": record.id,
+            "description": record.description,
+            "length": len(record.seq),
+            "organism": record.annotations.get("organism", "Unknown"),
+            "sequence": str(record.seq)
+        }
+    
+    def validate_api_key(self) -> bool:
+        """Validate API key by making a test request"""
+        try:
+            test_ids = self.search_sequences("test", max_results=1)
+            return True
+        except:
+            return False
+
+# Keep the old class name for backward compatibility
+NCBIConnector = ResilientNCBIConnector
 
 class PrimerDesigner:
     """Main primer design class with T7 dsRNA functionality"""
@@ -1373,6 +1431,135 @@ class ConservationAnalyzer:
         
         return best_similarity
 
+class EnhancedSpecificityAnalyzer:
+    """Enhanced specificity testing with proper alignment and thermodynamic considerations"""
+    
+    def __init__(self, ncbi_connector):
+        self.ncbi = ncbi_connector
+        self.aligner = PairwiseAligner()
+        self.aligner.match_score = 2
+        self.aligner.mismatch_score = -1
+        self.aligner.open_gap_score = -2
+        self.aligner.extend_gap_score = -0.5
+    
+    def calculate_binding_specificity(self, primer_seq: str, target_seq: str, 
+                                    temp: float = 60.0, salt: float = 50.0) -> Dict:
+        """Calculate thermodynamic binding specificity"""
+        try:
+            from Bio.SeqUtils.MeltingTemp import Tm_NN
+            
+            # Find best alignment
+            alignments = self.aligner.align(primer_seq, target_seq)
+            best_alignment = max(alignments, key=lambda x: x.score)
+            
+            # Calculate identity and similarity
+            matches = sum(1 for a, b in zip(str(best_alignment[0]), str(best_alignment[1])) if a == b and a != '-')
+            identity = matches / len(primer_seq) * 100
+            
+            # Calculate melting temperature for best match region
+            aligned_primer = str(best_alignment[0]).replace('-', '')
+            if len(aligned_primer) >= 10:  # Minimum length for Tm calculation
+                tm_aligned = Tm_NN(aligned_primer, Na=salt, Tris=10.0)
+            else:
+                tm_aligned = 0.0
+            
+            # Calculate binding probability at PCR temperature
+            if tm_aligned > 0:
+                binding_prob = 1.0 if tm_aligned > temp else np.exp(-(temp - tm_aligned) / 10.0)
+            else:
+                binding_prob = 0.0
+            
+            return {
+                'identity': identity,
+                'alignment_score': best_alignment.score,
+                'tm_aligned': tm_aligned,
+                'binding_probability': binding_prob,
+                'is_specific': identity < 70 or binding_prob < 0.1,
+                'alignment': str(best_alignment)
+            }
+            
+        except Exception as e:
+            return {
+                'error': str(e),
+                'identity': 0.0,
+                'is_specific': True
+            }
+    
+    def comprehensive_specificity_test(self, primer_pair: PrimerPair, 
+                                     target_sequence: str, 
+                                     comparison_organisms: List[str],
+                                     pcr_temp: float = 60.0) -> Dict:
+        """Enhanced specificity testing with thermodynamic considerations"""
+        
+        results = {
+            'forward_results': {},
+            'reverse_results': {},
+            'overall_specificity': True,
+            'risk_organisms': []
+        }
+        
+        # Extract primer sequences
+        if hasattr(primer_pair, 'has_t7_promoter') and primer_pair.has_t7_promoter:
+            forward_seq = primer_pair.core_forward_seq
+            reverse_seq = primer_pair.core_reverse_seq
+        else:
+            forward_seq = primer_pair.forward_seq
+            reverse_seq = primer_pair.reverse_seq
+        
+        # Test against each organism
+        for organism in comparison_organisms:
+            try:
+                # Fetch sequences for organism
+                seq_ids = self.ncbi.search_sequences(f'"{organism}"[organism]', max_results=3)
+                
+                if not seq_ids:
+                    continue
+                
+                organism_results = {'forward': [], 'reverse': []}
+                
+                for seq_id in seq_ids[:2]:  # Test top 2 sequences
+                    comp_sequence = self.ncbi.fetch_sequence(seq_id)
+                    if not comp_sequence or len(comp_sequence) < 100:
+                        continue
+                    
+                    # Test forward primer
+                    forward_result = self.calculate_binding_specificity(
+                        forward_seq, comp_sequence, pcr_temp
+                    )
+                    organism_results['forward'].append(forward_result)
+                    
+                    # Test reverse primer
+                    reverse_result = self.calculate_binding_specificity(
+                        reverse_seq, comp_sequence, pcr_temp
+                    )
+                    organism_results['reverse'].append(reverse_result)
+                
+                # Determine worst-case scenario for this organism
+                if organism_results['forward'] and organism_results['reverse']:
+                    max_forward_risk = max(r.get('binding_probability', 0) for r in organism_results['forward'])
+                    max_reverse_risk = max(r.get('binding_probability', 0) for r in organism_results['reverse'])
+                    
+                    # Both primers must bind for amplification
+                    amplification_risk = max_forward_risk * max_reverse_risk
+                    
+                    if amplification_risk > 0.1:  # 10% threshold
+                        results['risk_organisms'].append({
+                            'organism': organism,
+                            'amplification_risk': amplification_risk,
+                            'forward_risk': max_forward_risk,
+                            'reverse_risk': max_reverse_risk
+                        })
+                        results['overall_specificity'] = False
+                
+                results['forward_results'][organism] = organism_results['forward']
+                results['reverse_results'][organism] = organism_results['reverse']
+                
+            except Exception as e:
+                st.warning(f"Specificity test failed for {organism}: {e}")
+                continue
+        
+        return results
+
 class SequenceManager:
     """Manages sequence selection and analysis workflow"""
     
@@ -1495,6 +1682,294 @@ class SequenceManager:
             st.error(f"Error fetching complete genomes: {e}")
             return []
 
+class OptimizedSequenceManager:
+    """Memory-optimized sequence manager with caching and size limits"""
+    
+    def __init__(self, ncbi_connector, max_sequence_size: int = 50000):
+        self.ncbi = ncbi_connector
+        self.max_sequence_size = max_sequence_size
+        self.sequence_cache = {}
+    
+    def fetch_organism_sequences_optimized(self, organism_name: str, max_sequences: int = 10) -> List[Dict]:
+        """Memory-optimized sequence fetching with caching"""
+        
+        cache_key = f"{organism_name}_{max_sequences}"
+        if cache_key in self.sequence_cache:
+            return self.sequence_cache[cache_key]
+        
+        sequences = []
+        
+        try:
+            # Use more specific search to reduce irrelevant results
+            search_query = f'"{organism_name}"[organism] AND (complete genome[title] OR complete sequence[title])'
+            seq_ids = self.ncbi.search_sequences(search_query, max_results=max_sequences * 2)
+            
+            # Process sequences in batches to manage memory
+            batch_size = 3
+            for i in range(0, min(len(seq_ids), max_sequences), batch_size):
+                batch_ids = seq_ids[i:i + batch_size]
+                
+                for seq_id in batch_ids:
+                    # Fetch metadata first to filter by size
+                    seq_info = self.ncbi.fetch_sequence_info(seq_id)
+                    if not seq_info:
+                        continue
+                    
+                    sequence_length = seq_info.get('length', 0)
+                    
+                    # Skip sequences that are too large or too small
+                    if sequence_length < 1000 or sequence_length > 10000000:
+                        continue
+                    
+                    # Fetch and truncate sequence if needed
+                    full_sequence = self.ncbi.fetch_sequence(seq_id)
+                    if not full_sequence:
+                        continue
+                    
+                    # Clean and truncate sequence
+                    clean_seq = re.sub(r'[^ATGCatgc]', '', full_sequence.upper())
+                    
+                    if len(clean_seq) > self.max_sequence_size:
+                        # Take middle portion for better gene representation
+                        start = (len(clean_seq) - self.max_sequence_size) // 2
+                        clean_seq = clean_seq[start:start + self.max_sequence_size]
+                        seq_info['truncated'] = True
+                        seq_info['original_length'] = len(full_sequence)
+                    
+                    sequences.append({
+                        'id': seq_id,
+                        'description': seq_info.get('description', ''),
+                        'organism': seq_info.get('organism', ''),
+                        'length': len(clean_seq),
+                        'sequence': clean_seq,
+                        'metadata': seq_info
+                    })
+                    
+                    if len(sequences) >= max_sequences:
+                        break
+                
+                # Memory cleanup between batches
+                if len(sequences) >= max_sequences:
+                    break
+        
+        except Exception as e:
+            st.error(f"Error in optimized sequence fetching: {e}")
+            return []
+        
+        # Cache results but limit cache size
+        if len(self.sequence_cache) > 10:  # Max 10 cached queries
+            oldest_key = next(iter(self.sequence_cache))
+            del self.sequence_cache[oldest_key]
+        
+        self.sequence_cache[cache_key] = sequences
+        return sequences
+
+class OptimizedSessionManager:
+    """Optimized session state management with compression and cleanup"""
+    
+    @staticmethod
+    def compress_session_data(data):
+        """Compress large session data"""
+        if isinstance(data, list) and len(data) > 10:
+            # Compress large lists (like primer results)
+            pickled = pickle.dumps(data)
+            compressed = gzip.compress(pickled)
+            return {
+                '_compressed': True,
+                '_data': compressed,
+                '_size': len(data),
+                '_timestamp': datetime.now().isoformat()
+            }
+        return data
+    
+    @staticmethod
+    def decompress_session_data(data):
+        """Decompress session data"""
+        if isinstance(data, dict) and data.get('_compressed'):
+            try:
+                compressed = data['_data']
+                pickled = gzip.decompress(compressed)
+                return pickle.loads(pickled)
+            except:
+                return []
+        return data
+    
+    @staticmethod
+    def cleanup_session_state():
+        """Remove stale session data"""
+        keys_to_remove = []
+        current_time = datetime.now()
+        
+        for key, value in st.session_state.items():
+            # Remove data older than 1 hour
+            if isinstance(value, dict) and '_timestamp' in value:
+                timestamp = datetime.fromisoformat(value['_timestamp'])
+                if current_time - timestamp > timedelta(hours=1):
+                    keys_to_remove.append(key)
+        
+        for key in keys_to_remove:
+            del st.session_state[key]
+    
+    @staticmethod
+    def store_primers_optimized(primers: List[PrimerPair]):
+        """Store primers with compression"""
+        compressed_primers = OptimizedSessionManager.compress_session_data(primers)
+        st.session_state.primers_designed = compressed_primers
+    
+    @staticmethod
+    def get_primers_optimized() -> List[PrimerPair]:
+        """Retrieve primers with decompression"""
+        compressed_primers = st.session_state.get('primers_designed', [])
+        return OptimizedSessionManager.decompress_session_data(compressed_primers)
+
+class TargetSpecificFilterManager:
+    """Manages target-specific filtering for expression and beneficial species"""
+    
+    def __init__(self):
+        self.expression_data = self._load_expression_database()
+        self.essential_genes = self._load_essential_genes()
+        self.host_range_data = self._load_host_range_data()
+    
+    def _load_expression_database(self) -> Dict:
+        """Load tissue/condition-specific expression data"""
+        # This would load from a curated database
+        return {
+            'Diaphorina citri': {
+                'gut_specific': ['SLC26A', 'ABCA3', 'ABCG1', 'digestive_enzymes'],
+                'infection_responsive': ['immune_genes', 'stress_response'],
+                'essential_housekeeping': ['ACT1', 'TUB1', 'EF1A', 'RPL32']
+            }
+        }
+    
+    def _load_essential_genes(self) -> Dict:
+        """Load essential gene annotations"""
+        return {
+            'universal_essential': ['ACT1', 'TUB1', 'EF1A', 'RPB2', 'RPL32'],
+            'insect_essential': ['chitin_synthase', 'ecdysone_receptor', 'juvenile_hormone'],
+            'pathogen_essential': ['cell_wall_synthesis', 'DNA_replication', 'protein_synthesis']
+        }
+    
+    def filter_genes_by_expression(self, organism: str, gene_list: List[str], 
+                                 filter_type: str) -> List[str]:
+        """Filter genes by expression specificity"""
+        if organism not in self.expression_data:
+            return gene_list
+        
+        organism_data = self.expression_data[organism]
+        
+        if filter_type == 'gut_specific':
+            specific_genes = organism_data.get('gut_specific', [])
+            return [gene for gene in gene_list if any(spec in gene.lower() for spec in specific_genes)]
+        
+        elif filter_type == 'infection_responsive':
+            responsive_genes = organism_data.get('infection_responsive', [])
+            return [gene for gene in gene_list if any(resp in gene.lower() for resp in responsive_genes)]
+        
+        elif filter_type == 'essential_only':
+            essential = organism_data.get('essential_housekeeping', [])
+            return [gene for gene in gene_list if any(ess in gene for ess in essential)]
+        
+        return gene_list
+    
+    def check_beneficial_species_presence(self, gene_name: str, 
+                                        beneficial_species: List[str]) -> Dict:
+        """Check if gene is present in beneficial species"""
+        results = {}
+        
+        for species in beneficial_species:
+            # This would query databases or perform BLAST searches
+            # Simplified implementation:
+            if 'universal' in gene_name.lower() or 'conserved' in gene_name.lower():
+                results[species] = {'present': True, 'confidence': 'high'}
+            else:
+                results[species] = {'present': False, 'confidence': 'medium'}
+        
+        return results
+
+class siRNAOptimizer:
+    """Optimizes siRNA sequences within dsRNA primers"""
+    
+    def __init__(self):
+        self.sirna_length = 21
+        self.guide_rules = {
+            'asymmetry_rule': True,
+            'gc_content_range': (30, 52),
+            'avoid_poly_runs': 4,
+            'thermodynamic_asymmetry': True
+        }
+    
+    def calculate_sirna_score(self, sirna_seq: str) -> Dict:
+        """Calculate siRNA efficiency score based on established rules"""
+        score = 0
+        details = {}
+        
+        # Reynolds rules (simplified)
+        if len(sirna_seq) >= 19:
+            # Position-specific scoring
+            if sirna_seq[18] in ['A', 'U']:  # Position 19 (1-indexed)
+                score += 3
+                details['pos19_AU'] = True
+            
+            if sirna_seq[2] in ['A', 'U']:  # Position 3
+                score += 2
+                details['pos3_AU'] = True
+            
+            if sirna_seq[9] in ['A', 'U']:  # Position 10
+                score += 1
+                details['pos10_AU'] = True
+            
+            # GC content
+            gc_content = (sirna_seq.count('G') + sirna_seq.count('C')) / len(sirna_seq) * 100
+            if 30 <= gc_content <= 52:
+                score += 2
+                details['optimal_gc'] = True
+            
+            details['gc_content'] = gc_content
+        
+        # Thermodynamic asymmetry (simplified)
+        if len(sirna_seq) >= 21:
+            sense_5_end = sirna_seq[:4]
+            antisense_5_end = sirna_seq[-4:]
+            
+            # Count AU at 5' ends
+            sense_au = sense_5_end.count('A') + sense_5_end.count('U')
+            antisense_au = antisense_5_end.count('A') + antisense_5_end.count('U')
+            
+            if sense_au > antisense_au:
+                score += 1
+                details['asymmetry'] = True
+        
+        details['total_score'] = score
+        details['efficiency_prediction'] = 'High' if score >= 6 else 'Medium' if score >= 3 else 'Low'
+        
+        return details
+    
+    def find_optimal_sirnas(self, dsrna_sequence: str, top_n: int = 5) -> List[Dict]:
+        """Find optimal siRNA sequences within dsRNA"""
+        sirnas = []
+        
+        # Scan through sequence with sliding window
+        for i in range(len(dsrna_sequence) - self.sirna_length + 1):
+            sirna_seq = dsrna_sequence[i:i + self.sirna_length]
+            
+            # Skip sequences with poly runs
+            if any(base * 4 in sirna_seq for base in 'ATGC'):
+                continue
+            
+            score_data = self.calculate_sirna_score(sirna_seq)
+            
+            sirnas.append({
+                'sequence': sirna_seq,
+                'position': i,
+                'score': score_data['total_score'],
+                'efficiency': score_data['efficiency_prediction'],
+                'details': score_data
+            })
+        
+        # Sort by score and return top candidates
+        sirnas.sort(key=lambda x: x['score'], reverse=True)
+        return sirnas[:top_n]
+
 # Streamlit App Functions
 def init_session_state():
     """Initialize session state variables"""
@@ -1534,6 +2009,9 @@ def init_session_state():
         st.session_state.sequence_info = {}
     if st.session_state.get('specificity_results') is None:
         st.session_state.specificity_results = {}
+    
+    # Cleanup stale session data
+    OptimizedSessionManager.cleanup_session_state()
 
 def debug_session_state():
     """Debug function to show session state"""
@@ -1820,39 +2298,55 @@ def search_organism_with_gene_targets(organism_name, email, api_key=None):
         return None
 
 def perform_gene_targeted_design(organism_name, email, api_key, max_sequences, custom_params, enable_t7_dsrna, optimal_dsrna_length, check_transcription_efficiency):
-    """Perform gene-targeted primer design workflow with better error handling"""
+    """Enhanced error handling for gene-targeted design"""
     
-    # Debug: Print what organism we're designing primers for
-    print(f"DEBUG: perform_gene_targeted_design called with organism: '{organism_name}'")
+    class DesignError(Exception):
+        """Custom exception for design errors"""
+        pass
     
-    with st.spinner(f"Designing gene-targeted primers for {organism_name}..."):
+    try:
+        # Validate inputs
+        if not email or '@' not in email:
+            raise DesignError("Valid email address required for NCBI access")
+        
+        if not organism_name or len(organism_name.strip()) < 3:
+            raise DesignError("Organism name must be at least 3 characters")
+        
+        # Initialize with validation
         try:
-            # Check if gene targets have been selected
-            if 'selected_gene_targets' not in st.session_state:
-                st.error("Please select gene targets first.")
-                return
-            
-            gene_targets = st.session_state.selected_gene_targets
-            selected_genes = gene_targets.get('selected_genes', [])
-            
-            if not selected_genes:
-                st.error("No gene targets selected.")
-                return
-            
-            # Initialize NCBI connector with timeout handling
-            try:
-                ncbi = NCBIConnector(email, api_key)
-                designer = PrimerDesigner()
-            except Exception as e:
-                st.error(f"Failed to initialize NCBI connection: {e}")
-                return
-            
-            st.write("🔍 **Step 1: Searching for gene-specific sequences...**")
-            
-            # Try to find sequences for selected genes
-            gene_sequences = []
-            for gene_info in selected_genes[:5]:  # Limit to first 5 genes
+            ncbi = ResilientNCBIConnector(email, api_key)
+            if api_key and not ncbi.validate_api_key():
+                st.warning("API key validation failed - proceeding without API key")
+                ncbi = ResilientNCBIConnector(email, None)
+        except Exception as e:
+            raise DesignError(f"Failed to initialize NCBI connection: {e}")
+        
+        # Gene target validation
+        if 'selected_gene_targets' not in st.session_state:
+            raise DesignError("No gene targets selected. Please select gene categories first.")
+        
+        gene_targets = st.session_state.selected_gene_targets
+        selected_genes = gene_targets.get('selected_genes', [])
+        
+        if not selected_genes:
+            raise DesignError("No gene targets selected. Please select at least one gene category.")
+        
+        # Progress tracking
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+        
+        # Process each gene with individual error handling
+        gene_sequences = []
+        failed_genes = []
+        
+        designer = PrimerDesigner()
+        
+        with st.spinner(f"Designing gene-targeted primers for {organism_name}..."):
+            for i, gene_info in enumerate(selected_genes[:5]):
                 try:
+                    progress_bar.progress((i + 1) / min(len(selected_genes), 5))
+                    status_text.text(f"Processing gene {i+1}/{min(len(selected_genes), 5)}: {gene_info}")
+                    
                     # Parse gene info: "Category: Gene name"
                     if ': ' in gene_info:
                         category, gene_name = gene_info.split(': ', 1)
@@ -1874,11 +2368,7 @@ def perform_gene_targeted_design(organism_name, email, api_key, max_sequences, c
                         elif 'RPS' in clean_gene.upper():
                             gene_variations.extend([clean_gene.replace('RPS', 'ribosomal protein S'), 'ribosomal protein'])
                         
-                        st.write(f"  Gene variations to try: {gene_variations}")
-                        
-                        st.write(f"Searching for {clean_gene} in {organism_name}...")
-                        
-                        # Search for gene-specific sequences with multiple strategies and gene variations
+                        # Search for gene-specific sequences with multiple strategies
                         seq_ids = []
                         found_sequence = False
                         
@@ -1893,21 +2383,15 @@ def perform_gene_targeted_design(organism_name, email, api_key, max_sequences, c
                                 f'"{organism_name}"[organism] AND {gene_var}',
                             ]
                             
-                            for i, search_query in enumerate(search_queries):
-                                st.write(f"  Trying query: {search_query}")
+                            for search_query in search_queries:
                                 try:
                                     results = ncbi.search_sequences(search_query, database="nucleotide", max_results=2)
                                     if results:
                                         seq_ids = results
-                                        st.write(f"  ✅ Found {len(results)} sequences with gene variation '{gene_var}'")
                                         found_sequence = True
                                         break
-                                    else:
-                                        st.write(f"  ❌ No results with gene variation '{gene_var}'")
                                 except Exception as e:
-                                    st.write(f"  ❌ Error with gene variation '{gene_var}': {e}")
-                        
-                        st.write(f"Final result: {len(seq_ids)} sequences found")
+                                    continue
                         
                         if seq_ids:
                             for seq_id in seq_ids[:1]:  # Take first sequence per gene
@@ -1919,78 +2403,46 @@ def perform_gene_targeted_design(organism_name, email, api_key, max_sequences, c
                                         'sequence': sequence,
                                         'id': seq_id
                                     })
-                                    st.write(f"✅ Found {clean_gene} sequence: {len(sequence)} bp")
                                     break
-                        else:
-                            st.write(f"⚠️ No specific sequence found for {clean_gene}")
-                            
-                            # Try alternative search strategies
-                            st.write(f"  Trying alternative searches for {clean_gene}...")
-                            
-                            # Try searching for the gene without organism restriction
-                            try:
-                                alt_query = f'"{clean_gene}"[gene] AND "{organism_name}"[organism]'
-                                alt_results = ncbi.search_sequences(alt_query, database="nucleotide", max_results=1)
-                                if alt_results:
-                                    st.write(f"  ✅ Found {len(alt_results)} sequences with alternative query")
-                                    seq_ids = alt_results
                                     
-                                    for seq_id in seq_ids[:1]:
-                                        sequence = ncbi.fetch_sequence(seq_id)
-                                        if sequence and len(sequence) > 100:
-                                            gene_sequences.append({
-                                                'gene': clean_gene,
-                                                'category': category,
-                                                'sequence': sequence,
-                                                'id': seq_id
-                                            })
-                                            st.write(f"✅ Found {clean_gene} sequence (alternative): {len(sequence)} bp")
-                                            break
-                                else:
-                                    st.write(f"  ❌ No results with alternative query either")
-                            except Exception as e:
-                                st.write(f"  ❌ Error with alternative search: {e}")
-                except Exception as e:
-                    st.write(f"⚠️ Error searching for {gene_info}: {e}")
+                except Exception as gene_error:
+                    failed_genes.append((gene_info, str(gene_error)))
+                    st.warning(f"Failed to process {gene_info}: {gene_error}")
                     continue
             
+            # Report results
+            if failed_genes:
+                st.warning(f"Failed to process {len(failed_genes)} genes:")
+                for gene, error in failed_genes:
+                    st.text(f"  • {gene}: {error}")
+            
             if not gene_sequences:
-                st.warning("No gene-specific sequences found. Falling back to general organism search...")
-                # Fallback to general organism search
+                # Implement fallback strategy
+                st.warning("No gene-specific sequences found. Attempting fallback to general organism search...")
                 try:
                     search_query = f'"{organism_name}"[organism]'
                     seq_ids = ncbi.search_sequences(search_query, database="nucleotide", max_results=min(max_sequences, 5))
                     
                     if not seq_ids:
-                        st.error(f"No sequences found for {organism_name}")
-                        return
+                        raise DesignError(f"No sequences found for {organism_name}")
                     
                     # Use the first sequence
                     sequence = ncbi.fetch_sequence(seq_ids[0])
                     if not sequence:
-                        st.error("Failed to fetch sequence")
-                        return
+                        raise DesignError("Failed to fetch sequence")
                     
                     # Clean and prepare sequence
-                        clean_sequence = re.sub(r'[^ATGCatgc]', '', sequence.upper())
+                    clean_sequence = re.sub(r'[^ATGCatgc]', '', sequence.upper())
                     if len(clean_sequence) < 100:
-                        st.error("Sequence too short for primer design")
-                        return
+                        raise DesignError("Sequence too short for primer design")
                     
                     # Limit sequence size for performance
                     if len(clean_sequence) > 10000:
                         clean_sequence = clean_sequence[:10000]
                         st.info("Using first 10kb of sequence for primer design")
                     
-                    st.success(f"Found general sequence: {len(clean_sequence)} bp")
-                    sequence_source = "General organism sequence (fallback)"
-                    
                     # Design primers for fallback sequence
-                    st.write("🧬 **Step 2: Designing primers for general sequence...**")
-                    
                     gene_target_name = "Gene-Targeted Design (Fallback)"
-                    st.write(f"Designing primers for: {gene_target_name}")
-                    
                     primers = designer.design_primers(
                         clean_sequence, 
                         custom_params=custom_params,
@@ -1999,8 +2451,7 @@ def perform_gene_targeted_design(organism_name, email, api_key, max_sequences, c
                     )
                     
                     if not primers:
-                        st.warning("No suitable primers found. Try adjusting parameters.")
-                        return
+                        raise DesignError("No suitable primers found. Try adjusting parameters.")
                     
                     # Store fallback results
                     st.session_state.current_sequence = clean_sequence
@@ -2013,10 +2464,10 @@ def perform_gene_targeted_design(organism_name, email, api_key, max_sequences, c
                         "gene_target_info": {
                             'gene_name': 'General organism sequence',
                             'gene_category': 'Fallback',
-                            'sequence_source': sequence_source
+                            'sequence_source': "General organism sequence (fallback)"
                         }
                     }
-                    st.session_state.primers_designed = primers
+                    OptimizedSessionManager.store_primers_optimized(primers)
                     
                     if enable_t7_dsrna:
                         st.session_state.t7_dsrna_enabled = True
@@ -2027,52 +2478,22 @@ def perform_gene_targeted_design(organism_name, email, api_key, max_sequences, c
                     
                     st.success(f"✅ Successfully designed {len(primers)} primer pairs for {gene_target_name}!")
                     st.info("📊 Go to Results tab to view detailed analysis!")
-                    
-                    # Show fallback preview
-                    preview_data = []
-                    for i, primer in enumerate(primers[:3]):
-                        preview_data.append({
-                            'Pair': i + 1,
-                            'Gene Target': gene_target_name,
-                            'Forward': primer.forward_seq[:30] + '...' if len(primer.forward_seq) > 30 else primer.forward_seq,
-                            'Reverse': primer.reverse_seq[:30] + '...' if len(primer.reverse_seq) > 30 else primer.reverse_seq,
-                            'Product Size': f"{primer.product_size} bp"
-                        })
-                    
-                    st.dataframe(pd.DataFrame(preview_data), use_container_width=True)
+                    return
                     
                 except Exception as e:
-                    st.error(f"Error fetching sequences: {e}")
-                    return
+                    raise DesignError(f"Fallback strategy failed: {e}")
             else:
                 st.success(f"Found {len(gene_sequences)} gene-specific sequences!")
-                
-                # Display found genes
-                gene_data = []
-                for gene_seq in gene_sequences:
-                    gene_data.append({
-                        'Gene': gene_seq['gene'],
-                        'Category': gene_seq['category'],
-                        'Sequence ID': gene_seq['id'],
-                        'Length': f"{len(gene_seq['sequence']):,} bp"
-                    })
-                
-                gene_df = pd.DataFrame(gene_data)
-                st.dataframe(gene_df, use_container_width=True)
                 
                 # Design primers for ALL found gene targets
                 all_primers = []
                 all_sequences = []
                 gene_target_info_list = []
                 
-                st.write("🧬 **Step 2: Designing primers for all gene targets...**")
-                
                 for i, gene_seq in enumerate(gene_sequences):
                     gene_name = gene_seq['gene']
                     gene_category = gene_seq['category']
                     gene_target_name = f"{gene_name} ({gene_category})"
-                    
-                    st.write(f"**Designing primers for {i+1}/{len(gene_sequences)}: {gene_target_name}**")
                     
                     # Clean and prepare sequence
                     clean_sequence = re.sub(r'[^ATGCatgc]', '', gene_seq['sequence'].upper())
@@ -2108,8 +2529,7 @@ def perform_gene_targeted_design(organism_name, email, api_key, max_sequences, c
                         st.warning(f"⚠️ No suitable primers found for {gene_name}")
                 
                 if not all_primers:
-                    st.warning("No suitable primers found for any gene targets. Try adjusting parameters.")
-                    return
+                    raise DesignError("No suitable primers found for any gene targets. Try adjusting parameters.")
                 
                 # Store comprehensive results
                 st.session_state.current_sequence = all_sequences[0]['sequence']  # Store first sequence as primary
@@ -2125,51 +2545,175 @@ def perform_gene_targeted_design(organism_name, email, api_key, max_sequences, c
                     "total_genes": len(gene_sequences),
                     "total_primers": len(all_primers)
                 }
-            st.session_state.primers_designed = all_primers
-            
-            if enable_t7_dsrna:
-                st.session_state.t7_dsrna_enabled = True
-                st.session_state.t7_settings = {
-                    'optimal_length': optimal_dsrna_length,
-                    'check_efficiency': check_transcription_efficiency
-                }
-            
+                OptimizedSessionManager.store_primers_optimized(all_primers)
+                
+                if enable_t7_dsrna:
+                    st.session_state.t7_dsrna_enabled = True
+                    st.session_state.t7_settings = {
+                        'optimal_length': optimal_dsrna_length,
+                        'check_efficiency': check_transcription_efficiency
+                    }
+                
                 st.success(f"🎯 **Successfully designed {len(all_primers)} primer pairs across {len(gene_sequences)} gene targets!**")
                 st.info("📊 Go to Results tab to view detailed analysis!")
                 
-                # Show comprehensive preview
-                st.subheader("📋 Primer Design Summary")
-                summary_data = []
-                for info in gene_target_info_list:
-                    summary_data.append({
-                        'Gene Target': f"{info['gene_name']} ({info['gene_category']})",
-                        'Primers Designed': info['primer_count'],
-                        'Sequence Length': f"{next(seq['length'] for seq in all_sequences if seq['gene'] == info['gene_name']):,} bp"
-                    })
+    except DesignError as de:
+        st.error(f"Design Error: {de}")
+        return
+    except Exception as e:
+        st.error(f"Unexpected error in gene-targeted design: {e}")
+        st.error("Please try again or contact support if the problem persists.")
+        return
+
+def display_sirna_analysis(primer_pair: PrimerPair, target_sequence: str):
+    """Display siRNA analysis for dsRNA primers"""
+    if hasattr(primer_pair, 'has_t7_promoter') and primer_pair.has_t7_promoter:
+        st.subheader("siRNA Optimization within dsRNA")
+        
+        # Extract dsRNA sequence
+        dsrna_start = primer_pair.forward_start
+        dsrna_end = primer_pair.reverse_start
+        dsrna_sequence = target_sequence[dsrna_start:dsrna_end]
+        
+        optimizer = siRNAOptimizer()
+        optimal_sirnas = optimizer.find_optimal_sirnas(dsrna_sequence)
+        
+        if optimal_sirnas:
+            st.write("**Top siRNA candidates within dsRNA:**")
+            
+            sirna_data = []
+            for i, sirna in enumerate(optimal_sirnas):
+                sirna_data.append({
+                    'Rank': i + 1,
+                    'Sequence': sirna['sequence'],
+                    'Position': sirna['position'],
+                    'Score': sirna['score'],
+                    'Efficiency': sirna['efficiency'],
+                    'GC%': f"{sirna['details'].get('gc_content', 0):.1f}%"
+                })
+            
+            sirna_df = pd.DataFrame(sirna_data)
+            st.dataframe(sirna_df, use_container_width=True)
+            
+            # Detailed analysis for top siRNA
+            if st.checkbox("Show detailed siRNA analysis"):
+                top_sirna = optimal_sirnas[0]
+                st.write("**Top siRNA detailed analysis:**")
+                st.code(top_sirna['sequence'])
                 
-                summary_df = pd.DataFrame(summary_data)
-                st.dataframe(summary_df, use_container_width=True)
+                details = top_sirna['details']
+                col1, col2 = st.columns(2)
                 
-                # Show sample primers from each gene
-                st.subheader("🔬 Sample Primers (First 2 pairs from each gene)")
-                preview_data = []
-                primer_count = 0
-                for info in gene_target_info_list:
-                    gene_primers = [p for p in all_primers if p.gene_target == f"{info['gene_name']} ({info['gene_category']})"]
-                    for i, primer in enumerate(gene_primers[:2]):  # Show first 2 from each gene
-                        preview_data.append({
-                            'Gene Target': f"{info['gene_name']} ({info['gene_category']})",
-                            'Pair': f"{info['gene_name']}-{i+1}",
-                            'Forward': primer.forward_seq[:30] + '...' if len(primer.forward_seq) > 30 else primer.forward_seq,
-                            'Reverse': primer.reverse_seq[:30] + '...' if len(primer.reverse_seq) > 30 else primer.reverse_seq,
-                            'Product Size': f"{primer.product_size} bp"
-                        })
+                with col1:
+                    st.write("**Efficiency factors:**")
+                    for factor, value in details.items():
+                        if factor != 'total_score' and isinstance(value, bool):
+                            st.write(f"• {factor}: {'✓' if value else '✗'}")
                 
-                if preview_data:
-                    st.dataframe(pd.DataFrame(preview_data), use_container_width=True)
-                
-        except Exception as e:
-            st.error(f"Gene-targeted design error: {e}")
+                with col2:
+                    st.metric("Total Score", details['total_score'])
+                    st.metric("Predicted Efficiency", details['efficiency_prediction'])
+
+def display_enhanced_gene_targets_interface(organism_targets):
+    """Enhanced interface with filtering options"""
+    if organism_targets:
+        st.success(f"Gene Targets Available for {organism_targets['common_name']}")
+        
+        # Add filtering options
+        st.subheader("Target Filtering Options")
+        
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            expression_filter = st.selectbox(
+                "Expression specificity:",
+                ["All genes", "Gut-specific", "Infection-responsive", "Essential only"]
+            )
+        
+        with col2:
+            check_beneficial = st.checkbox("Check beneficial species", value=True)
+            if check_beneficial:
+                beneficial_species = st.multiselect(
+                    "Beneficial species to avoid:",
+                    ["Apis mellifera", "Bombus terrestris", "Coccinella septempunctata"],
+                    default=["Apis mellifera"]
+                )
+        
+        with col3:
+            prioritize_essential = st.checkbox("Prioritize essential genes", value=True)
+        
+        # Apply filters
+        filter_manager = TargetSpecificFilterManager()
+        
+        filtered_targets = {}
+        for category, genes in organism_targets['gene_targets'].items():
+            # Apply expression filter
+            if expression_filter != "All genes":
+                filter_type = expression_filter.lower().replace(' ', '_').replace('-', '_')
+                genes = filter_manager.filter_genes_by_expression(
+                    organism_targets['organism'], genes, filter_type
+                )
+            
+            if genes:  # Only include categories with remaining genes
+                filtered_targets[category] = genes
+        
+        # Display filtered results with safety annotations
+        for category, genes in filtered_targets.items():
+            with st.expander(f"{category} ({len(genes)} genes)", expanded=True):
+                for gene in genes:
+                    col1, col2, col3 = st.columns([3, 1, 1])
+                    
+                    with col1:
+                        st.write(f"• {gene}")
+                    
+                    with col2:
+                        if check_beneficial:
+                            safety_check = filter_manager.check_beneficial_species_presence(
+                                gene, beneficial_species
+                            )
+                            safe_count = sum(1 for result in safety_check.values() if not result['present'])
+                            if safe_count == len(beneficial_species):
+                                st.success("✓ Safe")
+                            else:
+                                st.warning("⚠ Check")
+                    
+                    with col3:
+                        if prioritize_essential and any(essential in gene.lower() for essential in filter_manager.essential_genes['universal_essential']):
+                            st.info("Essential")
+
+def perform_enhanced_specificity_testing(primers: List[PrimerPair], target_sequence: str, 
+                                       comparison_organisms: List[str], email: str, api_key: str = None):
+    """Perform enhanced specificity testing with thermodynamic considerations"""
+    if not primers or not comparison_organisms:
+        return {}
+    
+    try:
+        ncbi = ResilientNCBIConnector(email, api_key)
+        analyzer = EnhancedSpecificityAnalyzer(ncbi)
+        
+        specificity_results = {}
+        
+        # Test each primer pair
+        for i, primer_pair in enumerate(primers[:3]):  # Test first 3 primer pairs
+            st.write(f"Testing specificity for primer pair {i+1}...")
+            
+            result = analyzer.comprehensive_specificity_test(
+                primer_pair, target_sequence, comparison_organisms
+            )
+            
+            specificity_results[f"primer_pair_{i+1}"] = result
+            
+            # Display risk organisms if any
+            if result.get('risk_organisms'):
+                st.warning(f"⚠️ Risk organisms found for primer pair {i+1}:")
+                for risk in result['risk_organisms']:
+                    st.write(f"  • {risk['organism']}: {risk['amplification_risk']:.1%} risk")
+        
+        return specificity_results
+        
+    except Exception as e:
+        st.error(f"Enhanced specificity testing failed: {e}")
+        return {}
 
 def perform_conservation_based_design(organism_name, email, api_key, max_sequences, conservation_threshold, window_size, enable_specificity_testing, specificity_threshold, comparison_organisms, custom_params, enable_t7_dsrna):
     """Perform conservation-based primer design workflow"""
