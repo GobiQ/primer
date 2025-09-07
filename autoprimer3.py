@@ -529,7 +529,7 @@ def search_organism_with_gene_targets(organism_name, email, api_key=None, max_se
     return organism_targets
 
 def display_gene_targets_interface(organism_targets):
-    """Display gene targets interface in Streamlit"""
+    """Display gene targets interface in Streamlit with improved state management"""
     
     if organism_targets:
         st.success(f"📋 **Gene Targets Available for {organism_targets['common_name']} ({organism_targets['organism']})**")
@@ -552,25 +552,33 @@ def display_gene_targets_interface(organism_targets):
             pathogen_cats = [cat for cat in organism_targets['gene_targets'].keys() if any(x in cat.lower() for x in ['pathogen', 'virulence', 'effector'])]
             resistance_cats = [cat for cat in organism_targets['gene_targets'].keys() if 'resistance' in cat.lower()]
             
-            # Default selection logic
-            default_categories = []
-            if essential_cats:
-                default_categories.extend(essential_cats[:2])  # First 2 essential categories
-            if pathogen_cats:
-                default_categories.extend(pathogen_cats[:1])   # First pathogenicity category
-            if resistance_cats:
-                default_categories.extend(resistance_cats[:1]) # First resistance category
+            # Default selection logic - but check if user already has selections
+            if 'selected_gene_categories' not in st.session_state:
+                default_categories = []
+                if essential_cats:
+                    default_categories.extend(essential_cats[:2])  # First 2 essential categories
+                if pathogen_cats:
+                    default_categories.extend(pathogen_cats[:1])   # First pathogenicity category
+                if resistance_cats:
+                    default_categories.extend(resistance_cats[:1]) # First resistance category
+                
+                # Fallback if no defaults found
+                if not default_categories:
+                    default_categories = [list(organism_targets['gene_targets'].keys())[0]]
+                
+                st.session_state.selected_gene_categories = default_categories
             
-            # Fallback if no defaults found
-            if not default_categories:
-                default_categories = [list(organism_targets['gene_targets'].keys())[0]]
-            
+            # Use the stored selection as default, but allow user to override
             selected_categories = st.multiselect(
                 "Choose gene categories to target:",
                 list(organism_targets['gene_targets'].keys()),
-                default=default_categories,
-                help="Select which gene categories to focus on for primer design. Essential genes are recommended for reliable detection."
+                default=st.session_state.get('selected_gene_categories', []),
+                help="Select which gene categories to focus on for primer design. Essential genes are recommended for reliable detection.",
+                key="gene_category_selector"
             )
+            
+            # Update session state with current selection
+            st.session_state.selected_gene_categories = selected_categories
             
             if selected_categories:
                 # Display selection summary
@@ -2412,7 +2420,8 @@ def main():
         'selected_organism_name': '',
         'gene_targets_loaded': False,
         'stored_organism_name': '',
-        'processing_gene_design': False
+        'processing_gene_design': False,
+        'selected_gene_categories': []
     }
     
     for var, default_value in required_vars.items():
@@ -2550,13 +2559,18 @@ def main():
             
             col1, col2 = st.columns([2, 1])
             with col1:
-                # Check if an organism was selected from buttons
+                # Check if an organism was selected from buttons or preserve current value
                 default_organism = st.session_state.get('selected_organism_name', '')
+                if not default_organism and st.session_state.get('stored_organism_name'):
+                    # If no new selection but we have a stored organism, use that
+                    default_organism = st.session_state.stored_organism_name
+                
                 organism_name = st.text_input("Enter organism name:", 
                                             value=default_organism,
-                                            placeholder="e.g., Fusarium oxysporum, Coronavirus, Tetranychus urticae")
+                                            placeholder="e.g., Fusarium oxysporum, Coronavirus, Tetranychus urticae",
+                                            key="organism_input")
                 
-                # Clear the selected organism after setting it
+                # Clear the selected organism after setting it, but preserve the input
                 if 'selected_organism_name' in st.session_state:
                     del st.session_state['selected_organism_name']
             
