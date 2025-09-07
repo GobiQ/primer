@@ -1742,6 +1742,11 @@ def check_session_state_validity():
 
 def perform_gene_targeted_design(organism_name, email, api_key, max_sequences, custom_params, enable_t7_dsrna, optimal_dsrna_length, check_transcription_efficiency):
     """Perform gene-targeted primer design workflow"""
+    
+    # Prevent function from running if already processing
+    if st.session_state.get('processing_gene_design', False):
+        return
+    
     with st.spinner(f"Designing gene-targeted primers for {organism_name}..."):
         try:
             # Check if gene targets have been selected
@@ -2403,8 +2408,11 @@ def main():
         # ORGANISM SELECTION VARIABLES:
         'organism_name_input': '',
         'trigger_gene_search': False,
-        'current_organism_targets': {},
-        'selected_organism_name': ''
+        'current_organism_targets': None,
+        'selected_organism_name': '',
+        'gene_targets_loaded': False,
+        'stored_organism_name': '',
+        'processing_gene_design': False
     }
     
     for var, default_value in required_vars.items():
@@ -2576,119 +2584,149 @@ def main():
             standard_workflow = "⚡ Standard Design" in workflow_choice
             
             # ==========================================
-            # WORKFLOW 1: GENE-TARGETED DESIGN
+            # WORKFLOW 1: GENE-TARGETED DESIGN (FIXED)
             # ==========================================
             if gene_targets_workflow:
                 st.info("🎯 **Gene-Targeted Design Mode**\nDesign primers for specific genes with known biological functions. Ideal for pathogenicity studies, resistance monitoring, and functional genomics.")
                 
-                # Handle gene target search trigger from button clicks
-                if st.session_state.get('trigger_gene_search', False):
-                    organism_name = st.session_state.get('organism_name_input', '')
-                    st.session_state.trigger_gene_search = False
-                    
-                    if organism_name and email:
-                        # Proceed with gene target search
-                        organism_targets = search_organism_with_gene_targets(organism_name, email, api_key)
-                        if organism_targets:
-                            # Store the results and display interface
-                            st.session_state.current_organism_targets = organism_targets
-                            gene_targets_selected = display_gene_targets_interface(organism_targets)
+                # Initialize session state for gene targets if not exists
+                if 'current_organism_targets' not in st.session_state:
+                    st.session_state.current_organism_targets = None
+                if 'gene_targets_loaded' not in st.session_state:
+                    st.session_state.gene_targets_loaded = False
                 
-                # Gene target integration (only for this workflow)
-                if organism_name:
-                    try:
-                        organism_targets = search_organism_with_gene_targets(organism_name, email, api_key)
-                        if organism_targets:
-                            gene_targets_selected = display_gene_targets_interface(organism_targets)
+                # Only search for gene targets if organism name changed or not loaded yet
+                current_organism = organism_name.strip().lower() if organism_name else ""
+                stored_organism = st.session_state.get('stored_organism_name', "").lower()
+                
+                if (current_organism != stored_organism and current_organism) or not st.session_state.gene_targets_loaded:
+                    if current_organism and email:
+                        with st.spinner(f"Loading gene targets for {organism_name}..."):
+                            try:
+                                organism_targets = search_organism_with_gene_targets(organism_name, email, api_key)
+                                st.session_state.current_organism_targets = organism_targets
+                                st.session_state.stored_organism_name = current_organism
+                                st.session_state.gene_targets_loaded = True
+                            except Exception as e:
+                                st.warning(f"Could not load gene targets: {e}")
+                                st.session_state.current_organism_targets = None
+                                st.session_state.gene_targets_loaded = True
+                    else:
+                        st.session_state.current_organism_targets = None
+                        st.session_state.gene_targets_loaded = False
+                
+                # Use stored organism targets
+                organism_targets = st.session_state.current_organism_targets
+                
+                if organism_name and email:
+                    if organism_targets:
+                        # Display gene targets interface
+                        gene_targets_selected = display_gene_targets_interface(organism_targets)
+                        
+                        # Design button logic
+                        if gene_targets_selected and 'selected_gene_targets' in st.session_state:
+                            st.success("✅ Gene targets selected. Ready to design primers!")
                             
-                            # Always show the design button, but with different states
-                            if gene_targets_selected and 'selected_gene_targets' in st.session_state:
-                                st.success("✅ Gene targets selected. Ready to design primers!")
-                                if st.button("🎯 Design Gene-Targeted Primers", type="primary", use_container_width=True):
-                                    if not email or not organism_name:
-                                        st.error("❌ Please provide email and organism name.")
-                                    else:
-                                        perform_gene_targeted_design(organism_name, email, api_key, max_sequences, custom_params, enable_t7_dsrna, optimal_dsrna_length, check_transcription_efficiency)
-                            else:
-                                st.info("⚠️ Please select gene targets above to enable primer design.")
-                                # Show a disabled button to indicate what will be available
-                                st.button("🎯 Design Gene-Targeted Primers", disabled=True, help="Select gene targets first")
+                            if st.button("🎯 Design Gene-Targeted Primers", type="primary", use_container_width=True, key="gene_design_btn"):
+                                # Add a flag to prevent UI disappearing during processing
+                                st.session_state.processing_gene_design = True
+                                perform_gene_targeted_design(organism_name, email, api_key, max_sequences, custom_params, enable_t7_dsrna, optimal_dsrna_length, check_transcription_efficiency)
+                                st.session_state.processing_gene_design = False
                         else:
-                            st.info("📝 No specific gene targets available for this organism. Consider using Conservation-Based or Standard Design.")
-                            # Show a fallback button for organisms without specific gene targets
-                            if st.button("🎯 Design Primers (Standard Mode)", type="secondary", use_container_width=True):
-                                if not email or not organism_name:
-                                    st.error("❌ Please provide email and organism name.")
-                                else:
-                                    # Fall back to standard design
-                                    with st.spinner(f"Designing primers for {organism_name}..."):
-                                        try:
-                                            ncbi = NCBIConnector(email, api_key)
-                                            designer = PrimerDesigner()
-                                            
-                                            search_query = f'"{organism_name}"[organism]'
-                                            seq_ids = ncbi.search_sequences(search_query, database="nucleotide", max_results=max_sequences)
-                                            
-                                            if seq_ids:
-                                                st.success(f"Found {len(seq_ids)} sequences!")
-                                                seq_id = seq_ids[0]
-                                                sequence = ncbi.fetch_sequence(seq_id)
-                                                seq_info = ncbi.fetch_sequence_info(seq_id)
-                                                
-                                                if sequence:
-                                                    clean_sequence = re.sub(r'[^ATGCatgc]', '', sequence.upper())
-                                                    if len(clean_sequence) < 50:
-                                                        st.error("Sequence too short for primer design")
-                                                    else:
-                                                        if len(clean_sequence) > 100000:
-                                                            st.warning(f"Large sequence ({len(clean_sequence):,} bp). Using first 100kb.")
-                                                            clean_sequence = clean_sequence[:100000]
-                                                        
-                                                        st.session_state.current_sequence = clean_sequence
-                                                        st.session_state.sequence_info = seq_info or {
-                                                            "id": seq_id,
-                                                            "description": f"Sequence {seq_id}",
-                                                            "length": len(clean_sequence),
-                                                            "organism": organism_name,
-                                                            "design_mode": "gene_targeted_fallback"
-                                                        }
-                                                        
-                                                        primers = designer.design_primers(
-                                                            clean_sequence, 
-                                                            custom_params=custom_params,
-                                                            add_t7_promoter=enable_t7_dsrna,
-                                                            gene_target="Standard Design (Fallback)"
-                                                        )
-                                                        st.session_state.primers_designed = primers
-                                                        
-                                                        if enable_t7_dsrna:
-                                                            st.session_state.t7_dsrna_enabled = True
-                                                            st.session_state.t7_settings = {
-                                                                'optimal_length': optimal_dsrna_length,
-                                                                'check_efficiency': check_transcription_efficiency
-                                                            }
-                                                        else:
-                                                            st.session_state.t7_dsrna_enabled = False
-                                                        
-                                                        if primers:
-                                                            st.success(f"✅ Successfully designed {len(primers)} primer pairs!")
-                                                            st.info("📊 Go to Results tab to view detailed analysis!")
-                                                        else:
-                                                            st.warning("No suitable primers found. Try adjusting parameters.")
-                                                else:
-                                                    st.error("Failed to fetch sequence")
+                            st.info("⚠️ Please select gene targets above to enable primer design.")
+                            st.button("🎯 Design Gene-Targeted Primers", disabled=True, help="Select gene targets first", key="gene_design_btn_disabled")
+                    
+                    elif st.session_state.gene_targets_loaded:
+                        # No gene targets available, show fallback option
+                        st.info("📝 No specific gene targets available for this organism. Using standard design approach.")
+                        
+                        if st.button("🎯 Design Primers (Standard Fallback)", type="secondary", use_container_width=True, key="gene_fallback_btn"):
+                            st.session_state.processing_gene_design = True
+                            # Use simplified standard design
+                            with st.spinner(f"Designing primers for {organism_name}..."):
+                                try:
+                                    ncbi = NCBIConnector(email, api_key)
+                                    designer = PrimerDesigner()
+                                    
+                                    search_query = f'"{organism_name}"[organism]'
+                                    seq_ids = ncbi.search_sequences(search_query, database="nucleotide", max_results=max_sequences)
+                                    
+                                    if seq_ids:
+                                        st.success(f"Found {len(seq_ids)} sequences!")
+                                        seq_id = seq_ids[0]
+                                        sequence = ncbi.fetch_sequence(seq_id)
+                                        seq_info = ncbi.fetch_sequence_info(seq_id)
+                                        
+                                        if sequence:
+                                            clean_sequence = re.sub(r'[^ATGCatgc]', '', sequence.upper())
+                                            if len(clean_sequence) < 50:
+                                                st.error("Sequence too short for primer design")
                                             else:
-                                                st.warning(f"No sequences found for {organism_name}")
-                                        except Exception as e:
-                                            st.error(f"Error: {e}")
-                    except Exception as e:
-                        st.warning(f"Gene target information not available: {e}")
-                        # Show a fallback button even if there's an error
-                        if st.button("🎯 Design Primers (Standard Mode)", type="secondary", use_container_width=True):
-                            st.info("Using standard primer design mode...")
-                            # You can add the same fallback logic here if needed
+                                                if len(clean_sequence) > 100000:
+                                                    st.warning(f"Large sequence ({len(clean_sequence):,} bp). Using first 100kb.")
+                                                    clean_sequence = clean_sequence[:100000]
+                                                
+                                                st.session_state.current_sequence = clean_sequence
+                                                st.session_state.sequence_info = seq_info or {
+                                                    "id": seq_id,
+                                                    "description": f"Sequence {seq_id}",
+                                                    "length": len(clean_sequence),
+                                                    "organism": organism_name,
+                                                    "design_mode": "gene_targeted_fallback"
+                                                }
+                                                
+                                                primers = designer.design_primers(
+                                                    clean_sequence, 
+                                                    custom_params=custom_params,
+                                                    add_t7_promoter=enable_t7_dsrna,
+                                                    gene_target="Standard Design (Fallback)"
+                                                )
+                                                st.session_state.primers_designed = primers
+                                                
+                                                if enable_t7_dsrna:
+                                                    st.session_state.t7_dsrna_enabled = True
+                                                    st.session_state.t7_settings = {
+                                                        'optimal_length': optimal_dsrna_length,
+                                                        'check_efficiency': check_transcription_efficiency
+                                                    }
+                                                else:
+                                                    st.session_state.t7_dsrna_enabled = False
+                                                
+                                                if primers:
+                                                    st.success(f"✅ Successfully designed {len(primers)} primer pairs!")
+                                                    st.info("📊 Go to Results tab to view detailed analysis!")
+                                                else:
+                                                    st.warning("No suitable primers found. Try adjusting parameters.")
+                                        else:
+                                            st.error("Failed to fetch sequence")
+                                    else:
+                                        st.warning(f"No sequences found for {organism_name}")
+                                except Exception as e:
+                                    st.error(f"Error: {e}")
+                                finally:
+                                    st.session_state.processing_gene_design = False
+                    else:
+                        # Still loading or no organism entered
+                        if not organism_name:
+                            st.info("👆 Enter an organism name above to see available gene targets.")
+                        else:
+                            st.info("Loading gene targets...")
                 else:
-                    st.info("👆 Enter an organism name above to see available gene targets.")
+                    # Missing email or organism name
+                    if not email:
+                        st.error("❌ Email required for gene target search")
+                    if not organism_name:
+                        st.info("👆 Enter an organism name above to see available gene targets.")
+            
+            # Debug section (remove after fixing)
+            if gene_targets_workflow:
+                with st.expander("🔍 Debug Gene Targets", expanded=False):
+                    st.write(f"Organism name: {organism_name}")
+                    st.write(f"Email provided: {bool(email)}")
+                    st.write(f"Gene targets loaded: {st.session_state.get('gene_targets_loaded', False)}")
+                    st.write(f"Current targets available: {st.session_state.get('current_organism_targets') is not None}")
+                    st.write(f"Selected gene targets: {'selected_gene_targets' in st.session_state}")
+                    st.write(f"Processing: {st.session_state.get('processing_gene_design', False)}")
             
             # ==========================================
             # WORKFLOW 2: CONSERVATION-BASED DESIGN  
