@@ -2403,7 +2403,8 @@ def main():
         # ORGANISM SELECTION VARIABLES:
         'organism_name_input': '',
         'trigger_gene_search': False,
-        'current_organism_targets': {}
+        'current_organism_targets': {},
+        'selected_organism_name': ''
     }
     
     for var, default_value in required_vars.items():
@@ -2541,8 +2542,15 @@ def main():
             
             col1, col2 = st.columns([2, 1])
             with col1:
+                # Check if an organism was selected from buttons
+                default_organism = st.session_state.get('selected_organism_name', '')
                 organism_name = st.text_input("Enter organism name:", 
+                                            value=default_organism,
                                             placeholder="e.g., Fusarium oxysporum, Coronavirus, Tetranychus urticae")
+                
+                # Clear the selected organism after setting it
+                if 'selected_organism_name' in st.session_state:
+                    del st.session_state['selected_organism_name']
             
             with col2:
                 max_sequences = st.number_input("Max sequences to search", min_value=5, max_value=50, value=10)
@@ -2788,23 +2796,14 @@ def main():
                                     help=f"Search for {latin_name}",
                                     use_container_width=True
                                 ):
-                                    # Set both the organism name and a flag to trigger gene target search
-                                    st.session_state.selected_organism = latin_name
-                                    st.session_state.organism_name_input = latin_name
-                                    st.session_state.trigger_gene_search = True
+                                    # Set the organism name to appear in the text input
+                                    st.session_state.selected_organism_name = latin_name
                                     st.rerun()
                         
                         # Add small spacing between subcategories
                         if subcategory != list(subcategories.keys())[-1]:  # Not the last subcategory
                             st.markdown("")
             
-            # Handle organism selection from buttons
-            if 'selected_organism' in st.session_state:
-                organism_name = st.session_state.selected_organism
-                del st.session_state.selected_organism
-                
-                # Force a rerun to update the organism_name text input
-                st.rerun()
         
         elif input_method == "Direct Sequence":
             sequence_input = st.text_area("Enter DNA sequence:", 
