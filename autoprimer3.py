@@ -112,7 +112,7 @@ def get_related_organisms(target_organism, max_organisms=100):
 def check_session_state_validity():
     """Check if session state has valid data"""
     # Ensure all required keys exist with safe defaults
-    primers = st.session_state.get('primers_designed', [])
+    primers = OptimizedSessionManager.get_primers_optimized()
     sequence = st.session_state.get('current_sequence', '')
     seq_info = st.session_state.get('sequence_info', {})
     
@@ -1821,7 +1821,7 @@ class OptimizedSessionManager:
     @staticmethod
     def get_primers_optimized() -> List[PrimerPair]:
         """Retrieve primers with decompression"""
-        compressed_primers = st.session_state.get('primers_designed', [])
+        compressed_primers = OptimizedSessionManager.get_primers_optimized()
         return OptimizedSessionManager.decompress_session_data(compressed_primers)
 
 class TargetSpecificFilterManager:
@@ -2014,6 +2014,47 @@ def init_session_state():
     
     # Cleanup stale session data
     OptimizedSessionManager.cleanup_session_state()
+
+def check_session_state_validity():
+    """Check if session state has valid primer data"""
+    try:
+        # Get primers data, handling both compressed and uncompressed formats
+        primers_data = st.session_state.get('primers_designed', [])
+        
+        # Handle compressed data from OptimizedSessionManager
+        if isinstance(primers_data, dict) and primers_data.get('_compressed'):
+            primers = OptimizedSessionManager.decompress_session_data(primers_data)
+            primer_count = len(primers) if primers else 0
+        elif isinstance(primers_data, list):
+            primers = primers_data
+            primer_count = len(primers)
+        else:
+            primers = []
+            primer_count = 0
+        
+        # Check sequence data
+        sequence = st.session_state.get('current_sequence', '')
+        sequence_length = len(sequence) if sequence else 0
+        
+        # Check sequence info
+        sequence_info = st.session_state.get('sequence_info', {})
+        has_seq_info = bool(sequence_info)
+        
+        return {
+            'has_primers': primer_count > 0,
+            'has_sequence': sequence_length > 0,
+            'has_seq_info': has_seq_info,
+            'primer_count': primer_count,
+            'sequence_length': sequence_length
+        }
+    except Exception as e:
+        return {
+            'has_primers': False,
+            'has_sequence': False,
+            'has_seq_info': False,
+            'primer_count': 0,
+            'sequence_length': 0
+        }
 
 def debug_session_state():
     """Debug function to show session state"""
@@ -2877,7 +2918,7 @@ def perform_conservation_based_design(organism_name, email, api_key, max_sequenc
                 gene_target="Conservation-Based Design"
             )
             
-            st.session_state.primers_designed = primers
+            OptimizedSessionManager.store_primers_optimized(primers)
             
             if enable_t7_dsrna:
                 st.session_state.t7_dsrna_enabled = True
@@ -2955,7 +2996,7 @@ def perform_standard_design(organism_name, email, api_key, max_sequences, custom
                             add_t7_promoter=enable_t7_dsrna,
                             gene_target="Standard Design"
                         )
-                        st.session_state.primers_designed = primers
+                        OptimizedSessionManager.store_primers_optimized(primers)
                         
                         if enable_t7_dsrna:
                             st.session_state.t7_dsrna_enabled = True
@@ -3535,7 +3576,7 @@ def main():
                                 add_t7_promoter=enable_t7_dsrna,
                                 gene_target="User Input Sequence"
                             )
-                            st.session_state.primers_designed = primers
+                            OptimizedSessionManager.store_primers_optimized(primers)
                             
                             if enable_t7_dsrna:
                                 st.session_state.t7_dsrna_enabled = True
@@ -3574,9 +3615,16 @@ def main():
             st.write(f"- Sequence length: {current_state_check['sequence_length']}")
             
             if 'primers_designed' in st.session_state:
-                st.write(f"- Primers in session state: {len(st.session_state['primers_designed'])}")
-                if st.session_state['primers_designed']:
-                    st.write(f"- First primer: {st.session_state['primers_designed'][0]}")
+                primers_data = st.session_state['primers_designed']
+                # Handle compressed data from OptimizedSessionManager
+                if isinstance(primers_data, dict) and primers_data.get('_compressed'):
+                    st.write(f"- Primers in session state: {primers_data.get('_size', 0)} (compressed)")
+                elif isinstance(primers_data, list):
+                    st.write(f"- Primers in session state: {len(primers_data)}")
+                    if primers_data:
+                        st.write(f"- First primer: {primers_data[0]}")
+                else:
+                    st.write(f"- Primers in session state: {type(primers_data)}")
             else:
                 st.write("- No primers in session state")
         
@@ -3587,7 +3635,7 @@ def main():
             st.info("No primers designed yet. Please use the Input tab to design primers.")
             st.stop()
         
-        primers = st.session_state.get('primers_designed', [])
+        primers = OptimizedSessionManager.get_primers_optimized()
         t7_enabled = st.session_state.get('t7_dsrna_enabled', False)
         
         # Display gene target context if available
@@ -3968,7 +4016,7 @@ def main():
             st.info("No primers designed yet. Please use the Input tab to design primers.")
             st.stop()
         
-        primers = st.session_state.get('primers_designed', [])
+        primers = OptimizedSessionManager.get_primers_optimized()
         t7_enabled = st.session_state.get('t7_dsrna_enabled', False)
         
         if t7_enabled:
@@ -4082,7 +4130,7 @@ def main():
             st.info("No primers to export. Please design primers first.")
             st.stop()
         
-        primers = st.session_state.get('primers_designed', [])
+        primers = OptimizedSessionManager.get_primers_optimized()
         t7_enabled = st.session_state.get('t7_dsrna_enabled', False)
         gene_targets_available = 'selected_gene_targets' in st.session_state
         
