@@ -3135,21 +3135,22 @@ def perform_standard_design(organism_name, email, api_key, max_sequences, custom
                         else:
                             st.warning(f"⚠️ Moderate specificity: {specific_tests}/{total_tests} tests passed ({specificity_percentage:.0f}%)")
                 
-                preview_data = []
-                for i, primer in enumerate(primers[:5]):
-                    preview_data.append({
-                        'Pair': i + 1,
-                        'Forward': primer.forward_seq[:30] + '...' if len(primer.forward_seq) > 30 else primer.forward_seq,
-                        'Reverse': primer.reverse_seq[:30] + '...' if len(primer.reverse_seq) > 30 else primer.reverse_seq,
-                        'Product Size': f"{primer.product_size} bp"
-                    })
-                
-                st.dataframe(pd.DataFrame(preview_data), use_container_width=True)
-                st.info("📊 Go to other tabs to view detailed analysis with specificity results!")
-                        else:
-                            st.warning("No suitable primers found. Try adjusting parameters.")
+                            preview_data = []
+                            for i, primer in enumerate(primers[:5]):
+                                preview_data.append({
+                                    'Pair': i + 1,
+                                    'Forward': primer.forward_seq[:30] + '...' if len(primer.forward_seq) > 30 else primer.forward_seq,
+                                    'Reverse': primer.reverse_seq[:30] + '...' if len(primer.reverse_seq) > 30 else primer.reverse_seq,
+                                    'Product Size': f"{primer.product_size} bp"
+                                })
+                            
+                            st.dataframe(pd.DataFrame(preview_data), use_container_width=True)
+                            st.info("📊 Go to other tabs to view detailed analysis with specificity results!")
                     else:
-                        st.error("Failed to fetch sequence")
+                        st.warning("No suitable primers found. Try adjusting parameters.")
+                
+                else:
+                    st.error("Failed to fetch sequence")
             else:
                 st.warning(f"No sequences found for {organism_name}")
                 
