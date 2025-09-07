@@ -1872,12 +1872,17 @@ def perform_gene_targeted_design(organism_name, email, api_key, max_sequences, c
                     for gene_target, results in specificity_results.items():
                         for organism, result in results.items():
                             if 'error' not in result:
+                                # Safely access result keys with defaults
+                                max_similarity = result.get('max_similarity', 0.0)
+                                is_specific = result.get('is_specific', False)
+                                sequences_tested = result.get('sequences_tested', 0)
+                                
                                 specificity_data.append({
                                     'Gene Target': gene_target,
                                     'Test Organism': organism,
-                                    'Max Similarity': f"{result['max_similarity']:.1%}",
-                                    'Specific': '✅ Yes' if result['is_specific'] else '❌ No',
-                                    'Sequences Tested': result['sequences_tested']
+                                    'Max Similarity': f"{max_similarity:.1%}",
+                                    'Specific': '✅ Yes' if is_specific else '❌ No',
+                                    'Sequences Tested': sequences_tested
                                 })
                     
                     if specificity_data:
@@ -2013,12 +2018,17 @@ def perform_conservation_based_design(organism_name, email, api_key, max_sequenc
                 # Display specificity results
                 specificity_data = []
                 for org, result in specificity_results.items():
-                    if 'error' not in result:
+                    if 'error' not in result and isinstance(result, dict):
+                        # Safely access result keys with defaults
+                        max_similarity = result.get('max_similarity', 0.0)
+                        is_specific = result.get('is_specific', False)
+                        sequences_tested = result.get('sequences_tested', 0)
+                        
                         specificity_data.append({
                             'Organism': org,
-                            'Max Similarity': f"{result['max_similarity']:.1%}",
-                            'Specific': '✅' if result['is_specific'] else '❌',
-                            'Sequences Tested': result['sequences_tested']
+                            'Max Similarity': f"{max_similarity:.1%}",
+                            'Specific': '✅' if is_specific else '❌',
+                            'Sequences Tested': sequences_tested
                         })
                 
                 if specificity_data:
@@ -2211,12 +2221,17 @@ def perform_standard_design(organism_name, email, api_key, max_sequences, custom
                                 for primer_name, results in specificity_results.items():
                                     for organism, result in results.items():
                                         if 'error' not in result:
+                                            # Safely access result keys with defaults
+                                            max_similarity = result.get('max_similarity', 0.0)
+                                            is_specific = result.get('is_specific', False)
+                                            sequences_tested = result.get('sequences_tested', 0)
+                                            
                                             specificity_data.append({
                                                 'Primer Pair': primer_name,
                                                 'Test Organism': organism,
-                                                'Max Similarity': f"{result['max_similarity']:.1%}",
-                                                'Specific': '✅ Yes' if result['is_specific'] else '❌ No',
-                                                'Sequences Tested': result['sequences_tested']
+                                                'Max Similarity': f"{max_similarity:.1%}",
+                                                'Specific': '✅ Yes' if is_specific else '❌ No',
+                                                'Sequences Tested': sequences_tested
                                             })
                                 
                                 if specificity_data:
@@ -2828,12 +2843,17 @@ def main():
             specificity_data = []
             
             for organism, result in specificity_results.items():
-                if 'error' not in result:
+                if 'error' not in result and isinstance(result, dict):
+                    # Safely access result keys with defaults
+                    max_similarity = result.get('max_similarity', 0.0)
+                    is_specific = result.get('is_specific', False)
+                    sequences_tested = result.get('sequences_tested', 0)
+                    
                     specificity_data.append({
                         'Organism': organism,
-                        'Max Similarity': f"{result['max_similarity']:.1%}",
-                        'Specific': '✅ Yes' if result['is_specific'] else '❌ No',
-                        'Sequences Tested': result['sequences_tested']
+                        'Max Similarity': f"{max_similarity:.1%}",
+                        'Specific': '✅ Yes' if is_specific else '❌ No',
+                        'Sequences Tested': sequences_tested
                     })
             
             if specificity_data:
