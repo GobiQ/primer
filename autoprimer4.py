@@ -998,13 +998,26 @@ def display_results_with_gene_context():
             st.dataframe(rec_df, use_container_width=True)
     
     elif design_mode == 'conservation_based':
-        # Conservation-based design removed - redirect to standard
-        st.subheader("⚡ Standard Design Context")
-        st.info("Conservation-based design has been removed. Using standard design approach.")
+        st.subheader("🧬 Conservation-Based Design Context")
+        analysis_metadata = st.session_state.get('analysis_metadata', {})
+        
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Sequences Analyzed", analysis_metadata.get('sequences_analyzed', 'N/A'))
+        with col2:
+            conservation_thresh = analysis_metadata.get('conservation_threshold', 0)
+            st.metric("Conservation Threshold", f"{conservation_thresh:.0%}")
+        with col3:
+            specificity_tested = analysis_metadata.get('specificity_tested', False)
+            st.metric("Specificity Tested", "Yes" if specificity_tested else "No")
+        with col4:
+            if specificity_tested:
+                spec_thresh = analysis_metadata.get('specificity_threshold', 0)
+                st.metric("Specificity Threshold", f"{spec_thresh:.0%}")
     
     elif design_mode == 'standard':
         st.subheader("⚡ Standard Design Context")
-        st.info("Primers designed from single sequence using standard approach. Consider Gene-Targeted design for enhanced specificity.")
+        st.info("Primers designed from single sequence using standard approach. Consider Gene-Targeted or Conservation-Based design for enhanced specificity.")
 
 def export_with_gene_targets(primers, format_type="excel"):
     """Export primers with gene target information"""
@@ -1559,203 +1572,6 @@ class PrimerDesigner:
         except Exception as e:
             return {'error': str(e)}
 
-class ConservationAnalyzer:
-    """Analyzes sequence conservation and specificity across multiple sequences"""
-    
-    def __init__(self, ncbi_connector):
-        self.ncbi = ncbi_connector
-    
-    def analyze_multiple_sequences(self, sequences, min_conservation=0.8, window_size=200, step_size=50):
-        """Find conserved regions across multiple sequences"""
-        if len(sequences) < 2:
-            return []
-        
-        # Find minimum sequence length
-        min_length = min(len(seq) for seq in sequences)
-        if min_length < window_size:
-            return []
-        
-        conserved_regions = []
-        
-        # Sliding window analysis
-        for start in range(0, min_length - window_size + 1, step_size):
-            end = start + window_size
-            
-            # Extract windows from all sequences
-            windows = [seq[start:end] for seq in sequences]
-            
-            # Calculate conservation score
-            conservation_score = self._calculate_conservation_score(windows)
-            
-            if conservation_score >= min_conservation:
-                # Get consensus sequence
-                consensus = self._get_consensus_sequence(windows)
-                
-                conserved_regions.append({
-                    'start': start,
-                    'end': end,
-                    'length': window_size,
-                    'conservation_score': conservation_score,
-                    'consensus_sequence': consensus,
-                    'sequence_count': len(sequences)
-                })
-        
-        # Merge overlapping regions
-        merged_regions = self._merge_overlapping_regions(conserved_regions)
-        
-        return merged_regions
-    
-    def _calculate_conservation_score(self, windows):
-        """Calculate conservation score for a set of sequence windows"""
-        if not windows:
-            return 0.0
-        
-        total_positions = len(windows[0])
-        conserved_positions = 0
-        
-        for pos in range(total_positions):
-            # Get nucleotides at this position across all sequences
-            nucleotides = [window[pos].upper() for window in windows if pos < len(window)]
-            
-            if nucleotides:
-                # Most common nucleotide
-                from collections import Counter
-                most_common = Counter(nucleotides).most_common(1)[0]
-                frequency = most_common[1] / len(nucleotides)
-                
-                # Consider position conserved if >80% have same nucleotide
-                if frequency >= 0.8:
-                    conserved_positions += 1
-        
-        return conserved_positions / total_positions if total_positions > 0 else 0.0
-    
-    def _get_consensus_sequence(self, windows):
-        """Generate consensus sequence from multiple windows"""
-        if not windows:
-            return ""
-        
-        consensus = []
-        length = len(windows[0])
-        
-        for pos in range(length):
-            nucleotides = [window[pos].upper() for window in windows if pos < len(window)]
-            
-            if nucleotides:
-                from collections import Counter
-                most_common = Counter(nucleotides).most_common(1)[0][0]
-                consensus.append(most_common)
-            else:
-                consensus.append('N')
-        
-        return ''.join(consensus)
-    
-    def _merge_overlapping_regions(self, regions, min_gap=30):
-        """Merge overlapping conserved regions"""
-        if not regions:
-            return []
-        
-        # Sort by start position
-        sorted_regions = sorted(regions, key=lambda x: x['start'])
-        merged = []
-        
-        current = sorted_regions[0].copy()
-        
-        for next_region in sorted_regions[1:]:
-            # If regions overlap or are close
-            if next_region['start'] - current['end'] <= min_gap:
-                # Merge regions
-                current['end'] = next_region['end']
-                current['length'] = current['end'] - current['start']
-                current['conservation_score'] = min(
-                    current['conservation_score'], 
-                    next_region['conservation_score']
-                )
-            else:
-                merged.append(current)
-                current = next_region.copy()
-        
-        merged.append(current)
-        return merged
-    
-    def test_specificity(self, target_sequence, comparison_organisms, target_organism=None, max_similarity=0.7):
-        """Test sequence specificity against other organisms"""
-        specificity_results = {}
-        
-        # Filter out target organism from comparison list
-        filtered_organisms = []
-        if target_organism:
-            target_organism_lower = target_organism.lower().strip()
-            for organism in comparison_organisms:
-                organism_lower = organism.lower().strip()
-                # Skip if it's the same organism (exact match or genus match)
-                if (organism_lower == target_organism_lower or 
-                    organism_lower.split()[0] == target_organism_lower.split()[0]):
-                    continue
-                filtered_organisms.append(organism)
-        else:
-            filtered_organisms = comparison_organisms
-        
-        for organism in filtered_organisms:
-            try:
-                # Search for sequences from comparison organism
-                query = f'"{organism}"[organism]'
-                seq_ids = self.ncbi.search_sequences(query, max_results=5)
-                
-                if seq_ids:
-                    similarities = []
-                    
-                    for seq_id in seq_ids[:3]:  # Test against top 3 sequences
-                        comparison_seq = self.ncbi.fetch_sequence(seq_id)
-                        if comparison_seq:
-                            similarity = self._calculate_sequence_similarity(
-                                target_sequence, comparison_seq
-                            )
-                            similarities.append(similarity)
-                    
-                    if similarities:
-                        max_similarity_found = max(similarities)
-                        is_specific = max_similarity_found < max_similarity
-                        
-                        specificity_results[organism] = {
-                            'max_similarity': max_similarity_found,
-                            'is_specific': is_specific,
-                            'sequences_tested': len(similarities)
-                        }
-                
-            except Exception as e:
-                specificity_results[organism] = {
-                    'error': str(e),
-                    'max_similarity': 0.0,
-                    'is_specific': True,
-                    'sequences_tested': 0
-                }
-        
-        return specificity_results
-    
-    def _calculate_sequence_similarity(self, seq1, seq2):
-        """Calculate best local similarity between two sequences"""
-        if not seq1 or not seq2:
-            return 0.0
-        
-        # Simple sliding window approach for local similarity
-        best_similarity = 0.0
-        window_size = min(len(seq1), 100)  # Use first 100 bp of target
-        
-        if len(seq2) < window_size:
-            return 0.0
-        
-        target_window = seq1[:window_size].upper()
-        
-        for i in range(len(seq2) - window_size + 1):
-            comparison_window = seq2[i:i + window_size].upper()
-            
-            # Calculate identity
-            matches = sum(1 for a, b in zip(target_window, comparison_window) if a == b)
-            similarity = matches / window_size
-            
-            best_similarity = max(best_similarity, similarity)
-        
-        return best_similarity
 
 class EnhancedSpecificityAnalyzer:
     """Enhanced specificity testing with proper alignment and thermodynamic considerations"""
@@ -3076,6 +2892,20 @@ def perform_enhanced_specificity_testing(primers: List[PrimerPair], target_seque
         st.error(f"Enhanced specificity testing failed: {e}")
         return {}
 
+def perform_conservation_based_design(
+    organism_name, email, api_key, max_sequences,
+    conservation_threshold=None, window_size=None,
+    enable_specificity_testing=False, specificity_threshold=None,
+    comparison_organisms="", custom_params=None, enable_t7_dsrna=False
+):
+    st.warning("Conservation-based design has been removed. Falling back to Standard Design.")
+    return perform_standard_design(
+        organism_name, email, api_key, max_sequences,
+        custom_params, enable_t7_dsrna,
+        optimal_dsrna_length=300,  # keep your existing default
+        check_transcription_efficiency=False
+    )
+
 def perform_standard_design(organism_name, email, api_key, max_sequences, custom_params, enable_t7_dsrna, optimal_dsrna_length, check_transcription_efficiency):
     """Perform standard primer design workflow"""
     with st.spinner(f"Searching for {organism_name} genomes..."):
@@ -3152,7 +2982,7 @@ def perform_standard_design(organism_name, email, api_key, max_sequences, custom
                             
                             # Test specificity for the best primers
                             specificity_results = {}
-                            analyzer = ConservationAnalyzer(NCBIConnector(email, api_key))
+                            analyzer = EnhancedSpecificityAnalyzer(NCBIConnector(email, api_key))
                             
                             # Add progress bar for specificity testing
                             progress_bar = st.progress(0)
@@ -3452,13 +3282,15 @@ def main():
                 "Choose your primer design approach:",
                 [
                     "🎯 Gene-Targeted Design (Recommended for specific genes)",
+                    "🧬 Conservation-Based Design (Recommended for robust primers)",
                     "⚡ Standard Design (Single sequence, fastest)"
                 ],
-                help="Select based on your research goals: specific gene detection vs. speed"
+                help="Select based on your research goals: specific gene detection vs. broad applicability vs. speed"
             )
             
             # Initialize workflow variables
             gene_targets_workflow = "🎯 Gene-Targeted Design" in workflow_choice
+            conservation_workflow = "🧬 Conservation-Based Design" in workflow_choice
             standard_workflow = "⚡ Standard Design" in workflow_choice
             
             # ==========================================
@@ -3553,7 +3385,21 @@ def main():
                                 st.info("Enter an organism name above to search for gene targets.")
             
             # ==========================================
-            # WORKFLOW 2: STANDARD DESIGN
+            # WORKFLOW 2: CONSERVATION-BASED DESIGN (REMOVED)
+            # ==========================================
+            elif conservation_workflow:
+                st.warning("Conservation-based design has been removed. Running Standard Design instead.")
+                if not email or not organism_name:
+                    st.error("❌ Please provide email and organism name.")
+                else:
+                    perform_standard_design(
+                        organism_name, email, api_key, max_sequences,
+                        custom_params, enable_t7_dsrna, optimal_dsrna_length,
+                        check_transcription_efficiency
+                    )
+            
+            # ==========================================
+            # WORKFLOW 3: STANDARD DESIGN
             # ==========================================
             else:  # standard_workflow
                 st.info("⚡ **Standard Design Mode**\nQuick primer design from the first available sequence. Ideal for rapid prototyping and basic applications.")
@@ -3564,6 +3410,53 @@ def main():
                         st.error("❌ Please provide email and organism name.")
                     else:
                         perform_standard_design(organism_name, email, api_key, max_sequences, custom_params, enable_t7_dsrna, optimal_dsrna_length, check_transcription_efficiency)
+            
+            # Agricultural Pests & Pathogens section with improved layout
+            st.markdown("---")
+            st.markdown("### 🎯 Quick Select: Agricultural Pests & Pathogens")
+            st.markdown("*Click any button below to automatically search for that organism*")
+            
+            suggestions = get_organism_suggestions()
+            
+            # Show summary of available organisms
+            total_organisms = sum(len(orgs) for subcats in suggestions.values() for orgs in subcats.values())
+            st.info(f"📊 **{total_organisms} organisms** available across {len(suggestions)} categories")
+            
+            # Create expandable sections for better organization
+            for category, subcategories in suggestions.items():
+                with st.expander(f"{category} ({sum(len(orgs) for orgs in subcategories.values())} organisms)", expanded=False):
+                    for subcategory, organisms in subcategories.items():
+                        st.markdown(f"**{subcategory}**")
+                        
+                        # Use a more compact grid layout
+                        num_cols = min(len(organisms), 4)  # Max 4 columns for better readability
+                        cols = st.columns(num_cols)
+                        
+                        for i, organism_item in enumerate(organisms):
+                            # Handle both old format (common_name, latin_name) and new format (common_name, latin_name, gene_targets)
+                            if len(organism_item) == 3:
+                                common_name, latin_name, gene_targets = organism_item
+                            else:
+                                common_name, latin_name = organism_item
+                            
+                            with cols[i % num_cols]:
+                                # Create a unique key and use callback to set organism name directly
+                                button_key = f"suggest_{category}_{subcategory}_{i}_{latin_name.replace(' ', '_')}"
+                                
+                                if st.button(
+                                    common_name, 
+                                    key=button_key, 
+                                    help=f"Search for {latin_name}",
+                                    use_container_width=True
+                                ):
+                                    # Set the organism name to appear in the text input
+                                    st.session_state.selected_organism_name = latin_name
+                                    st.rerun()
+                        
+                        # Add small spacing between subcategories
+                        if subcategory != list(subcategories.keys())[-1]:  # Not the last subcategory
+                            st.markdown("")
+            
         
         elif input_method == "Direct Sequence":
             sequence_input = st.text_area("Enter DNA sequence:", 
@@ -3617,55 +3510,6 @@ def main():
                         except Exception as e:
                             st.error(f"Error: {e}")
     
-    # Agricultural Pests & Pathogens section with improved layout
-    st.markdown("---")
-    st.markdown("### 🎯 Quick Select: Agricultural Pests & Pathogens")
-    st.markdown("*Click any button below to automatically search for that organism*")
-    st.info("💡 **Tip**: Expand the categories below to see all available organism buttons. The first category is expanded by default.")
-    
-    suggestions = get_organism_suggestions()
-    
-    # Show summary of available organisms
-    total_organisms = sum(len(orgs) for subcats in suggestions.values() for orgs in subcats.values())
-    st.info(f"📊 **{total_organisms} organisms** available across {len(suggestions)} categories")
-    
-    # Create expandable sections for better organization
-    for i, (category, subcategories) in enumerate(suggestions.items()):
-        # Make the first category expanded by default
-        expanded = (i == 0)
-        with st.expander(f"{category} ({sum(len(orgs) for orgs in subcategories.values())} organisms)", expanded=expanded):
-            for subcategory, organisms in subcategories.items():
-                st.markdown(f"**{subcategory}**")
-                
-                # Use a more compact grid layout
-                num_cols = min(len(organisms), 4)  # Max 4 columns for better readability
-                cols = st.columns(num_cols)
-                
-                for i, organism_item in enumerate(organisms):
-                    # Handle both old format (common_name, latin_name) and new format (common_name, latin_name, gene_targets)
-                    if len(organism_item) == 3:
-                        common_name, latin_name, gene_targets = organism_item
-                    else:
-                        common_name, latin_name = organism_item
-                    
-                    with cols[i % num_cols]:
-                        # Create a unique key and use callback to set organism name directly
-                        button_key = f"suggest_{category}_{subcategory}_{i}_{latin_name.replace(' ', '_')}"
-                        
-                        if st.button(
-                            common_name, 
-                            key=button_key, 
-                            help=f"Search for {latin_name}",
-                            use_container_width=True
-                        ):
-                            # Set the organism name to appear in the text input
-                            st.session_state.selected_organism_name = latin_name
-                            st.rerun()
-                
-                # Add small spacing between subcategories
-                if subcategory != list(subcategories.keys())[-1]:  # Not the last subcategory
-                    st.markdown("")
-
     with tab2:
         st.header("Primer Design Results")
         
@@ -3694,7 +3538,7 @@ def main():
         is_conservation_based = analysis_metadata.get('type') == 'conservation_based'
         
         if is_conservation_based:
-            st.success("⚡ **Standard Design** - Primers designed from single sequence")
+            st.success("🧬 **Conservation-Based Design** - Primers designed from conserved regions across multiple sequences")
             
             col1, col2, col3, col4 = st.columns(4)
             with col1:
@@ -3726,9 +3570,6 @@ def main():
             if 'description' in info:
                 st.write(f"**Description:** {info['description']}")
             
-            # Show conservation information if available
-            if 'conservation_score' in info:
-                st.metric("Conservation Score", f"{info['conservation_score']:.1%}")
             
             # Show multi-gene information if available
             if info.get('design_mode') == 'multi_gene_targeted':
@@ -3759,24 +3600,6 @@ def main():
                     gene_breakdown_df = pd.DataFrame(gene_breakdown_data)
                     st.dataframe(gene_breakdown_df, use_container_width=True)
         
-        # Show conserved regions if available
-        if hasattr(st.session_state, 'conserved_regions') and st.session_state.conserved_regions:
-            st.subheader("Conserved Regions Analysis")
-            
-            conserved_regions = st.session_state.conserved_regions
-            conservation_data = []
-            
-            for i, region in enumerate(conserved_regions):
-                conservation_data.append({
-                    'Region': i + 1,
-                    'Position': f"{region['start']}-{region['end']}",
-                    'Length': f"{region['length']} bp",
-                    'Conservation': f"{region['conservation_score']:.1%}",
-                    'Sequences': region['sequence_count']
-                })
-            
-            conservation_df = pd.DataFrame(conservation_data)
-            st.dataframe(conservation_df, use_container_width=True)
         
         # Show enhanced specificity results if available
         if hasattr(st.session_state, 'enhanced_specificity_results') and st.session_state.enhanced_specificity_results:
@@ -4004,7 +3827,7 @@ def main():
         # Conservation and Specificity Summary
         if is_conservation_based:
             with st.expander("Analysis Summary", expanded=False):
-                st.write("**Standard Primer Design Summary:**")
+                st.write("**Conservation-Based Primer Design Summary:**")
                 st.write(f"- Analyzed {analysis_metadata.get('sequences_analyzed', 'N/A')} sequences from {st.session_state.get('target_organism', 'target organism')}")
                 st.write(f"- Used {analysis_metadata.get('conservation_threshold', 0):.0%} conservation threshold")
                 
