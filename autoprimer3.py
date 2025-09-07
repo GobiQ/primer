@@ -1859,11 +1859,55 @@ def perform_gene_targeted_design(organism_name, email, api_key, max_sequences, c
                         # Clean gene name for search
                         clean_gene = gene_name.split('(')[0].strip()
                         
+                        # Create gene name variations for better matching
+                        gene_variations = [clean_gene]
+                        
+                        # Add common gene name variations
+                        if clean_gene.upper() in ['ACT1', 'ACTIN']:
+                            gene_variations.extend(['actin', 'ACT', 'Actin'])
+                        elif clean_gene.upper() in ['TUB1', 'TUBULIN']:
+                            gene_variations.extend(['tubulin', 'TUB', 'Tubulin'])
+                        elif clean_gene.upper() in ['EF1A', 'ELONGATION']:
+                            gene_variations.extend(['elongation factor', 'EF1', 'EF-1'])
+                        elif 'RPL' in clean_gene.upper():
+                            gene_variations.extend([clean_gene.replace('RPL', 'ribosomal protein L'), 'ribosomal protein'])
+                        elif 'RPS' in clean_gene.upper():
+                            gene_variations.extend([clean_gene.replace('RPS', 'ribosomal protein S'), 'ribosomal protein'])
+                        
+                        st.write(f"  Gene variations to try: {gene_variations}")
+                        
                         st.write(f"Searching for {clean_gene} in {organism_name}...")
                         
-                        # Search for gene-specific sequences
-                        search_query = f'"{organism_name}"[organism] AND "{clean_gene}"'
-                        seq_ids = ncbi.search_sequences(search_query, database="nucleotide", max_results=2)
+                        # Search for gene-specific sequences with multiple strategies and gene variations
+                        seq_ids = []
+                        found_sequence = False
+                        
+                        for gene_var in gene_variations:
+                            if found_sequence:
+                                break
+                                
+                            search_queries = [
+                                f'"{organism_name}"[organism] AND "{gene_var}"[gene]',
+                                f'"{organism_name}"[organism] AND "{gene_var}"[title]',
+                                f'"{organism_name}"[organism] AND "{gene_var}"',
+                                f'"{organism_name}"[organism] AND {gene_var}',
+                            ]
+                            
+                            for i, search_query in enumerate(search_queries):
+                                st.write(f"  Trying query: {search_query}")
+                                try:
+                                    results = ncbi.search_sequences(search_query, database="nucleotide", max_results=2)
+                                    if results:
+                                        seq_ids = results
+                                        st.write(f"  ✅ Found {len(results)} sequences with gene variation '{gene_var}'")
+                                        found_sequence = True
+                                        break
+                                    else:
+                                        st.write(f"  ❌ No results with gene variation '{gene_var}'")
+                                except Exception as e:
+                                    st.write(f"  ❌ Error with gene variation '{gene_var}': {e}")
+                        
+                        st.write(f"Final result: {len(seq_ids)} sequences found")
                         
                         if seq_ids:
                             for seq_id in seq_ids[:1]:  # Take first sequence per gene
@@ -1879,6 +1923,33 @@ def perform_gene_targeted_design(organism_name, email, api_key, max_sequences, c
                                     break
                         else:
                             st.write(f"⚠️ No specific sequence found for {clean_gene}")
+                            
+                            # Try alternative search strategies
+                            st.write(f"  Trying alternative searches for {clean_gene}...")
+                            
+                            # Try searching for the gene without organism restriction
+                            try:
+                                alt_query = f'"{clean_gene}"[gene] AND "{organism_name}"[organism]'
+                                alt_results = ncbi.search_sequences(alt_query, database="nucleotide", max_results=1)
+                                if alt_results:
+                                    st.write(f"  ✅ Found {len(alt_results)} sequences with alternative query")
+                                    seq_ids = alt_results
+                                    
+                                    for seq_id in seq_ids[:1]:
+                                        sequence = ncbi.fetch_sequence(seq_id)
+                                        if sequence and len(sequence) > 100:
+                                            gene_sequences.append({
+                                                'gene': clean_gene,
+                                                'category': category,
+                                                'sequence': sequence,
+                                                'id': seq_id
+                                            })
+                                            st.write(f"✅ Found {clean_gene} sequence (alternative): {len(sequence)} bp")
+                                            break
+                                else:
+                                    st.write(f"  ❌ No results with alternative query either")
+                            except Exception as e:
+                                st.write(f"  ❌ Error with alternative search: {e}")
                 except Exception as e:
                     st.write(f"⚠️ Error searching for {gene_info}: {e}")
                     continue
