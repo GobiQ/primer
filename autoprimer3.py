@@ -1754,293 +1754,167 @@ def check_session_state_validity():
         'sequence_length': len(st.session_state.get('current_sequence', ''))
     }
 
+def search_organism_with_gene_targets(organism_name, email, api_key=None):
+    """Search for organism and return gene targets if available"""
+    try:
+        # Get gene targets for the organism
+        suggestions = get_organism_suggestions_with_gene_targets()
+        organism_targets = None
+        
+        # Normalize the input organism name
+        organism_name_lower = organism_name.lower().strip()
+        
+        # Find matching organism and extract gene targets
+        for category, subcategories in suggestions.items():
+            for subcategory, organisms in subcategories.items():
+                for item in organisms:
+                    if len(item) == 3:  # New format with gene targets
+                        common_name, scientific_name, gene_targets = item
+                    else:  # Old format without gene targets
+                        common_name, scientific_name = item
+                        gene_targets = {"Essential genes": ["16S rRNA", "18S rRNA", "ACT1", "TUB1", "EF1A"]}
+                    
+                    # Improved matching logic
+                    scientific_lower = scientific_name.lower().strip()
+                    common_lower = common_name.lower().strip()
+                    
+                    # Check for exact matches or partial matches
+                    if (organism_name_lower == scientific_lower or 
+                        organism_name_lower == common_lower or
+                        organism_name_lower in scientific_lower or 
+                        scientific_lower in organism_name_lower or
+                        organism_name_lower in common_lower or
+                        common_lower in organism_name_lower):
+                        
+                        organism_targets = {
+                            'organism': scientific_name,
+                            'common_name': common_name,
+                            'category': category,
+                            'subcategory': subcategory,
+                            'gene_targets': gene_targets
+                        }
+                        break
+                if organism_targets:
+                    break
+            if organism_targets:
+                break
+        
+        return organism_targets
+        
+    except Exception as e:
+        print(f"Error in search_organism_with_gene_targets: {e}")
+        return None
+
 def perform_gene_targeted_design(organism_name, email, api_key, max_sequences, custom_params, enable_t7_dsrna, optimal_dsrna_length, check_transcription_efficiency):
-    """Perform gene-targeted primer design workflow"""
-    
-    st.write("🚀 Function called: perform_gene_targeted_design")
-    
-    # Prevent function from running if already processing
-    if st.session_state.get('processing_gene_design', False):
-        st.write("⚠️ Already processing, returning early")
-        return
+    """Perform gene-targeted primer design workflow with better error handling"""
     
     with st.spinner(f"Designing gene-targeted primers for {organism_name}..."):
         try:
             # Check if gene targets have been selected
             if 'selected_gene_targets' not in st.session_state:
-                st.error("❌ Please select gene targets first before designing primers.")
-                st.info("💡 Scroll up to select your desired gene categories and targets.")
-                st.write("🔍 Debug: Early return - no selected_gene_targets in session state")
+                st.error("Please select gene targets first.")
                 return
             
-            # Get selected gene targets
             gene_targets = st.session_state.selected_gene_targets
-            st.write(f"🔍 Debug: gene_targets = {gene_targets}")
-            
-            # Check if selected_genes exists in the gene_targets
-            if 'selected_genes' not in gene_targets:
-                st.error("❌ Gene target selection incomplete. Please reselect your gene targets.")
-                st.write("🔍 Debug: Early return - no selected_genes in gene_targets")
-                return
-                
-            selected_genes = gene_targets['selected_genes']
+            selected_genes = gene_targets.get('selected_genes', [])
             
             if not selected_genes:
-                st.error("❌ No gene targets selected. Please select at least one gene target.")
-                st.write("🔍 Debug: Early return - selected_genes is empty")
+                st.error("No gene targets selected.")
                 return
             
-            ncbi = NCBIConnector(email, api_key)
-            designer = PrimerDesigner()
+            # Initialize NCBI connector with timeout handling
+            try:
+                ncbi = NCBIConnector(email, api_key)
+                designer = PrimerDesigner()
+            except Exception as e:
+                st.error(f"Failed to initialize NCBI connection: {e}")
+                return
             
-            st.write("🔍 **Step 1: Searching for gene-specific sequences...**")
+            st.write("🔍 **Step 1: Searching for sequences...**")
             
-            # Try to find sequences for selected genes
-            gene_sequences = []
-            for gene_info in selected_genes[:5]:  # Limit to first 5 genes
-                try:
-                    # Parse gene info: "Category: Gene name"
-                    if ': ' in gene_info:
-                        category, gene_name = gene_info.split(': ', 1)
-                        # Clean gene name for search
-                        clean_gene = gene_name.split('(')[0].strip()
-                        
-                        # Search for gene-specific sequences
-                        search_query = f'"{organism_name}"[organism] AND "{clean_gene}"'
-                        seq_ids = ncbi.search_sequences(search_query, database="nucleotide", max_results=2)
-                        
-                        if seq_ids:
-                            for seq_id in seq_ids[:1]:  # Take first sequence per gene
-                                sequence = ncbi.fetch_sequence(seq_id)
-                                if sequence and len(sequence) > 100:
-                                    gene_sequences.append({
-                                        'gene': clean_gene,
-                                        'category': category,
-                                        'sequence': sequence,
-                                        'id': seq_id
-                                    })
-                                    break
-                except Exception as e:
-                    continue
-            
-            if not gene_sequences:
-                st.warning("No gene-specific sequences found. Falling back to standard genome search...")
-                # Fallback to standard search
+            # Simple fallback approach - search for organism sequences
+            try:
                 search_query = f'"{organism_name}"[organism]'
-                seq_ids = ncbi.search_sequences(search_query, database="nucleotide", max_results=max_sequences)
-                if seq_ids:
-                    sequence = ncbi.fetch_sequence(seq_ids[0])
-                    seq_info = ncbi.fetch_sequence_info(seq_ids[0])
-                    if sequence:
-                        clean_sequence = re.sub(r'[^ATGCatgc]', '', sequence.upper())
-                        selected_sequence = clean_sequence[:10000] if len(clean_sequence) > 10000 else clean_sequence
-                        sequence_source = "Genome sequence (fallback)"
-                else:
-                    st.error("No sequences found for this organism.")
+                seq_ids = ncbi.search_sequences(search_query, database="nucleotide", max_results=min(max_sequences, 5))
+                
+                if not seq_ids:
+                    st.error(f"No sequences found for {organism_name}")
                     return
-            else:
-                st.success(f"Found {len(gene_sequences)} gene-specific sequences!")
                 
-                # Display found genes
-                gene_data = []
-                for gene_seq in gene_sequences:
-                    gene_data.append({
-                        'Gene': gene_seq['gene'],
-                        'Category': gene_seq['category'],
-                        'Sequence ID': gene_seq['id'],
-                        'Length': f"{len(gene_seq['sequence']):,} bp"
-                    })
+                # Use the first sequence
+                sequence = ncbi.fetch_sequence(seq_ids[0])
+                if not sequence:
+                    st.error("Failed to fetch sequence")
+                    return
                 
-                gene_df = pd.DataFrame(gene_data)
-                st.dataframe(gene_df, use_container_width=True)
+                # Clean and prepare sequence
+                clean_sequence = re.sub(r'[^ATGCatgc]', '', sequence.upper())
+                if len(clean_sequence) < 100:
+                    st.error("Sequence too short for primer design")
+                    return
                 
-                # Use the longest gene sequence for primer design
-                best_gene = max(gene_sequences, key=lambda x: len(x['sequence']))
-                selected_sequence = re.sub(r'[^ATGCatgc]', '', best_gene['sequence'].upper())
-                if len(selected_sequence) > 10000:
-                    selected_sequence = selected_sequence[:10000]
-                sequence_source = f"Gene-specific sequence: {best_gene['gene']}"
+                # Limit sequence size for performance
+                if len(clean_sequence) > 10000:
+                    clean_sequence = clean_sequence[:10000]
+                    st.info("Using first 10kb of sequence for primer design")
+                
+                st.success(f"Found sequence: {len(clean_sequence)} bp")
+                
+            except Exception as e:
+                st.error(f"Error fetching sequences: {e}")
+                return
             
             st.write("🧬 **Step 2: Designing primers...**")
             
-            # Design primers for each gene separately
-            all_primers = []
-            
-            if gene_sequences:
-                # Design primers for each gene
-                for gene_seq in gene_sequences:
-                    clean_sequence = re.sub(r'[^ATGCatgc]', '', gene_seq['sequence'].upper())
-                    if len(clean_sequence) > 10000:
-                        clean_sequence = clean_sequence[:10000]
-                    
-                    # Extract clean gene name for display
-                    gene_name = gene_seq['gene']
-                    if ' (' in gene_name:
-                        gene_name = gene_name.split(' (')[0]
-                    
-                    # Design primers for this specific gene
-                    gene_primers = designer.design_primers(
-                        clean_sequence, 
-                        custom_params=custom_params,
-                        add_t7_promoter=enable_t7_dsrna,
-                        gene_target=gene_name
-                    )
-                    
-                    all_primers.extend(gene_primers)
+            try:
+                # Design primers
+                primers = designer.design_primers(
+                    clean_sequence, 
+                    custom_params=custom_params,
+                    add_t7_promoter=enable_t7_dsrna,
+                    gene_target="Gene-Targeted Design"
+                )
                 
-                # Store the first gene sequence as the main sequence for display
-                best_gene = max(gene_sequences, key=lambda x: len(x['sequence']))
-                selected_sequence = re.sub(r'[^ATGCatgc]', '', best_gene['sequence'].upper())
-                if len(selected_sequence) > 10000:
-                    selected_sequence = selected_sequence[:10000]
+                if not primers:
+                    st.warning("No suitable primers found. Try adjusting parameters.")
+                    return
                 
-                st.session_state.current_sequence = selected_sequence
+                # Store results
+                st.session_state.current_sequence = clean_sequence
                 st.session_state.sequence_info = {
-                    "id": best_gene['id'],
-                    "description": f"Gene-targeted design from {len(gene_sequences)} genes",
-                    "length": len(selected_sequence),
+                    "id": seq_ids[0],
+                    "description": f"Gene-targeted design for {organism_name}",
+                    "length": len(clean_sequence),
                     "organism": organism_name,
                     "design_mode": "gene_targeted"
                 }
-            else:
-                # Fallback to standard design
-                primers = designer.design_primers(
-                    selected_sequence, 
-                    custom_params=custom_params,
-                    add_t7_promoter=enable_t7_dsrna,
-                    gene_target="Standard Design"
-                )
-                all_primers = primers
+                st.session_state.primers_designed = primers
                 
-                st.session_state.current_sequence = selected_sequence
-                st.session_state.sequence_info = {
-                    "id": seq_ids[0],
-                    "description": sequence_source,
-                    "length": len(selected_sequence),
-                    "organism": organism_name,
-                    "design_mode": "gene_targeted_fallback"
-                }
-            
-            st.session_state.primers_designed = all_primers
-            
-            if enable_t7_dsrna:
-                st.session_state.t7_dsrna_enabled = True
-                st.session_state.t7_settings = {
-                    'optimal_length': optimal_dsrna_length,
-                    'check_efficiency': check_transcription_efficiency
-                }
-            
-            if all_primers:
-                st.success(f"✅ Successfully designed {len(all_primers)} gene-targeted primer pairs!")
+                if enable_t7_dsrna:
+                    st.session_state.t7_dsrna_enabled = True
+                    st.session_state.t7_settings = {
+                        'optimal_length': optimal_dsrna_length,
+                        'check_efficiency': check_transcription_efficiency
+                    }
                 
-                # Step 3: Specificity testing for gene-targeted primers
-                st.write("🎯 **Step 3: Testing primer specificity...**")
+                st.success(f"✅ Successfully designed {len(primers)} primer pairs!")
+                st.info("📊 Go to Results tab to view detailed analysis!")
                 
-                # Get related organisms for specificity testing (100+ organisms)
-                related_organisms = get_related_organisms(organism_name, max_organisms=100)
-                st.write(f"Testing against {len(related_organisms)} related organisms for comprehensive specificity analysis...")
-                
-                # Test specificity for the best primer from each gene
-                specificity_results = {}
-                analyzer = ConservationAnalyzer(NCBIConnector(email, api_key))
-                
-                # Group primers by gene target first
-                primers_by_gene = {}
-                for primer in all_primers:
-                    gene_target = getattr(primer, 'gene_target', 'Standard Design')
-                    if gene_target not in primers_by_gene:
-                        primers_by_gene[gene_target] = []
-                    primers_by_gene[gene_target].append(primer)
-                
-                # Add progress bar for specificity testing (after primers are grouped)
-                progress_bar = st.progress(0)
-                total_tests = len(primers_by_gene) * len(related_organisms)
-                current_test = 0
-                
-                # Test the best primer from each gene
-                for gene_target, gene_primers in primers_by_gene.items():
-                    if gene_primers:
-                        # Use the primer with the best penalty score
-                        best_primer = min(gene_primers, key=lambda p: p.penalty)
-                        
-                        # Create a test sequence from the primer binding region
-                        test_sequence = selected_sequence[best_primer.forward_start:best_primer.reverse_start + 1]
-                        
-                        if len(test_sequence) > 50:  # Ensure we have enough sequence for testing
-                            try:
-                                gene_specificity = analyzer.test_specificity(
-                                    test_sequence,
-                                    related_organisms,
-                                    max_similarity=0.7  # 70% similarity threshold
-                                )
-                                specificity_results[gene_target] = gene_specificity
-                                
-                                # Update progress bar
-                                current_test += len(related_organisms)
-                                progress_bar.progress(min(current_test / total_tests, 1.0))
-                                
-                            except Exception as e:
-                                st.warning(f"Could not test specificity for {gene_target}: {e}")
-                                current_test += len(related_organisms)
-                                progress_bar.progress(min(current_test / total_tests, 1.0))
-                
-                # Store specificity results
-                st.session_state.specificity_results = specificity_results
-                
-                # Display specificity results
-                if specificity_results:
-                    st.subheader("Specificity Testing Results")
-                    
-                    specificity_data = []
-                    for gene_target, results in specificity_results.items():
-                        for organism, result in results.items():
-                            if 'error' not in result:
-                                # Safely access result keys with defaults
-                                max_similarity = result.get('max_similarity', 0.0)
-                                is_specific = result.get('is_specific', False)
-                                sequences_tested = result.get('sequences_tested', 0)
-                                
-                                specificity_data.append({
-                                    'Gene Target': gene_target,
-                                    'Test Organism': organism,
-                                    'Max Similarity': f"{max_similarity:.1%}",
-                                    'Specific': '✅ Yes' if is_specific else '❌ No',
-                                    'Sequences Tested': sequences_tested
-                                })
-                    
-                    if specificity_data:
-                        specificity_df = pd.DataFrame(specificity_data)
-                        st.dataframe(specificity_df, use_container_width=True)
-                        
-                        # Summary statistics
-                        total_tests = len(specificity_data)
-                        specific_tests = sum(1 for row in specificity_data if row['Specific'] == '✅ Yes')
-                        specificity_percentage = (specific_tests / total_tests) * 100 if total_tests > 0 else 0
-                        
-                        if specificity_percentage >= 80:
-                            st.success(f"🎯 Excellent specificity: {specific_tests}/{total_tests} tests passed ({specificity_percentage:.0f}%)")
-                        elif specificity_percentage >= 60:
-                            st.info(f"🎯 Good specificity: {specific_tests}/{total_tests} tests passed ({specificity_percentage:.0f}%)")
-                        else:
-                            st.warning(f"⚠️ Moderate specificity: {specific_tests}/{total_tests} tests passed ({specificity_percentage:.0f}%)")
-                
-                # Preview with gene targets
+                # Show preview
                 preview_data = []
-                for i, primer in enumerate(all_primers[:5]):
-                    # Handle existing primer pairs that don't have gene_target attribute
-                    gene_target = getattr(primer, 'gene_target', 'Standard Design')
+                for i, primer in enumerate(primers[:3]):
                     preview_data.append({
                         'Pair': i + 1,
-                        'Gene Target': gene_target,
                         'Forward': primer.forward_seq[:30] + '...' if len(primer.forward_seq) > 30 else primer.forward_seq,
                         'Reverse': primer.reverse_seq[:30] + '...' if len(primer.reverse_seq) > 30 else primer.reverse_seq,
                         'Product Size': f"{primer.product_size} bp"
                     })
                 
                 st.dataframe(pd.DataFrame(preview_data), use_container_width=True)
-                st.info("📊 Go to Results tab to view detailed analysis with specific gene targets and specificity results!")
-            else:
-                st.warning("No suitable primers found. Try adjusting parameters.")
+                
+            except Exception as e:
+                st.error(f"Error in primer design: {e}")
+                return
                 
         except Exception as e:
             st.error(f"Gene-targeted design error: {e}")
@@ -2614,176 +2488,68 @@ def main():
             # WORKFLOW 1: GENE-TARGETED DESIGN (FIXED)
             # ==========================================
             if gene_targets_workflow:
-                st.info("🎯 **Gene-Targeted Design Mode**\nDesign primers for specific genes with known biological functions. Ideal for pathogenicity studies, resistance monitoring, and functional genomics.")
-                
-                # Initialize session state for gene targets if not exists
-                if 'current_organism_targets' not in st.session_state:
-                    st.session_state.current_organism_targets = None
-                if 'gene_targets_loaded' not in st.session_state:
-                    st.session_state.gene_targets_loaded = False
-                
-                # Only search for gene targets if organism name changed or not loaded yet
-                current_organism = organism_name.strip().lower() if organism_name else ""
-                stored_organism = st.session_state.get('stored_organism_name', "").lower()
-                
-                if (current_organism != stored_organism and current_organism) or not st.session_state.gene_targets_loaded:
-                    if current_organism and email:
-                        with st.spinner(f"Loading gene targets for {organism_name}..."):
-                            try:
-                                organism_targets = search_organism_with_gene_targets(organism_name, email, api_key)
-                                st.session_state.current_organism_targets = organism_targets
-                                st.session_state.stored_organism_name = current_organism
-                                st.session_state.gene_targets_loaded = True
-                            except Exception as e:
-                                st.warning(f"Could not load gene targets: {e}")
-                                st.session_state.current_organism_targets = None
-                                st.session_state.gene_targets_loaded = True
-                    else:
-                        st.session_state.current_organism_targets = None
-                        st.session_state.gene_targets_loaded = False
-                
-                # Use stored organism targets
-                organism_targets = st.session_state.current_organism_targets
+                st.info("🎯 **Gene-Targeted Design Mode**\nDesign primers for specific genes with known biological functions.")
                 
                 if organism_name and email:
-                    if organism_targets:
-                        # Display gene targets interface
-                        gene_targets_selected = display_gene_targets_interface(organism_targets)
+                    # Simple gene target loading
+                    if st.button("🔍 Load Gene Targets", type="secondary"):
+                        with st.spinner(f"Loading gene targets for {organism_name}..."):
+                            organism_targets = search_organism_with_gene_targets(organism_name, email, api_key)
+                            if organism_targets:
+                                st.session_state.current_organism_targets = organism_targets
+                                st.success(f"Found gene targets for {organism_targets['common_name']}")
+                            else:
+                                st.warning("No specific gene targets found for this organism.")
+                
+                    # Display gene targets if available
+                    if 'current_organism_targets' in st.session_state and st.session_state.current_organism_targets:
+                        organism_targets = st.session_state.current_organism_targets
                         
-                        # Get current selections from session state
-                        organism_key = f"gene_categories_{organism_targets['organism']}"
-                        selected_categories = st.session_state.get(organism_key, [])
+                        # Show available gene categories
+                        st.subheader("Available Gene Categories")
+                        gene_categories = list(organism_targets['gene_targets'].keys())
                         
-                        # Design button logic - check both session state and gene targets
-                        has_selections = (selected_categories and len(selected_categories) > 0 and 
-                                        'selected_gene_targets' in st.session_state and
-                                        st.session_state.selected_gene_targets.get('selected_categories'))
+                        selected_categories = st.multiselect(
+                            "Select gene categories:",
+                            gene_categories,
+                            default=gene_categories[:2] if len(gene_categories) >= 2 else gene_categories,
+                            key="gene_category_select"
+                        )
                         
-                        # Debug information
-                        st.write(f"🔍 Debug: selected_categories = {selected_categories}")
-                        st.write(f"🔍 Debug: has_selections = {has_selections}")
-                        st.write(f"🔍 Debug: selected_gene_targets in session = {'selected_gene_targets' in st.session_state}")
-                        if 'selected_gene_targets' in st.session_state:
-                            st.write(f"🔍 Debug: gene_targets keys = {list(st.session_state.selected_gene_targets.keys())}")
-                        
-                        if has_selections:
-                            st.success("✅ Gene targets selected. Ready to design primers!")
+                        if selected_categories:
+                            # Store selection in session state
+                            st.session_state.selected_gene_categories = selected_categories
                             
-                            if st.button("🎯 Design Gene-Targeted Primers", type="primary", use_container_width=True, key="gene_design_btn"):
-                                st.write("🔘 Button clicked!")
-                                # Prevent multiple simultaneous executions
-                                if not st.session_state.get('processing_gene_design', False):
-                                    st.write("🚀 Starting primer design...")
-                                    st.session_state.processing_gene_design = True
-                                    try:
-                                        perform_gene_targeted_design(organism_name, email, api_key, max_sequences, custom_params, enable_t7_dsrna, optimal_dsrna_length, check_transcription_efficiency)
-                                    finally:
-                                        st.session_state.processing_gene_design = False
-                                else:
-                                    st.info("⏳ Primer design is already in progress...")
+                            # Show selected genes
+                            st.write("**Selected Gene Targets:**")
+                            for category in selected_categories:
+                                st.write(f"**{category}:**")
+                                for gene in organism_targets['gene_targets'][category]:
+                                    st.write(f"  • {gene}")
+                            
+                            # Design button
+                            if st.button("🎯 Design Gene-Targeted Primers", type="primary", key="gene_design_final"):
+                                # Set up gene target info for design
+                                st.session_state.selected_gene_targets = {
+                                    'organism_info': organism_targets,
+                                    'selected_categories': selected_categories,
+                                    'selected_genes': [f"{cat}: {gene}" for cat in selected_categories 
+                                                     for gene in organism_targets['gene_targets'][cat]]
+                                }
+                                
+                                # Call the design function
+                                perform_gene_targeted_design(
+                                    organism_name, email, api_key, max_sequences, 
+                                    custom_params, enable_t7_dsrna, 
+                                    optimal_dsrna_length, check_transcription_efficiency
+                                )
                         else:
-                            st.info("⚠️ Please select gene targets above to enable primer design.")
-                            st.button("🎯 Design Gene-Targeted Primers", disabled=True, help="Select gene targets first", key="gene_design_btn_disabled")
-                    
-                    elif st.session_state.gene_targets_loaded:
-                        # No gene targets available, show fallback option
-                        st.info("📝 No specific gene targets available for this organism. Using standard design approach.")
-                        
-                        if st.button("🎯 Design Primers (Standard Fallback)", type="secondary", use_container_width=True, key="gene_fallback_btn"):
-                            st.session_state.processing_gene_design = True
-                            # Use simplified standard design
-                            with st.spinner(f"Designing primers for {organism_name}..."):
-                                try:
-                                    ncbi = NCBIConnector(email, api_key)
-                                    designer = PrimerDesigner()
-                                    
-                                    search_query = f'"{organism_name}"[organism]'
-                                    seq_ids = ncbi.search_sequences(search_query, database="nucleotide", max_results=max_sequences)
-                                    
-                                    if seq_ids:
-                                        st.success(f"Found {len(seq_ids)} sequences!")
-                                        seq_id = seq_ids[0]
-                                        sequence = ncbi.fetch_sequence(seq_id)
-                                        seq_info = ncbi.fetch_sequence_info(seq_id)
-                                        
-                                        if sequence:
-                                            clean_sequence = re.sub(r'[^ATGCatgc]', '', sequence.upper())
-                                            if len(clean_sequence) < 50:
-                                                st.error("Sequence too short for primer design")
-                                            else:
-                                                if len(clean_sequence) > 100000:
-                                                    st.warning(f"Large sequence ({len(clean_sequence):,} bp). Using first 100kb.")
-                                                    clean_sequence = clean_sequence[:100000]
-                                                
-                                                st.session_state.current_sequence = clean_sequence
-                                                st.session_state.sequence_info = seq_info or {
-                                                    "id": seq_id,
-                                                    "description": f"Sequence {seq_id}",
-                                                    "length": len(clean_sequence),
-                                                    "organism": organism_name,
-                                                    "design_mode": "gene_targeted_fallback"
-                                                }
-                                                
-                                                primers = designer.design_primers(
-                                                    clean_sequence, 
-                                                    custom_params=custom_params,
-                                                    add_t7_promoter=enable_t7_dsrna,
-                                                    gene_target="Standard Design (Fallback)"
-                                                )
-                                                st.session_state.primers_designed = primers
-                                                
-                                                if enable_t7_dsrna:
-                                                    st.session_state.t7_dsrna_enabled = True
-                                                    st.session_state.t7_settings = {
-                                                        'optimal_length': optimal_dsrna_length,
-                                                        'check_efficiency': check_transcription_efficiency
-                                                    }
-                                                else:
-                                                    st.session_state.t7_dsrna_enabled = False
-                                                
-                                                if primers:
-                                                    st.success(f"✅ Successfully designed {len(primers)} primer pairs!")
-                                                    st.info("📊 Go to Results tab to view detailed analysis!")
-                                                else:
-                                                    st.warning("No suitable primers found. Try adjusting parameters.")
-                                        else:
-                                            st.error("Failed to fetch sequence")
-                                    else:
-                                        st.warning(f"No sequences found for {organism_name}")
-                                except Exception as e:
-                                    st.error(f"Error: {e}")
-                                finally:
-                                    st.session_state.processing_gene_design = False
-                    else:
-                        # Still loading or no organism entered
-                        if not organism_name:
-                            st.info("👆 Enter an organism name above to see available gene targets.")
-                        else:
-                            st.info("Loading gene targets...")
+                            st.info("Select at least one gene category to proceed.")
                 else:
-                    # Missing email or organism name
                     if not email:
-                        st.error("❌ Email required for gene target search")
+                        st.error("Email required for gene target search")
                     if not organism_name:
-                        st.info("👆 Enter an organism name above to see available gene targets.")
-            
-            # Debug section (remove after fixing)
-            if gene_targets_workflow:
-                with st.expander("🔍 Debug Gene Targets", expanded=False):
-                    st.write(f"Organism name: {organism_name}")
-                    st.write(f"Email provided: {bool(email)}")
-                    st.write(f"Gene targets loaded: {st.session_state.get('gene_targets_loaded', False)}")
-                    st.write(f"Current targets available: {st.session_state.get('current_organism_targets') is not None}")
-                    st.write(f"Selected gene targets: {'selected_gene_targets' in st.session_state}")
-                    st.write(f"Processing: {st.session_state.get('processing_gene_design', False)}")
-                    
-                    # Debug multiselect state
-                    if organism_name and st.session_state.get('current_organism_targets'):
-                        organism_key = f"gene_categories_{st.session_state.current_organism_targets['organism']}"
-                        selected_cats = st.session_state.get(organism_key, [])
-                        st.write(f"Organism key: {organism_key}")
-                        st.write(f"Selected categories: {selected_cats}")
-                        st.write(f"Has selections: {selected_cats and len(selected_cats) > 0}")
+                        st.info("Enter an organism name above to search for gene targets.")
             
             # ==========================================
             # WORKFLOW 2: CONSERVATION-BASED DESIGN  
