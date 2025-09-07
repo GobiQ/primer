@@ -3282,15 +3282,14 @@ def main():
                 "Choose your primer design approach:",
                 [
                     "🎯 Gene-Targeted Design (Recommended for specific genes)",
-                    "🧬 Conservation-Based Design (Recommended for robust primers)",
                     "⚡ Standard Design (Single sequence, fastest)"
                 ],
-                help="Select based on your research goals: specific gene detection vs. broad applicability vs. speed"
+                help="Select based on your research goals: specific gene detection vs. speed"
             )
             
             # Initialize workflow variables
             gene_targets_workflow = "🎯 Gene-Targeted Design" in workflow_choice
-            conservation_workflow = "🧬 Conservation-Based Design" in workflow_choice
+            conservation_workflow = False  # Conservation workflow removed
             standard_workflow = "⚡ Standard Design" in workflow_choice
             
             # ==========================================
@@ -3299,18 +3298,6 @@ def main():
             if gene_targets_workflow:
                 st.info("🎯 **Gene-Targeted Design Mode**\nDesign primers for specific genes with known biological functions.")
                 
-                suggestions = get_organism_suggestions_with_gene_targets()
-                st.write("**Available organisms with gene targets:**")
-                for category, subcategories in suggestions.items():
-                    st.write(f"**{category}:**")
-                    for subcategory, organisms in subcategories.items():
-                        st.write(f"  {subcategory}:")
-                        for item in organisms[:3]:  # Show first 3 organisms per subcategory
-                            if len(item) == 3:
-                                common_name, scientific_name, gene_targets = item
-                                st.write(f"    - {common_name} ({scientific_name})")
-                            else:
-                                st.write(f"    - {item}")
                 
                 if organism_name and email:
                     # Simple gene target loading
