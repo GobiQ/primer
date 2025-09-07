@@ -578,8 +578,9 @@ def display_gene_targets_interface(organism_targets):
                 key=f"gene_category_selector_{organism_targets['organism']}"
             )
             
-            # Update organism-specific session state
-            st.session_state[organism_key] = selected_categories
+            # Update organism-specific session state only if selection changed
+            if selected_categories != st.session_state.get(organism_key, []):
+                st.session_state[organism_key] = selected_categories
             
             if selected_categories:
                 # Display selection summary
@@ -606,7 +607,7 @@ def display_gene_targets_interface(organism_targets):
                         st.write(f"*{get_gene_use_recommendation(category)}*")
                         st.write("")
                 
-                # Store in session state
+                # Store in session state - always update when selections change
                 st.session_state.selected_gene_targets = {
                     'organism_info': organism_targets,
                     'selected_categories': selected_categories,
@@ -615,6 +616,10 @@ def display_gene_targets_interface(organism_targets):
                 }
                 
                 return True
+            else:
+                # Clear session state when no categories are selected
+                if 'selected_gene_targets' in st.session_state:
+                    del st.session_state.selected_gene_targets
     
     return False
 
@@ -2642,8 +2647,10 @@ def main():
                         organism_key = f"gene_categories_{organism_targets['organism']}"
                         selected_categories = st.session_state.get(organism_key, [])
                         
-                        # Design button logic - simplified condition checking
-                        has_selections = selected_categories and len(selected_categories) > 0
+                        # Design button logic - check both session state and gene targets
+                        has_selections = (selected_categories and len(selected_categories) > 0 and 
+                                        'selected_gene_targets' in st.session_state and
+                                        st.session_state.selected_gene_targets.get('selected_categories'))
                         
                         if has_selections:
                             st.success("✅ Gene targets selected. Ready to design primers!")
