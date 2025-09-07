@@ -2786,6 +2786,10 @@ def perform_enhanced_specificity_testing(primers: List[PrimerPair], target_seque
                 for risk in result['risk_organisms']:
                     st.write(f"  • {risk['organism']}: {risk['amplification_risk']:.1%} risk")
         
+        # Store enhanced specificity results in session state
+        st.session_state.enhanced_specificity_results = specificity_results
+        st.session_state.specificity_target_organism = target_organism
+        
         return specificity_results
         
     except Exception as e:
@@ -2935,6 +2939,7 @@ def perform_conservation_based_design(organism_name, email, api_key, max_sequenc
             st.session_state.conserved_regions = conserved_regions
             st.session_state.conservation_sequences = sequences
             st.session_state.specificity_results = specificity_results
+            st.session_state.specificity_target_organism = organism_name
             
             # Store analysis metadata
             st.session_state.analysis_metadata = {
@@ -3089,61 +3094,62 @@ def perform_standard_design(organism_name, email, api_key, max_sequences, custom
                                         current_test += len(related_organisms)
                                         progress_bar.progress(min(current_test / total_tests, 1.0))
                             
-                            # Store specificity results
-                            st.session_state.specificity_results = specificity_results
-                            
-                            # Display specificity results
-                            if specificity_results:
-                                st.subheader("Specificity Testing Results")
+                # Store specificity results and target organism info
+                st.session_state.specificity_results = specificity_results
+                st.session_state.specificity_target_organism = organism_name
+                
+                # Display specificity results
+                if specificity_results:
+                    st.subheader("Specificity Testing Results")
+                    
+                    specificity_data = []
+                    for primer_name, results in specificity_results.items():
+                        for organism, result in results.items():
+                            if 'error' not in result:
+                                # Safely access result keys with defaults
+                                max_similarity = result.get('max_similarity', 0.0)
+                                is_specific = result.get('is_specific', False)
+                                sequences_tested = result.get('sequences_tested', 0)
                                 
-                                specificity_data = []
-                                for primer_name, results in specificity_results.items():
-                                    for organism, result in results.items():
-                                        if 'error' not in result:
-                                            # Safely access result keys with defaults
-                                            max_similarity = result.get('max_similarity', 0.0)
-                                            is_specific = result.get('is_specific', False)
-                                            sequences_tested = result.get('sequences_tested', 0)
-                                            
-                                            specificity_data.append({
-                                                'Primer Pair': primer_name,
-                                                'Test Organism': organism,
-                                                'Max Similarity': f"{max_similarity:.1%}",
-                                                'Specific': '✅ Yes' if is_specific else '❌ No',
-                                                'Sequences Tested': sequences_tested
-                                            })
-                                
-                                if specificity_data:
-                                    specificity_df = pd.DataFrame(specificity_data)
-                                    st.dataframe(specificity_df, use_container_width=True)
-                                    
-                                    # Summary statistics
-                                    total_tests = len(specificity_data)
-                                    specific_tests = sum(1 for row in specificity_data if row['Specific'] == '✅ Yes')
-                                    specificity_percentage = (specific_tests / total_tests) * 100 if total_tests > 0 else 0
-                                    
-                                    if specificity_percentage >= 80:
-                                        st.success(f"🎯 Excellent specificity: {specific_tests}/{total_tests} tests passed ({specificity_percentage:.0f}%)")
-                                    elif specificity_percentage >= 60:
-                                        st.info(f"🎯 Good specificity: {specific_tests}/{total_tests} tests passed ({specificity_percentage:.0f}%)")
-                                    else:
-                                        st.warning(f"⚠️ Moderate specificity: {specific_tests}/{total_tests} tests passed ({specificity_percentage:.0f}%)")
-                            
-                            preview_data = []
-                            for i, primer in enumerate(primers[:5]):
-                                preview_data.append({
-                                    'Pair': i + 1,
-                                    'Forward': primer.forward_seq[:30] + '...' if len(primer.forward_seq) > 30 else primer.forward_seq,
-                                    'Reverse': primer.reverse_seq[:30] + '...' if len(primer.reverse_seq) > 30 else primer.reverse_seq,
-                                    'Product Size': f"{primer.product_size} bp"
+                                specificity_data.append({
+                                    'Primer Pair': primer_name,
+                                    'Test Organism': organism,
+                                    'Max Similarity': f"{max_similarity:.1%}",
+                                    'Specific': '✅ Yes' if is_specific else '❌ No',
+                                    'Sequences Tested': sequences_tested
                                 })
-                            
-                            st.dataframe(pd.DataFrame(preview_data), use_container_width=True)
-                            st.info("📊 Go to other tabs to view detailed analysis with specificity results!")
+                    
+                    if specificity_data:
+                        specificity_df = pd.DataFrame(specificity_data)
+                        st.dataframe(specificity_df, use_container_width=True)
+                        
+                        # Summary statistics
+                        total_tests = len(specificity_data)
+                        specific_tests = sum(1 for row in specificity_data if row['Specific'] == '✅ Yes')
+                        specificity_percentage = (specific_tests / total_tests) * 100 if total_tests > 0 else 0
+                        
+                        if specificity_percentage >= 80:
+                            st.success(f"🎯 Excellent specificity: {specific_tests}/{total_tests} tests passed ({specificity_percentage:.0f}%)")
+                        elif specificity_percentage >= 60:
+                            st.info(f"🎯 Good specificity: {specific_tests}/{total_tests} tests passed ({specificity_percentage:.0f}%)")
+                        else:
+                            st.warning(f"⚠️ Moderate specificity: {specific_tests}/{total_tests} tests passed ({specificity_percentage:.0f}%)")
+                
+                preview_data = []
+                for i, primer in enumerate(primers[:5]):
+                    preview_data.append({
+                        'Pair': i + 1,
+                        'Forward': primer.forward_seq[:30] + '...' if len(primer.forward_seq) > 30 else primer.forward_seq,
+                        'Reverse': primer.reverse_seq[:30] + '...' if len(primer.reverse_seq) > 30 else primer.reverse_seq,
+                        'Product Size': f"{primer.product_size} bp"
+                    })
+                
+                st.dataframe(pd.DataFrame(preview_data), use_container_width=True)
+                st.info("📊 Go to other tabs to view detailed analysis with specificity results!")
                         else:
                             st.warning("No suitable primers found. Try adjusting parameters.")
-                else:
-                    st.error("Failed to fetch sequence")
+                    else:
+                        st.error("Failed to fetch sequence")
             else:
                 st.warning(f"No sequences found for {organism_name}")
                 
@@ -3775,9 +3781,55 @@ def main():
             conservation_df = pd.DataFrame(conservation_data)
             st.dataframe(conservation_df, use_container_width=True)
         
-        # Show specificity results if available
-        if hasattr(st.session_state, 'specificity_results') and st.session_state.specificity_results:
+        # Show enhanced specificity results if available
+        if hasattr(st.session_state, 'enhanced_specificity_results') and st.session_state.enhanced_specificity_results:
+            st.subheader("Enhanced Specificity Testing Results")
+            
+            # Show target organism exclusion information
+            target_organism = st.session_state.get('specificity_target_organism', 'Unknown')
+            if target_organism and target_organism != 'Unknown':
+                st.info(f"🎯 **Target Organism Excluded**: '{target_organism}' was excluded from specificity testing to avoid self-matches")
+            
+            enhanced_results = st.session_state.enhanced_specificity_results
+            
+            # Display results for each primer pair
+            for primer_name, primer_result in enhanced_results.items():
+                st.write(f"**{primer_name.replace('_', ' ').title()}**")
+                
+                if primer_result.get('risk_organisms'):
+                    st.warning(f"⚠️ **Risk Organisms Found**:")
+                    risk_data = []
+                    for risk in primer_result['risk_organisms']:
+                        risk_data.append({
+                            'Organism': risk['organism'],
+                            'Amplification Risk': f"{risk['amplification_risk']:.1%}",
+                            'Forward Risk': f"{risk['forward_risk']:.1%}",
+                            'Reverse Risk': f"{risk['reverse_risk']:.1%}"
+                        })
+                    
+                    if risk_data:
+                        risk_df = pd.DataFrame(risk_data)
+                        st.dataframe(risk_df, use_container_width=True)
+                else:
+                    st.success("✅ **No risk organisms detected** - primers show good specificity")
+                
+                # Overall specificity assessment
+                overall_specificity = primer_result.get('overall_specificity', True)
+                if overall_specificity:
+                    st.success("🎯 **Overall Assessment**: Primers are specific to target organism")
+                else:
+                    st.warning("⚠️ **Overall Assessment**: Primers may cross-react with other organisms")
+                
+                st.write("---")
+        
+        # Show legacy specificity results if available (fallback)
+        elif hasattr(st.session_state, 'specificity_results') and st.session_state.specificity_results:
             st.subheader("Specificity Testing Results")
+            
+            # Show target organism exclusion information if available
+            target_organism = st.session_state.get('specificity_target_organism', None)
+            if target_organism:
+                st.info(f"🎯 **Target Organism Excluded**: '{target_organism}' was excluded from specificity testing to avoid self-matches")
             
             specificity_results = st.session_state.specificity_results
             specificity_data = []
@@ -3924,6 +3976,11 @@ def main():
                         if 'target_sequence' in dsrna_props:
                             st.write("**Target Sequence (first 100 bp):**")
                             st.code(dsrna_props['target_sequence'], language="text")
+                        
+                        # siRNA Analysis within dsRNA
+                        st.subheader("siRNA Analysis within dsRNA")
+                        if st.checkbox("Show siRNA optimization analysis", key=f"sirna_analysis_{selected_primer}"):
+                            display_sirna_analysis(primer, st.session_state.current_sequence)
             else:
                 col1, col2 = st.columns(2)
                 
