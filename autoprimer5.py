@@ -600,10 +600,10 @@ def get_organism_suggestions_with_gene_targets_original():
                     "Cell wall degrading": ["PiCBEL1-15 (cellulose-binding elicitor lectin)", "PiGH12-1 (endoglucanase)", "PiPL1-20 (pectate lyases)", "PiXEG1 (xyloglucanase)", "PiPG1-5 (polygalacturonases)"],
                     "Pathogenicity factors": ["PiINF1 (infestin)", "PiNPP1 (necrosis-inducing protein)", "PiEPI1-10 (epidermis-specific)", "PiHAM34 (haustorial membrane)", "PiMCF1 (mycelium-cyst transition)"]
                 }),
-                ("Powdery mildew", "Erysiphe necator", {
+                ("Powdery mildew", "Golovinomyces ambrosiae", {
                     "Essential genes": ["ACT1", "TUB2", "EF1A", "RPB2", "ITS1-2"],
-                    "Pathogenicity": ["ENH1 (haustorium formation)", "ENC1 (conidiophore development)", "ENS1 (spore germination)", "ENP1 (penetration)", "ENA1 (appressorium formation)"],
-                    "Effectors": ["CSEP1-100 (candidate secreted effector proteins)", "ENE1-50 (E. necator effectors)", "AVR1-10 (avirulence candidates)", "HAU1-20 (haustorial expressed)"],
+                    "Pathogenicity": ["GAH1 (haustorium formation)", "GAC1 (conidiophore development)", "GAS1 (spore germination)", "GAP1 (penetration)", "GAA1 (appressorium formation)"],
+                    "Effectors": ["CSEP1-100 (candidate secreted effector proteins)", "GAE1-50 (G. ambrosiae effectors)", "AVR1-10 (avirulence candidates)", "HAU1-20 (haustorial expressed)"],
                     "Sterol biosynthesis": ["CYP51A1", "CYP51B1", "ERG1 (squalene epoxidase)", "ERG7 (lanosterol synthase)", "ERG11 (sterol 14α-demethylase)"]
                 }),
                 ("Rust disease", "Puccinia graminis", {
