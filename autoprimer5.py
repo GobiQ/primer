@@ -1565,315 +1565,305 @@ class PrimerDesigner:
         
         except Exception as e:
             return {'error': str(e)}
+    
+    def design_primers_with_complementarity(self, sequence: str, target_region: Optional[Tuple[int, int]] = None,
+                                          custom_params: Optional[Dict] = None, add_t7_promoter: bool = False, 
+                                          gene_target: str = "Standard Design") -> Tuple[List[PrimerPair], Dict]:
+        """Design primers and return both primers and raw Primer3 results"""
+        params = self.default_params.copy()
+        if custom_params:
+            params.update(custom_params)
+        
+        seq_args = {
+            'SEQUENCE_ID': 'target',
+            'SEQUENCE_TEMPLATE': sequence.upper()
+        }
+        
+        if target_region:
+            start, end = target_region
+            seq_args['SEQUENCE_TARGET'] = [start, end - start]
+        
+        try:
+            primer_results = primer3.bindings.designPrimers(seq_args, params)
+            primers = []
+            
+            num_pairs = primer_results.get('PRIMER_PAIR_NUM_RETURNED', 0)
+            
+            for i in range(num_pairs):
+                forward_seq = primer_results[f'PRIMER_LEFT_{i}_SEQUENCE']
+                reverse_seq = primer_results[f'PRIMER_RIGHT_{i}_SEQUENCE']
+                forward_start = primer_results[f'PRIMER_LEFT_{i}'][0]
+                reverse_start = primer_results[f'PRIMER_RIGHT_{i}'][0]
+                product_size = primer_results[f'PRIMER_PAIR_{i}_PRODUCT_SIZE']
+                penalty = primer_results[f'PRIMER_PAIR_{i}_PENALTY']
+                
+                if add_t7_promoter:
+                    forward_seq_t7 = self.t7_promoter + forward_seq
+                    reverse_seq_t7 = self.t7_promoter + reverse_seq
+                    
+                    forward_tm = Tm_NN(forward_seq)
+                    reverse_tm = Tm_NN(reverse_seq)
+                    
+                    primer_pair = PrimerPair(
+                        forward_seq=forward_seq_t7,
+                        reverse_seq=reverse_seq_t7,
+                        forward_tm=forward_tm,
+                        reverse_tm=reverse_tm,
+                        product_size=product_size,
+                        gc_content_f=self.calculate_gc_content(forward_seq),
+                        gc_content_r=self.calculate_gc_content(reverse_seq),
+                        forward_start=forward_start,
+                        reverse_start=reverse_start,
+                        penalty=penalty,
+                        gene_target=gene_target
+                    )
+                    
+                    primer_pair.core_forward_seq = forward_seq
+                    primer_pair.core_reverse_seq = reverse_seq
+                    primer_pair.has_t7_promoter = True
+                    primer_pair.t7_promoter_seq = self.t7_promoter
+                    
+                else:
+                    forward_tm = Tm_NN(forward_seq)
+                    reverse_tm = Tm_NN(reverse_seq)
+                    
+                    primer_pair = PrimerPair(
+                        forward_seq=forward_seq,
+                        reverse_seq=reverse_seq,
+                        forward_tm=forward_tm,
+                        reverse_tm=reverse_tm,
+                        product_size=product_size,
+                        gc_content_f=self.calculate_gc_content(forward_seq),
+                        gc_content_r=self.calculate_gc_content(reverse_seq),
+                        forward_start=forward_start,
+                        reverse_start=reverse_start,
+                        penalty=penalty,
+                        gene_target=gene_target
+                    )
+                    
+                    primer_pair.has_t7_promoter = False
+                
+                primers.append(primer_pair)
+            
+            return primers, primer_results
+            
+        except Exception as e:
+            st.error(f"Error in primer design: {e}")
+            return [], {}
 
 
-class PrimerComplementarityAnalyzer:
-    """Analyzes and visualizes primer complementarity using Primer3-style algorithms"""
+class Primer3ComplementarityAnalyzer:
+    """Extracts and visualizes complementarity data directly from Primer3 results"""
     
     def __init__(self):
-        self.complement_map = {'A': 'T', 'T': 'A', 'G': 'C', 'C': 'G'}
-        self.base_penalties = {'A': 2, 'T': 2, 'G': 4, 'C': 4}  # G-C pairs are stronger
+        self.primer3_results = None
     
-    def reverse_complement(self, sequence: str) -> str:
-        """Generate reverse complement of DNA sequence"""
-        return "".join(self.complement_map.get(base, base) for base in reversed(sequence.upper()))
+    def store_primer3_results(self, primer3_results):
+        """Store the raw Primer3 results for analysis"""
+        self.primer3_results = primer3_results
     
-    def find_self_complementarity(self, sequence: str, min_length: int = 4) -> List[Dict]:
-        """Find self-complementary regions (hairpins) in a primer"""
-        hairpins = []
-        seq_len = len(sequence)
+    def extract_complementarity_data(self, primer_index=0):
+        """Extract complementarity data for a specific primer pair from Primer3 results"""
+        if not self.primer3_results:
+            return None
         
-        # Check for self-complementarity at different positions
-        for i in range(seq_len - min_length):
-            for j in range(i + min_length, seq_len + 1):
-                region = sequence[i:j]
-                rev_comp = self.reverse_complement(region)
+        try:
+            # Extract Primer3 complementarity values
+            data = {
+                'forward_self_any': self.primer3_results.get(f'PRIMER_LEFT_{primer_index}_SELF_ANY_TH', 0.0),
+                'forward_self_end': self.primer3_results.get(f'PRIMER_LEFT_{primer_index}_SELF_END_TH', 0.0),
+                'reverse_self_any': self.primer3_results.get(f'PRIMER_RIGHT_{primer_index}_SELF_ANY_TH', 0.0),
+                'reverse_self_end': self.primer3_results.get(f'PRIMER_RIGHT_{primer_index}_SELF_END_TH', 0.0),
+                'pair_compl_any': self.primer3_results.get(f'PRIMER_PAIR_{primer_index}_COMPL_ANY_TH', 0.0),
+                'pair_compl_end': self.primer3_results.get(f'PRIMER_PAIR_{primer_index}_COMPL_END_TH', 0.0),
                 
-                # Check if reverse complement exists elsewhere in the sequence
-                for k in range(seq_len - len(region) + 1):
-                    if k == i:  # Skip the same region
-                        continue
-                    
-                    test_region = sequence[k:k + len(region)]
-                    if test_region == rev_comp:
-                        # Calculate penalty score
-                        score = self._calculate_hairpin_score(region, i, k, seq_len)
-                        hairpins.append({
-                            'type': 'hairpin',
-                            'region1_start': i,
-                            'region1_end': j - 1,
-                            'region2_start': k,
-                            'region2_end': k + len(region) - 1,
-                            'sequence': region,
-                            'score': score,
-                            'length': len(region)
-                        })
-        
-        return sorted(hairpins, key=lambda x: x['score'], reverse=True)
-    
-    def find_primer_dimers(self, primer1: str, primer2: str, min_length: int = 4) -> List[Dict]:
-        """Find primer-dimer interactions between two primers"""
-        dimers = []
-        
-        # Check primer1 3' end against primer2 3' end (most problematic)
-        dimers.extend(self._check_primer_interaction(primer1, primer2, '3-3'))
-        
-        # Check primer1 3' end against primer2 5' end
-        dimers.extend(self._check_primer_interaction(primer1, primer2, '3-5'))
-        
-        # Check primer1 5' end against primer2 3' end
-        dimers.extend(self._check_primer_interaction(primer1, primer2, '5-3'))
-        
-        return sorted(dimers, key=lambda x: x['score'], reverse=True)
-    
-    def _check_primer_interaction(self, primer1: str, primer2: str, interaction_type: str) -> List[Dict]:
-        """Check specific primer interaction type"""
-        dimers = []
-        min_length = 4
-        
-        if interaction_type == '3-3':
-            # 3' end of primer1 vs 3' end of primer2
-            for i in range(min_length, min(len(primer1), len(primer2)) + 1):
-                region1 = primer1[-i:]
-                region2 = primer2[-i:]
-                rev_comp2 = self.reverse_complement(region2)
+                # Also get the non-thermodynamic scores (if available)
+                'forward_self_any_score': self.primer3_results.get(f'PRIMER_LEFT_{primer_index}_SELF_ANY', 0.0),
+                'forward_self_end_score': self.primer3_results.get(f'PRIMER_LEFT_{primer_index}_SELF_END', 0.0),
+                'reverse_self_any_score': self.primer3_results.get(f'PRIMER_RIGHT_{primer_index}_SELF_ANY', 0.0),
+                'reverse_self_end_score': self.primer3_results.get(f'PRIMER_RIGHT_{primer_index}_SELF_END', 0.0),
+                'pair_compl_any_score': self.primer3_results.get(f'PRIMER_PAIR_{primer_index}_COMPL_ANY', 0.0),
+                'pair_compl_end_score': self.primer3_results.get(f'PRIMER_PAIR_{primer_index}_COMPL_END', 0.0),
                 
-                if region1 == rev_comp2:
-                    score = self._calculate_dimer_score(region1, len(primer1) - i, len(primer2) - i, interaction_type)
-                    dimers.append({
-                        'type': 'primer_dimer',
-                        'interaction': '3-3',
-                        'region1_start': len(primer1) - i,
-                        'region1_end': len(primer1) - 1,
-                        'region2_start': len(primer2) - i,
-                        'region2_end': len(primer2) - 1,
-                        'sequence': region1,
-                        'score': score,
-                        'length': i
-                    })
-        
-        elif interaction_type == '3-5':
-            # 3' end of primer1 vs 5' end of primer2
-            for i in range(min_length, min(len(primer1), len(primer2)) + 1):
-                region1 = primer1[-i:]
-                region2 = primer2[:i]
-                rev_comp2 = self.reverse_complement(region2)
-                
-                if region1 == rev_comp2:
-                    score = self._calculate_dimer_score(region1, len(primer1) - i, 0, interaction_type)
-                    dimers.append({
-                        'type': 'primer_dimer',
-                        'interaction': '3-5',
-                        'region1_start': len(primer1) - i,
-                        'region1_end': len(primer1) - 1,
-                        'region2_start': 0,
-                        'region2_end': i - 1,
-                        'sequence': region1,
-                        'score': score,
-                        'length': i
-                    })
-        
-        elif interaction_type == '5-3':
-            # 5' end of primer1 vs 3' end of primer2
-            for i in range(min_length, min(len(primer1), len(primer2)) + 1):
-                region1 = primer1[:i]
-                region2 = primer2[-i:]
-                rev_comp2 = self.reverse_complement(region2)
-                
-                if region1 == rev_comp2:
-                    score = self._calculate_dimer_score(region1, 0, len(primer2) - i, interaction_type)
-                    dimers.append({
-                        'type': 'primer_dimer',
-                        'interaction': '5-3',
-                        'region1_start': 0,
-                        'region1_end': i - 1,
-                        'region2_start': len(primer2) - i,
-                        'region2_end': len(primer2) - 1,
-                        'sequence': region1,
-                        'score': score,
-                        'length': i
-                    })
-        
-        return dimers
+                # Get penalty score
+                'penalty': self.primer3_results.get(f'PRIMER_PAIR_{primer_index}_PENALTY', 0.0)
+            }
+            
+            return data
+        except Exception as e:
+            st.error(f"Error extracting Primer3 complementarity data: {e}")
+            return None
     
-    def _calculate_hairpin_score(self, sequence: str, pos1: int, pos2: int, primer_length: int) -> float:
-        """Calculate penalty score for hairpin formation"""
-        score = 0
+    def create_complementarity_summary_chart(self, primers_data):
+        """Create summary chart of complementarity across all primers"""
+        if not primers_data:
+            return None
         
-        # Base pairing penalties
-        for base in sequence:
-            score += self.base_penalties.get(base, 2)
+        # Prepare data for plotting
+        primer_numbers = []
+        forward_self_any = []
+        forward_self_end = []
+        reverse_self_any = []
+        reverse_self_end = []
+        pair_compl_any = []
+        pair_compl_end = []
         
-        # Position penalties (3' end is more problematic)
-        if pos1 > primer_length * 0.7 or pos2 > primer_length * 0.7:
-            score *= 1.5
-        
-        # Length penalty
-        score *= len(sequence)
-        
-        return score
-    
-    def _calculate_dimer_score(self, sequence: str, pos1: int, pos2: int, interaction_type: str) -> float:
-        """Calculate penalty score for primer dimer formation"""
-        score = 0
-        
-        # Base pairing penalties
-        for base in sequence:
-            score += self.base_penalties.get(base, 2)
-        
-        # Interaction type penalties (3-3 is most problematic)
-        if interaction_type == '3-3':
-            score *= 2.0
-        elif interaction_type in ['3-5', '5-3']:
-            score *= 1.5
-        
-        # Length penalty
-        score *= len(sequence)
-        
-        return score
-    
-    def create_complementarity_visualization(self, primer1: str, primer2: str, 
-                                           hairpins1: List[Dict], hairpins2: List[Dict], 
-                                           dimers: List[Dict]) -> go.Figure:
-        """Create interactive visualization of complementarity issues"""
+        for i, data in enumerate(primers_data):
+            if data:
+                primer_numbers.append(i + 1)
+                forward_self_any.append(data['forward_self_any'])
+                forward_self_end.append(data['forward_self_end'])
+                reverse_self_any.append(data['reverse_self_any'])
+                reverse_self_end.append(data['reverse_self_end'])
+                pair_compl_any.append(data['pair_compl_any'])
+                pair_compl_end.append(data['pair_compl_end'])
         
         # Create subplots
         fig = make_subplots(
-            rows=3, cols=1,
-            subplot_titles=['Forward Primer Self-Complementarity', 
-                          'Reverse Primer Self-Complementarity',
-                          'Primer-Primer Interactions'],
-            vertical_spacing=0.1,
-            row_heights=[0.3, 0.3, 0.4]
+            rows=2, cols=2,
+            subplot_titles=(
+                'Self-Complementarity (Any Position)', 
+                'Self-Complementarity (3\' End)',
+                'Primer-Primer Complementarity (Any)', 
+                'Primer-Primer Complementarity (3\' End)'
+            ),
+            specs=[[{"secondary_y": False}, {"secondary_y": False}],
+                   [{"secondary_y": False}, {"secondary_y": False}]]
         )
         
-        # Plot forward primer hairpins
-        self._plot_hairpins(fig, primer1, hairpins1, row=1, color='blue')
+        # Self-Any
+        fig.add_trace(
+            go.Bar(x=primer_numbers, y=forward_self_any, name='Forward', 
+                   marker_color='lightblue', opacity=0.7),
+            row=1, col=1
+        )
+        fig.add_trace(
+            go.Bar(x=primer_numbers, y=reverse_self_any, name='Reverse', 
+                   marker_color='lightcoral', opacity=0.7),
+            row=1, col=1
+        )
         
-        # Plot reverse primer hairpins
-        self._plot_hairpins(fig, primer2, hairpins2, row=2, color='red')
+        # Self-End
+        fig.add_trace(
+            go.Bar(x=primer_numbers, y=forward_self_end, name='Forward', 
+                   marker_color='blue', opacity=0.7, showlegend=False),
+            row=1, col=2
+        )
+        fig.add_trace(
+            go.Bar(x=primer_numbers, y=reverse_self_end, name='Reverse', 
+                   marker_color='red', opacity=0.7, showlegend=False),
+            row=1, col=2
+        )
         
-        # Plot primer dimers
-        self._plot_dimers(fig, primer1, primer2, dimers, row=3)
+        # Pair-Any
+        fig.add_trace(
+            go.Bar(x=primer_numbers, y=pair_compl_any, name='Pair Compl Any', 
+                   marker_color='green', opacity=0.7),
+            row=2, col=1
+        )
         
-        # Update layout
+        # Pair-End
+        fig.add_trace(
+            go.Bar(x=primer_numbers, y=pair_compl_end, name='Pair Compl End', 
+                   marker_color='darkgreen', opacity=0.7, showlegend=False),
+            row=2, col=2
+        )
+        
+        # Add threshold lines (typical Primer3 defaults)
+        for row in [1, 2]:
+            for col in [1, 2]:
+                fig.add_hline(y=47.0, line_dash="dash", line_color="red", 
+                             annotation_text="Typical threshold (47°C)", row=row, col=col)
+        
         fig.update_layout(
-            height=800,
-            showlegend=False,
-            title="Primer Complementarity Analysis",
-            title_x=0.5
+            height=600,
+            title_text="Primer3 Complementarity Analysis (ΔG in °C)",
+            showlegend=True
         )
+        
+        # Update y-axes labels
+        fig.update_yaxes(title_text="ΔG (°C)", row=1, col=1)
+        fig.update_yaxes(title_text="ΔG (°C)", row=1, col=2)
+        fig.update_yaxes(title_text="ΔG (°C)", row=2, col=1)
+        fig.update_yaxes(title_text="ΔG (°C)", row=2, col=2)
+        
+        # Update x-axes labels
+        fig.update_xaxes(title_text="Primer Pair", row=2, col=1)
+        fig.update_xaxes(title_text="Primer Pair", row=2, col=2)
         
         return fig
     
-    def _plot_hairpins(self, fig: go.Figure, primer: str, hairpins: List[Dict], 
-                      row: int, color: str):
-        """Plot hairpin structures for a single primer"""
+    def create_detailed_analysis_table(self, data, primer_index):
+        """Create detailed table for a specific primer pair"""
+        if not data:
+            return None
         
-        # Create sequence positions
-        positions = list(range(len(primer)))
+        analysis_data = [
+            {
+                'Analysis Type': 'Forward Self-Any (Hairpins)',
+                'ΔG (°C)': f"{data['forward_self_any']:.1f}",
+                'Score': f"{data['forward_self_any_score']:.1f}",
+                'Risk Level': self._assess_risk(data['forward_self_any'], 'self'),
+                'Description': 'Internal complementarity in forward primer'
+            },
+            {
+                'Analysis Type': 'Forward Self-End (3\' Dimers)',
+                'ΔG (°C)': f"{data['forward_self_end']:.1f}",
+                'Score': f"{data['forward_self_end_score']:.1f}",
+                'Risk Level': self._assess_risk(data['forward_self_end'], 'end'),
+                'Description': '3\' end complementarity in forward primer'
+            },
+            {
+                'Analysis Type': 'Reverse Self-Any (Hairpins)',
+                'ΔG (°C)': f"{data['reverse_self_any']:.1f}",
+                'Score': f"{data['reverse_self_any_score']:.1f}",
+                'Risk Level': self._assess_risk(data['reverse_self_any'], 'self'),
+                'Description': 'Internal complementarity in reverse primer'
+            },
+            {
+                'Analysis Type': 'Reverse Self-End (3\' Dimers)',
+                'ΔG (°C)': f"{data['reverse_self_end']:.1f}",
+                'Score': f"{data['reverse_self_end_score']:.1f}",
+                'Risk Level': self._assess_risk(data['reverse_self_end'], 'end'),
+                'Description': '3\' end complementarity in reverse primer'
+            },
+            {
+                'Analysis Type': 'Primer-Primer Any',
+                'ΔG (°C)': f"{data['pair_compl_any']:.1f}",
+                'Score': f"{data['pair_compl_any_score']:.1f}",
+                'Risk Level': self._assess_risk(data['pair_compl_any'], 'pair'),
+                'Description': 'Complementarity between primer pair'
+            },
+            {
+                'Analysis Type': 'Primer-Primer End',
+                'ΔG (°C)': f"{data['pair_compl_end']:.1f}",
+                'Score': f"{data['pair_compl_end_score']:.1f}",
+                'Risk Level': self._assess_risk(data['pair_compl_end'], 'pair_end'),
+                'Description': '3\' end complementarity between primers'
+            }
+        ]
         
-        # Add sequence text
-        fig.add_trace(
-            go.Scatter(
-                x=positions,
-                y=[0] * len(primer),
-                mode='text',
-                text=list(primer),
-                textfont=dict(size=12, color=color),
-                showlegend=False
-            ),
-            row=row, col=1
-        )
-        
-        # Add hairpin connections
-        for hairpin in hairpins[:3]:  # Show top 3 hairpins
-            start1, end1 = hairpin['region1_start'], hairpin['region1_end']
-            start2, end2 = hairpin['region2_start'], hairpin['region2_end']
-            
-            # Draw hairpin loop
-            fig.add_trace(
-                go.Scatter(
-                    x=[start1, end1, end2, start2, start1],
-                    y=[0.2, 0.2, 0.2, 0.2, 0.2],
-                    mode='lines',
-                    line=dict(color=color, width=2),
-                    showlegend=False
-                ),
-                row=row, col=1
-            )
-            
-            # Add score annotation
-            mid_x = (start1 + end1 + start2 + end2) / 4
-            fig.add_annotation(
-                x=mid_x,
-                y=0.3,
-                text=f"Score: {hairpin['score']:.1f}",
-                showarrow=False,
-                font=dict(size=10, color=color),
-                row=row, col=1
-            )
+        return pd.DataFrame(analysis_data)
     
-    def _plot_dimers(self, fig: go.Figure, primer1: str, primer2: str, 
-                    dimers: List[Dict], row: int):
-        """Plot primer dimer interactions"""
-        
-        # Create two parallel lines for the primers
-        y1, y2 = 0.2, -0.2
-        
-        # Add primer sequences
-        fig.add_trace(
-            go.Scatter(
-                x=list(range(len(primer1))),
-                y=[y1] * len(primer1),
-                mode='text',
-                text=list(primer1),
-                textfont=dict(size=12, color='blue'),
-                showlegend=False
-            ),
-            row=row, col=1
-        )
-        
-        fig.add_trace(
-            go.Scatter(
-                x=list(range(len(primer2))),
-                y=[y2] * len(primer2),
-                mode='text',
-                text=list(primer2),
-                textfont=dict(size=12, color='red'),
-                showlegend=False
-            ),
-            row=row, col=1
-        )
-        
-        # Add dimer connections
-        for dimer in dimers[:3]:  # Show top 3 dimers
-            if dimer['interaction'] == '3-3':
-                x1 = dimer['region1_start']
-                x2 = dimer['region2_start']
-                
-                # Draw connection line
-                fig.add_trace(
-                    go.Scatter(
-                        x=[x1, x2],
-                        y=[y1, y2],
-                        mode='lines',
-                        line=dict(color='orange', width=3),
-                        showlegend=False
-                    ),
-                    row=row, col=1
-                )
-                
-                # Add score annotation
-                mid_x = (x1 + x2) / 2
-                fig.add_annotation(
-                    x=mid_x,
-                    y=0,
-                    text=f"3'-3': {dimer['score']:.1f}",
-                    showarrow=False,
-                    font=dict(size=10, color='orange'),
-                    row=row, col=1
-                )
+    def _assess_risk(self, delta_g, analysis_type):
+        """Assess risk level based on ΔG values and analysis type"""
+        # These thresholds are based on typical Primer3 defaults
+        if analysis_type == 'end' or analysis_type == 'pair_end':
+            # 3' end complementarity is more critical
+            if delta_g > 47.0:
+                return "🔴 High Risk"
+            elif delta_g > 35.0:
+                return "🟡 Medium Risk"
+            else:
+                return "🟢 Low Risk"
+        else:
+            # General complementarity
+            if delta_g > 47.0:
+                return "🔴 High Risk"
+            elif delta_g > 40.0:
+                return "🟡 Medium Risk"
+            else:
+                return "🟢 Low Risk"
 
 
 class EnhancedSpecificityAnalyzer:
@@ -2650,95 +2640,136 @@ def create_sequence_diagram(sequence: str, primers: List[PrimerPair], selected_p
         st.error(f"Error creating sequence diagram: {e}")
         return None
 
-def display_complementarity_analysis(primer_pair, primer_index: int):
-    """Display complementarity analysis for a specific primer pair"""
-    try:
-        analyzer = PrimerComplementarityAnalyzer()
-        
-        # Get sequences (handle T7 promoters)
-        if hasattr(primer_pair, 'has_t7_promoter') and primer_pair.has_t7_promoter:
-            forward_seq = primer_pair.core_forward_seq
-            reverse_seq = primer_pair.core_reverse_seq
+def display_primer3_complementarity_analysis(primer_pair, selected_primer_index, primer3_results=None):
+    """Display complementarity analysis using Primer3's actual calculations"""
+    st.subheader("Primer3 Complementarity Analysis")
+    st.info("Analysis using Primer3's internal complementarity calculations and thermodynamic parameters")
+    
+    if not primer3_results:
+        st.warning("Primer3 results not available for complementarity analysis")
+        return
+    
+    analyzer = Primer3ComplementarityAnalyzer()
+    analyzer.store_primer3_results(primer3_results)
+    
+    # Extract data for selected primer
+    comp_data = analyzer.extract_complementarity_data(selected_primer_index)
+    
+    if not comp_data:
+        st.error("Could not extract complementarity data for this primer pair")
+        return
+    
+    # Display overview metrics
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.metric(
+            "Forward Self-Any", 
+            f"{comp_data['forward_self_any']:.1f}°C",
+            help="Maximum ΔG for internal complementarity in forward primer"
+        )
+        st.metric(
+            "Forward Self-End", 
+            f"{comp_data['forward_self_end']:.1f}°C",
+            help="ΔG for 3' end complementarity in forward primer"
+        )
+    
+    with col2:
+        st.metric(
+            "Reverse Self-Any", 
+            f"{comp_data['reverse_self_any']:.1f}°C",
+            help="Maximum ΔG for internal complementarity in reverse primer"
+        )
+        st.metric(
+            "Reverse Self-End", 
+            f"{comp_data['reverse_self_end']:.1f}°C",
+            help="ΔG for 3' end complementarity in reverse primer"
+        )
+    
+    with col3:
+        st.metric(
+            "Primer-Primer Any", 
+            f"{comp_data['pair_compl_any']:.1f}°C",
+            help="Maximum ΔG for complementarity between primers"
+        )
+        st.metric(
+            "Primer-Primer End", 
+            f"{comp_data['pair_compl_end']:.1f}°C",
+            help="ΔG for 3' end complementarity between primers"
+        )
+    
+    # Risk assessment
+    st.subheader("Risk Assessment")
+    
+    max_self_any = max(comp_data['forward_self_any'], comp_data['reverse_self_any'])
+    max_self_end = max(comp_data['forward_self_end'], comp_data['reverse_self_end'])
+    max_pair = max(comp_data['pair_compl_any'], comp_data['pair_compl_end'])
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        if max_self_any > 47.0:
+            st.error(f"🔴 Self-Hairpins: High Risk ({max_self_any:.1f}°C)")
+        elif max_self_any > 40.0:
+            st.warning(f"🟡 Self-Hairpins: Medium Risk ({max_self_any:.1f}°C)")
         else:
-            forward_seq = primer_pair.forward_seq
-            reverse_seq = primer_pair.reverse_seq
-        
-        # Analyze complementarity
-        forward_hairpins = analyzer.find_self_complementarity(forward_seq)
-        reverse_hairpins = analyzer.find_self_complementarity(reverse_seq)
-        dimers = analyzer.find_primer_dimers(forward_seq, reverse_seq)
-        
-        # Display summary
-        st.subheader(f"Complementarity Analysis - Primer Pair {primer_index + 1}")
-        
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            forward_risk = max([h['score'] for h in forward_hairpins], default=0)
-            if forward_risk > 10:
-                st.error(f"🔴 Forward Risk: {forward_risk:.1f}")
-            elif forward_risk > 5:
-                st.warning(f"🟡 Forward Risk: {forward_risk:.1f}")
-            else:
-                st.success(f"🟢 Forward Risk: {forward_risk:.1f}")
-        
-        with col2:
-            reverse_risk = max([h['score'] for h in reverse_hairpins], default=0)
-            if reverse_risk > 10:
-                st.error(f"🔴 Reverse Risk: {reverse_risk:.1f}")
-            elif reverse_risk > 5:
-                st.warning(f"🟡 Reverse Risk: {reverse_risk:.1f}")
-            else:
-                st.success(f"🟢 Reverse Risk: {reverse_risk:.1f}")
-        
-        with col3:
-            dimer_risk = max([d['score'] for d in dimers], default=0)
-            if dimer_risk > 10:
-                st.error(f"🔴 Dimer Risk: {dimer_risk:.1f}")
-            elif dimer_risk > 5:
-                st.warning(f"🟡 Dimer Risk: {dimer_risk:.1f}")
-            else:
-                st.success(f"🟢 Dimer Risk: {dimer_risk:.1f}")
-        
-        # Display detailed results
-        if forward_hairpins or reverse_hairpins or dimers:
-            st.subheader("Detailed Analysis")
-            
-            # Forward primer hairpins
-            if forward_hairpins:
-                st.write("**Forward Primer Self-Complementarity:**")
-                for i, hairpin in enumerate(forward_hairpins[:3]):  # Show top 3
-                    st.write(f"- Hairpin {i+1}: {hairpin['sequence']} (Score: {hairpin['score']:.1f})")
-                    st.write(f"  Positions: {hairpin['region1_start']}-{hairpin['region1_end']} ↔ {hairpin['region2_start']}-{hairpin['region2_end']}")
-            
-            # Reverse primer hairpins
-            if reverse_hairpins:
-                st.write("**Reverse Primer Self-Complementarity:**")
-                for i, hairpin in enumerate(reverse_hairpins[:3]):  # Show top 3
-                    st.write(f"- Hairpin {i+1}: {hairpin['sequence']} (Score: {hairpin['score']:.1f})")
-                    st.write(f"  Positions: {hairpin['region1_start']}-{hairpin['region1_end']} ↔ {hairpin['region2_start']}-{hairpin['region2_end']}")
-            
-            # Primer dimers
-            if dimers:
-                st.write("**Primer-Primer Interactions:**")
-                for i, dimer in enumerate(dimers[:3]):  # Show top 3
-                    st.write(f"- Dimer {i+1}: {dimer['sequence']} (Score: {dimer['score']:.1f})")
-                    st.write(f"  Interaction: {dimer['interaction']}")
-                    st.write(f"  Forward: {dimer['region1_start']}-{dimer['region1_end']}, Reverse: {dimer['region2_start']}-{dimer['region2_end']}")
-            
-            # Create visualization
-            if forward_hairpins or reverse_hairpins or dimers:
-                st.subheader("Visualization")
-                fig = analyzer.create_complementarity_visualization(
-                    forward_seq, reverse_seq, forward_hairpins, reverse_hairpins, dimers
-                )
-                st.plotly_chart(fig, use_container_width=True)
-        
+            st.success(f"🟢 Self-Hairpins: Low Risk ({max_self_any:.1f}°C)")
+    
+    with col2:
+        if max_self_end > 47.0:
+            st.error(f"🔴 3' Self-Dimers: High Risk ({max_self_end:.1f}°C)")
+        elif max_self_end > 35.0:
+            st.warning(f"🟡 3' Self-Dimers: Medium Risk ({max_self_end:.1f}°C)")
         else:
-            st.success("✅ No significant complementarity issues detected!")
-            
-    except Exception as e:
-        st.error(f"Error in complementarity analysis: {e}")
+            st.success(f"🟢 3' Self-Dimers: Low Risk ({max_self_end:.1f}°C)")
+    
+    with col3:
+        if max_pair > 47.0:
+            st.error(f"🔴 Primer Dimers: High Risk ({max_pair:.1f}°C)")
+        elif max_pair > 40.0:
+            st.warning(f"🟡 Primer Dimers: Medium Risk ({max_pair:.1f}°C)")
+        else:
+            st.success(f"🟢 Primer Dimers: Low Risk ({max_pair:.1f}°C)")
+    
+    # Detailed analysis table
+    if st.checkbox("Show detailed Primer3 analysis", key=f"primer3_detail_{selected_primer_index}"):
+        detail_table = analyzer.create_detailed_analysis_table(comp_data, selected_primer_index)
+        if detail_table is not None:
+            st.dataframe(detail_table, use_container_width=True)
+    
+    # Overall assessment
+    overall_max = max(max_self_any, max_self_end, max_pair)
+    
+    if overall_max > 47.0:
+        st.error("🚫 **Overall Assessment: HIGH RISK** - Significant complementarity detected")
+        st.write("**Recommendation:** Consider using a different primer pair or adjusting design parameters")
+    elif overall_max > 40.0:
+        st.warning("⚠️ **Overall Assessment: MEDIUM RISK** - Some complementarity present")
+        st.write("**Recommendation:** Monitor for primer artifacts during PCR, consider optimization")
+    else:
+        st.success("✅ **Overall Assessment: LOW RISK** - Minimal complementarity detected")
+        st.write("**Recommendation:** Good primer pair for PCR applications")
+    
+    # Explanation of metrics
+    with st.expander("Understanding Primer3 Complementarity Metrics"):
+        st.markdown("""
+        **ΔG Values (°C):** Lower (more negative) values indicate stronger binding
+        
+        **Self-Any:** Checks for internal complementarity that could form hairpins anywhere in the primer
+        
+        **Self-End:** Specifically examines complementarity at the 3' end where DNA polymerase extends
+        
+        **Primer-Primer Any:** Complementarity between forward and reverse primers at any position
+        
+        **Primer-Primer End:** 3' end complementarity between primers (most critical for dimer formation)
+        
+        **Risk Thresholds:**
+        - 🟢 < 40°C: Low risk of artifacts
+        - 🟡 40-47°C: Medium risk, monitor carefully  
+        - 🔴 > 47°C: High risk, likely to cause PCR artifacts
+        
+        **Note:** These are the actual values calculated by Primer3 during primer design and directly contribute to the penalty scores you see.
+        """)
 
 def export_to_excel(primers: List[PrimerPair]) -> bytes:
     """Export primer results to Excel format"""
@@ -3004,12 +3035,13 @@ def perform_gene_targeted_design(organism_name, email, api_key, max_sequences, c
                     
                     # Design primers for fallback sequence
                     gene_target_name = "Gene-Targeted Design (Fallback)"
-                    primers = designer.design_primers(
+                    primers, primer3_results = designer.design_primers_with_complementarity(
                         clean_sequence, 
                         custom_params=custom_params,
                         add_t7_promoter=enable_t7_dsrna,
                         gene_target=gene_target_name
                     )
+                    st.session_state.primer3_results = primer3_results
                     
                     if not primers:
                         raise DesignError("No suitable primers found. Try adjusting parameters.")
@@ -3063,12 +3095,13 @@ def perform_gene_targeted_design(organism_name, email, api_key, max_sequences, c
                         st.info(f"Using first 10kb of {gene_name} sequence for primer design")
                     
                     # Design primers for this gene
-                    gene_primers = designer.design_primers(
+                    gene_primers, primer3_results = designer.design_primers_with_complementarity(
                         clean_sequence, 
                         custom_params=custom_params,
                         add_t7_promoter=enable_t7_dsrna,
                         gene_target=gene_target_name
                     )
+                    st.session_state.primer3_results = primer3_results
                     
                     if gene_primers:
                         st.success(f"✅ Designed {len(gene_primers)} primer pairs for {gene_name}")
@@ -3345,12 +3378,13 @@ def perform_standard_design(organism_name, email, api_key, max_sequences, custom
                         }
                         
                         st.write("Designing primers...")
-                        primers = designer.design_primers(
+                        primers, primer3_results = designer.design_primers_with_complementarity(
                             clean_sequence, 
                             custom_params=custom_params,
                             add_t7_promoter=enable_t7_dsrna,
                             gene_target="Standard Design"
                         )
+                        st.session_state.primer3_results = primer3_results
                         OptimizedSessionManager.store_primers_optimized(primers)
                         
                         if enable_t7_dsrna:
@@ -3861,12 +3895,13 @@ def main():
                                 "id": "user_sequence"
                             }
                             
-                            primers = designer.design_primers(
+                            primers, primer3_results = designer.design_primers_with_complementarity(
                                 clean_seq, 
                                 custom_params=custom_params,
                                 add_t7_promoter=enable_t7_dsrna,
                                 gene_target="User Input Sequence"
                             )
+                            st.session_state.primer3_results = primer3_results
                             OptimizedSessionManager.store_primers_optimized(primers)
                             
                             if enable_t7_dsrna:
@@ -4206,8 +4241,9 @@ def main():
         
         # Complementarity Analysis
         st.subheader("Primer Complementarity Analysis")
-        if st.checkbox("Show complementarity analysis", key=f"complementarity_{selected_primer}"):
-            display_complementarity_analysis(primer, selected_primer)
+        if st.checkbox("Show Primer3 complementarity analysis", key=f"complementarity_{selected_primer}"):
+            primer3_results = st.session_state.get('primer3_results', None)
+            display_primer3_complementarity_analysis(primer, selected_primer, primer3_results)
         
         # Conservation and Specificity Summary
         if is_conservation_based:
@@ -4337,52 +4373,26 @@ def main():
                 best_penalty = min(p.penalty for p in primers)
                 st.metric("Best Penalty Score", f"{best_penalty:.3f}")
         
-        # Complementarity Summary
-        st.subheader("Complementarity Risk Assessment")
-        if primers:
-            analyzer = PrimerComplementarityAnalyzer()
+        # Primer3 Complementarity Overview
+        st.subheader("Primer3 Complementarity Overview")
+        primer3_results = st.session_state.get('primer3_results', None)
+
+        if primer3_results and primers:
+            analyzer = Primer3ComplementarityAnalyzer()
+            analyzer.store_primer3_results(primer3_results)
             
-            complementarity_summary = []
-            for i, primer in enumerate(primers[:10]):  # Analyze top 10 primers
-                # Get sequences (handle T7)
-                if hasattr(primer, 'has_t7_promoter') and primer.has_t7_promoter:
-                    forward_seq = primer.core_forward_seq
-                    reverse_seq = primer.core_reverse_seq
-                else:
-                    forward_seq = primer.forward_seq
-                    reverse_seq = primer.reverse_seq
-                
-                # Analyze
-                forward_hairpins = analyzer.find_self_complementarity(forward_seq)
-                reverse_hairpins = analyzer.find_self_complementarity(reverse_seq)
-                dimers = analyzer.find_primer_dimers(forward_seq, reverse_seq)
-                
-                forward_risk = max([h['score'] for h in forward_hairpins], default=0)
-                reverse_risk = max([h['score'] for h in reverse_hairpins], default=0)
-                dimer_risk = max([d['score'] for d in dimers], default=0)
-                overall_risk = max(forward_risk, reverse_risk, dimer_risk)
-                
-                complementarity_summary.append({
-                    'Primer Pair': i + 1,
-                    'Forward Risk': f"{forward_risk:.1f}",
-                    'Reverse Risk': f"{reverse_risk:.1f}",
-                    'Dimer Risk': f"{dimer_risk:.1f}",
-                    'Overall Risk': f"{overall_risk:.1f}",
-                    'Assessment': 'High' if overall_risk > 10 else 'Medium' if overall_risk > 5 else 'Low'
-                })
+            # Collect data for all primers
+            all_comp_data = []
+            for i in range(len(primers)):
+                comp_data = analyzer.extract_complementarity_data(i)
+                if comp_data:
+                    all_comp_data.append(comp_data)
             
-            comp_df = pd.DataFrame(complementarity_summary)
-            st.dataframe(comp_df, use_container_width=True)
-            
-            # Risk distribution chart
-            risk_counts = comp_df['Assessment'].value_counts()
-            fig_risk = px.pie(
-                values=risk_counts.values, 
-                names=risk_counts.index,
-                title="Complementarity Risk Distribution",
-                color_discrete_map={'Low': 'green', 'Medium': 'orange', 'High': 'red'}
-            )
-            st.plotly_chart(fig_risk, use_container_width=True)
+            if all_comp_data:
+                # Create summary chart
+                fig_comp = analyzer.create_complementarity_summary_chart(all_comp_data)
+                if fig_comp:
+                    st.plotly_chart(fig_comp, use_container_width=True)
     
     with tab4:
         st.header("Export Results")
