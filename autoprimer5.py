@@ -4540,6 +4540,16 @@ def main():
                     st.write(f"- GC Content: {primer.gc_content_r:.1f}%")
                 
                 st.write(f"**Product Size:** {primer.product_size} bp")
+                
+                # Show complete target sequence for gBlock synthesis
+                if st.session_state.current_sequence:
+                    target_start = primer.forward_start + len(primer.forward_seq)
+                    target_end = primer.reverse_start
+                    if target_end > target_start:
+                        target_sequence = st.session_state.current_sequence[target_start:target_end]
+                        st.write("**Complete Target Sequence (for gBlock synthesis):**")
+                        st.code(target_sequence, language="text")
+                        st.info("💡 **gBlock Synthesis**: This complete sequence can be used to order a synthetic DNA fragment (gBlock) as a positive control for your PCR.")
             
             st.write(f"**Penalty Score:** {primer.penalty:.4f}")
         
