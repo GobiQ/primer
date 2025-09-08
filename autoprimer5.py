@@ -1,3 +1,24 @@
+import streamlit as st
+import pandas as pd
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+import numpy as np
+from typing import List, Dict, Tuple, Optional
+from Bio.Seq import Seq
+from Bio.SeqUtils import MeltingTemp as MT
+from Bio.SeqUtils.ProtParam import ProteinAnalysis
+from Bio import pairwise2
+from Bio.pairwise2 import format_alignment
+import requests
+import json
+import time
+import random
+from dataclasses import dataclass
+from Bio.SeqUtils.MeltingTemp import Tm_NN
+from Bio.Align import PairwiseAligner
+from Bio.SeqUtils import GC
+import plotly.express as px
+
 def get_related_organisms(target_organism, max_organisms=100):
     """Get comprehensive list of related organisms for specificity testing (100+ organisms)"""
     organism_lower = target_organism.lower()
@@ -1573,6 +1594,315 @@ class PrimerDesigner:
             return {'error': str(e)}
 
 
+class PrimerComplementarityAnalyzer:
+    """Analyzes and visualizes primer complementarity using Primer3-style algorithms"""
+    
+    def __init__(self):
+        self.complement_map = {'A': 'T', 'T': 'A', 'G': 'C', 'C': 'G'}
+        self.base_penalties = {'A': 2, 'T': 2, 'G': 4, 'C': 4}  # G-C pairs are stronger
+    
+    def reverse_complement(self, sequence: str) -> str:
+        """Generate reverse complement of DNA sequence"""
+        return "".join(self.complement_map.get(base, base) for base in reversed(sequence.upper()))
+    
+    def find_self_complementarity(self, sequence: str, min_length: int = 4) -> List[Dict]:
+        """Find self-complementary regions (hairpins) in a primer"""
+        hairpins = []
+        seq_len = len(sequence)
+        
+        # Check for self-complementarity at different positions
+        for i in range(seq_len - min_length):
+            for j in range(i + min_length, seq_len + 1):
+                region = sequence[i:j]
+                rev_comp = self.reverse_complement(region)
+                
+                # Check if reverse complement exists elsewhere in the sequence
+                for k in range(seq_len - len(region) + 1):
+                    if k == i:  # Skip the same region
+                        continue
+                    
+                    test_region = sequence[k:k + len(region)]
+                    if test_region == rev_comp:
+                        # Calculate penalty score
+                        score = self._calculate_hairpin_score(region, i, k, seq_len)
+                        hairpins.append({
+                            'type': 'hairpin',
+                            'region1_start': i,
+                            'region1_end': j - 1,
+                            'region2_start': k,
+                            'region2_end': k + len(region) - 1,
+                            'sequence': region,
+                            'score': score,
+                            'length': len(region)
+                        })
+        
+        return sorted(hairpins, key=lambda x: x['score'], reverse=True)
+    
+    def find_primer_dimers(self, primer1: str, primer2: str, min_length: int = 4) -> List[Dict]:
+        """Find primer-dimer interactions between two primers"""
+        dimers = []
+        
+        # Check primer1 3' end against primer2 3' end (most problematic)
+        dimers.extend(self._check_primer_interaction(primer1, primer2, '3-3'))
+        
+        # Check primer1 3' end against primer2 5' end
+        dimers.extend(self._check_primer_interaction(primer1, primer2, '3-5'))
+        
+        # Check primer1 5' end against primer2 3' end
+        dimers.extend(self._check_primer_interaction(primer1, primer2, '5-3'))
+        
+        return sorted(dimers, key=lambda x: x['score'], reverse=True)
+    
+    def _check_primer_interaction(self, primer1: str, primer2: str, interaction_type: str) -> List[Dict]:
+        """Check specific primer interaction type"""
+        dimers = []
+        min_length = 4
+        
+        if interaction_type == '3-3':
+            # 3' end of primer1 vs 3' end of primer2
+            for i in range(min_length, min(len(primer1), len(primer2)) + 1):
+                region1 = primer1[-i:]
+                region2 = primer2[-i:]
+                rev_comp2 = self.reverse_complement(region2)
+                
+                if region1 == rev_comp2:
+                    score = self._calculate_dimer_score(region1, len(primer1) - i, len(primer2) - i, interaction_type)
+                    dimers.append({
+                        'type': 'primer_dimer',
+                        'interaction': '3-3',
+                        'region1_start': len(primer1) - i,
+                        'region1_end': len(primer1) - 1,
+                        'region2_start': len(primer2) - i,
+                        'region2_end': len(primer2) - 1,
+                        'sequence': region1,
+                        'score': score,
+                        'length': i
+                    })
+        
+        elif interaction_type == '3-5':
+            # 3' end of primer1 vs 5' end of primer2
+            for i in range(min_length, min(len(primer1), len(primer2)) + 1):
+                region1 = primer1[-i:]
+                region2 = primer2[:i]
+                rev_comp2 = self.reverse_complement(region2)
+                
+                if region1 == rev_comp2:
+                    score = self._calculate_dimer_score(region1, len(primer1) - i, 0, interaction_type)
+                    dimers.append({
+                        'type': 'primer_dimer',
+                        'interaction': '3-5',
+                        'region1_start': len(primer1) - i,
+                        'region1_end': len(primer1) - 1,
+                        'region2_start': 0,
+                        'region2_end': i - 1,
+                        'sequence': region1,
+                        'score': score,
+                        'length': i
+                    })
+        
+        elif interaction_type == '5-3':
+            # 5' end of primer1 vs 3' end of primer2
+            for i in range(min_length, min(len(primer1), len(primer2)) + 1):
+                region1 = primer1[:i]
+                region2 = primer2[-i:]
+                rev_comp2 = self.reverse_complement(region2)
+                
+                if region1 == rev_comp2:
+                    score = self._calculate_dimer_score(region1, 0, len(primer2) - i, interaction_type)
+                    dimers.append({
+                        'type': 'primer_dimer',
+                        'interaction': '5-3',
+                        'region1_start': 0,
+                        'region1_end': i - 1,
+                        'region2_start': len(primer2) - i,
+                        'region2_end': len(primer2) - 1,
+                        'sequence': region1,
+                        'score': score,
+                        'length': i
+                    })
+        
+        return dimers
+    
+    def _calculate_hairpin_score(self, sequence: str, pos1: int, pos2: int, primer_length: int) -> float:
+        """Calculate penalty score for hairpin formation"""
+        score = 0
+        
+        # Base pairing penalties
+        for base in sequence:
+            score += self.base_penalties.get(base, 2)
+        
+        # Position penalties (3' end is more problematic)
+        if pos1 > primer_length * 0.7 or pos2 > primer_length * 0.7:
+            score *= 1.5
+        
+        # Length penalty
+        score *= len(sequence)
+        
+        return score
+    
+    def _calculate_dimer_score(self, sequence: str, pos1: int, pos2: int, interaction_type: str) -> float:
+        """Calculate penalty score for primer dimer formation"""
+        score = 0
+        
+        # Base pairing penalties
+        for base in sequence:
+            score += self.base_penalties.get(base, 2)
+        
+        # Interaction type penalties (3-3 is most problematic)
+        if interaction_type == '3-3':
+            score *= 2.0
+        elif interaction_type in ['3-5', '5-3']:
+            score *= 1.5
+        
+        # Length penalty
+        score *= len(sequence)
+        
+        return score
+    
+    def create_complementarity_visualization(self, primer1: str, primer2: str, 
+                                           hairpins1: List[Dict], hairpins2: List[Dict], 
+                                           dimers: List[Dict]) -> go.Figure:
+        """Create interactive visualization of complementarity issues"""
+        
+        # Create subplots
+        fig = make_subplots(
+            rows=3, cols=1,
+            subplot_titles=['Forward Primer Self-Complementarity', 
+                          'Reverse Primer Self-Complementarity',
+                          'Primer-Primer Interactions'],
+            vertical_spacing=0.1,
+            row_heights=[0.3, 0.3, 0.4]
+        )
+        
+        # Plot forward primer hairpins
+        self._plot_hairpins(fig, primer1, hairpins1, row=1, color='blue')
+        
+        # Plot reverse primer hairpins
+        self._plot_hairpins(fig, primer2, hairpins2, row=2, color='red')
+        
+        # Plot primer dimers
+        self._plot_dimers(fig, primer1, primer2, dimers, row=3)
+        
+        # Update layout
+        fig.update_layout(
+            height=800,
+            showlegend=False,
+            title="Primer Complementarity Analysis",
+            title_x=0.5
+        )
+        
+        return fig
+    
+    def _plot_hairpins(self, fig: go.Figure, primer: str, hairpins: List[Dict], 
+                      row: int, color: str):
+        """Plot hairpin structures for a single primer"""
+        
+        # Create sequence positions
+        positions = list(range(len(primer)))
+        
+        # Add sequence text
+        fig.add_trace(
+            go.Scatter(
+                x=positions,
+                y=[0] * len(primer),
+                mode='text',
+                text=list(primer),
+                textfont=dict(size=12, color=color),
+                showlegend=False
+            ),
+            row=row, col=1
+        )
+        
+        # Add hairpin connections
+        for hairpin in hairpins[:3]:  # Show top 3 hairpins
+            start1, end1 = hairpin['region1_start'], hairpin['region1_end']
+            start2, end2 = hairpin['region2_start'], hairpin['region2_end']
+            
+            # Draw hairpin loop
+            fig.add_trace(
+                go.Scatter(
+                    x=[start1, end1, end2, start2, start1],
+                    y=[0.2, 0.2, 0.2, 0.2, 0.2],
+                    mode='lines',
+                    line=dict(color=color, width=2),
+                    showlegend=False
+                ),
+                row=row, col=1
+            )
+            
+            # Add score annotation
+            mid_x = (start1 + end1 + start2 + end2) / 4
+            fig.add_annotation(
+                x=mid_x,
+                y=0.3,
+                text=f"Score: {hairpin['score']:.1f}",
+                showarrow=False,
+                font=dict(size=10, color=color),
+                row=row, col=1
+            )
+    
+    def _plot_dimers(self, fig: go.Figure, primer1: str, primer2: str, 
+                    dimers: List[Dict], row: int):
+        """Plot primer dimer interactions"""
+        
+        # Create two parallel lines for the primers
+        y1, y2 = 0.2, -0.2
+        
+        # Add primer sequences
+        fig.add_trace(
+            go.Scatter(
+                x=list(range(len(primer1))),
+                y=[y1] * len(primer1),
+                mode='text',
+                text=list(primer1),
+                textfont=dict(size=12, color='blue'),
+                showlegend=False
+            ),
+            row=row, col=1
+        )
+        
+        fig.add_trace(
+            go.Scatter(
+                x=list(range(len(primer2))),
+                y=[y2] * len(primer2),
+                mode='text',
+                text=list(primer2),
+                textfont=dict(size=12, color='red'),
+                showlegend=False
+            ),
+            row=row, col=1
+        )
+        
+        # Add dimer connections
+        for dimer in dimers[:3]:  # Show top 3 dimers
+            if dimer['interaction'] == '3-3':
+                x1 = dimer['region1_start']
+                x2 = dimer['region2_start']
+                
+                # Draw connection line
+                fig.add_trace(
+                    go.Scatter(
+                        x=[x1, x2],
+                        y=[y1, y2],
+                        mode='lines',
+                        line=dict(color='orange', width=3),
+                        showlegend=False
+                    ),
+                    row=row, col=1
+                )
+                
+                # Add score annotation
+                mid_x = (x1 + x2) / 2
+                fig.add_annotation(
+                    x=mid_x,
+                    y=0,
+                    text=f"3'-3': {dimer['score']:.1f}",
+                    showarrow=False,
+                    font=dict(size=10, color='orange'),
+                    row=row, col=1
+                )
+
+
 class EnhancedSpecificityAnalyzer:
     """Enhanced specificity testing with proper alignment and thermodynamic considerations"""
     
@@ -2346,6 +2676,96 @@ def create_sequence_diagram(sequence: str, primers: List[PrimerPair], selected_p
     except Exception as e:
         st.error(f"Error creating sequence diagram: {e}")
         return None
+
+def display_complementarity_analysis(primer_pair, primer_index: int):
+    """Display complementarity analysis for a specific primer pair"""
+    try:
+        analyzer = PrimerComplementarityAnalyzer()
+        
+        # Get sequences (handle T7 promoters)
+        if hasattr(primer_pair, 'has_t7_promoter') and primer_pair.has_t7_promoter:
+            forward_seq = primer_pair.core_forward_seq
+            reverse_seq = primer_pair.core_reverse_seq
+        else:
+            forward_seq = primer_pair.forward_seq
+            reverse_seq = primer_pair.reverse_seq
+        
+        # Analyze complementarity
+        forward_hairpins = analyzer.find_self_complementarity(forward_seq)
+        reverse_hairpins = analyzer.find_self_complementarity(reverse_seq)
+        dimers = analyzer.find_primer_dimers(forward_seq, reverse_seq)
+        
+        # Display summary
+        st.subheader(f"Complementarity Analysis - Primer Pair {primer_index + 1}")
+        
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            forward_risk = max([h['score'] for h in forward_hairpins], default=0)
+            if forward_risk > 10:
+                st.error(f"🔴 Forward Risk: {forward_risk:.1f}")
+            elif forward_risk > 5:
+                st.warning(f"🟡 Forward Risk: {forward_risk:.1f}")
+            else:
+                st.success(f"🟢 Forward Risk: {forward_risk:.1f}")
+        
+        with col2:
+            reverse_risk = max([h['score'] for h in reverse_hairpins], default=0)
+            if reverse_risk > 10:
+                st.error(f"🔴 Reverse Risk: {reverse_risk:.1f}")
+            elif reverse_risk > 5:
+                st.warning(f"🟡 Reverse Risk: {reverse_risk:.1f}")
+            else:
+                st.success(f"🟢 Reverse Risk: {reverse_risk:.1f}")
+        
+        with col3:
+            dimer_risk = max([d['score'] for d in dimers], default=0)
+            if dimer_risk > 10:
+                st.error(f"🔴 Dimer Risk: {dimer_risk:.1f}")
+            elif dimer_risk > 5:
+                st.warning(f"🟡 Dimer Risk: {dimer_risk:.1f}")
+            else:
+                st.success(f"🟢 Dimer Risk: {dimer_risk:.1f}")
+        
+        # Display detailed results
+        if forward_hairpins or reverse_hairpins or dimers:
+            st.subheader("Detailed Analysis")
+            
+            # Forward primer hairpins
+            if forward_hairpins:
+                st.write("**Forward Primer Self-Complementarity:**")
+                for i, hairpin in enumerate(forward_hairpins[:3]):  # Show top 3
+                    st.write(f"- Hairpin {i+1}: {hairpin['sequence']} (Score: {hairpin['score']:.1f})")
+                    st.write(f"  Positions: {hairpin['region1_start']}-{hairpin['region1_end']} ↔ {hairpin['region2_start']}-{hairpin['region2_end']}")
+            
+            # Reverse primer hairpins
+            if reverse_hairpins:
+                st.write("**Reverse Primer Self-Complementarity:**")
+                for i, hairpin in enumerate(reverse_hairpins[:3]):  # Show top 3
+                    st.write(f"- Hairpin {i+1}: {hairpin['sequence']} (Score: {hairpin['score']:.1f})")
+                    st.write(f"  Positions: {hairpin['region1_start']}-{hairpin['region1_end']} ↔ {hairpin['region2_start']}-{hairpin['region2_end']}")
+            
+            # Primer dimers
+            if dimers:
+                st.write("**Primer-Primer Interactions:**")
+                for i, dimer in enumerate(dimers[:3]):  # Show top 3
+                    st.write(f"- Dimer {i+1}: {dimer['sequence']} (Score: {dimer['score']:.1f})")
+                    st.write(f"  Interaction: {dimer['interaction']}")
+                    st.write(f"  Forward: {dimer['region1_start']}-{dimer['region1_end']}, Reverse: {dimer['region2_start']}-{dimer['region2_end']}")
+            
+            # Create visualization
+            if forward_hairpins or reverse_hairpins or dimers:
+                st.subheader("Visualization")
+                fig = analyzer.create_complementarity_visualization(
+                    forward_seq, reverse_seq, forward_hairpins, reverse_hairpins, dimers
+                )
+                st.plotly_chart(fig, use_container_width=True)
+        
+        else:
+            st.success("✅ No significant complementarity issues detected!")
+            
+    except Exception as e:
+        st.error(f"Error in complementarity analysis: {e}")
 
 def export_to_excel(primers: List[PrimerPair]) -> bytes:
     """Export primer results to Excel format"""
@@ -3811,6 +4231,11 @@ def main():
             
             st.write(f"**Penalty Score:** {primer.penalty:.4f}")
         
+        # Complementarity Analysis
+        st.subheader("Primer Complementarity Analysis")
+        if st.checkbox("Show complementarity analysis", key=f"complementarity_{selected_primer}"):
+            display_complementarity_analysis(primer, selected_primer)
+        
         # Conservation and Specificity Summary
         if is_conservation_based:
             with st.expander("Analysis Summary", expanded=False):
@@ -4008,6 +4433,53 @@ def main():
             with col4:
                 best_penalty = min(p.penalty for p in primers)
                 st.metric("Best Penalty Score", f"{best_penalty:.3f}")
+        
+        # Complementarity Summary
+        st.subheader("Complementarity Risk Assessment")
+        if primers:
+            analyzer = PrimerComplementarityAnalyzer()
+            
+            complementarity_summary = []
+            for i, primer in enumerate(primers[:10]):  # Analyze top 10 primers
+                # Get sequences (handle T7)
+                if hasattr(primer, 'has_t7_promoter') and primer.has_t7_promoter:
+                    forward_seq = primer.core_forward_seq
+                    reverse_seq = primer.core_reverse_seq
+                else:
+                    forward_seq = primer.forward_seq
+                    reverse_seq = primer.reverse_seq
+                
+                # Analyze
+                forward_hairpins = analyzer.find_self_complementarity(forward_seq)
+                reverse_hairpins = analyzer.find_self_complementarity(reverse_seq)
+                dimers = analyzer.find_primer_dimers(forward_seq, reverse_seq)
+                
+                forward_risk = max([h['score'] for h in forward_hairpins], default=0)
+                reverse_risk = max([h['score'] for h in reverse_hairpins], default=0)
+                dimer_risk = max([d['score'] for d in dimers], default=0)
+                overall_risk = max(forward_risk, reverse_risk, dimer_risk)
+                
+                complementarity_summary.append({
+                    'Primer Pair': i + 1,
+                    'Forward Risk': f"{forward_risk:.1f}",
+                    'Reverse Risk': f"{reverse_risk:.1f}",
+                    'Dimer Risk': f"{dimer_risk:.1f}",
+                    'Overall Risk': f"{overall_risk:.1f}",
+                    'Assessment': 'High' if overall_risk > 10 else 'Medium' if overall_risk > 5 else 'Low'
+                })
+            
+            comp_df = pd.DataFrame(complementarity_summary)
+            st.dataframe(comp_df, use_container_width=True)
+            
+            # Risk distribution chart
+            risk_counts = comp_df['Assessment'].value_counts()
+            fig_risk = px.pie(
+                values=risk_counts.values, 
+                names=risk_counts.index,
+                title="Complementarity Risk Distribution",
+                color_discrete_map={'Low': 'green', 'Medium': 'orange', 'High': 'red'}
+            )
+            st.plotly_chart(fig_risk, use_container_width=True)
     
     with tab4:
         st.header("Export Results")
@@ -4266,94 +4738,6 @@ def main():
             except Exception as e:
                 st.error(f"Error creating ordering format: {e}")
         
-        # Protocol export for T7 dsRNA
-        if t7_enabled:
-            st.subheader("Protocol Export")
-            
-            protocol_text = f"""
-T7 dsRNA Production Protocol
-============================
-
-Generated for {len(primers)} primer pairs designed for dsRNA synthesis.
-
-MATERIALS REQUIRED:
-- T7 RNA Polymerase (40 U/μL)
-- 10× T7 Transcription Buffer
-- NTP Mix (25 mM each ATP, CTP, GTP, UTP)
-- DNase I (2 U/μL)
-- RNase-free water
-- 0.5 M EDTA
-- Phenol:chloroform:isoamyl alcohol (25:24:1)
-- 3 M sodium acetate (pH 5.2)
-- 100% ethanol
-- 70% ethanol
-
-PROTOCOL:
-
-1. PCR AMPLIFICATION:
-   - Use T7-tagged primers to amplify target regions
-   - Verify products by gel electrophoresis
-   - Purify PCR products using standard methods
-
-2. T7 TRANSCRIPTION SETUP (20 μL reaction):
-   - 1-2 μg purified PCR template
-   - 2 μL 10× T7 Transcription Buffer
-   - 2 μL NTP Mix (2 mM final each)
-   - 1 μL T7 RNA Polymerase (40 units)
-   - RNase-free water to 20 μL
-
-3. INCUBATION:
-   - 37°C for 2-4 hours
-   - Optional: Add additional 20 units T7 polymerase after 2h
-
-4. DNASE TREATMENT:
-   - Add 1 μL DNase I (2 units)
-   - Incubate 37°C for 15 minutes
-   - Add 1 μL 0.5 M EDTA to stop reaction
-
-5. dsRNA ANNEALING:
-   - Heat to 95°C for 5 minutes
-   - Cool slowly to room temperature (30-60 minutes)
-   - This allows complementary strands to anneal
-
-6. PURIFICATION:
-   - Add equal volume phenol:chloroform
-   - Vortex and centrifuge 15,000g for 5 minutes
-   - Transfer aqueous phase to new tube
-   - Add 1/10 volume 3 M sodium acetate
-   - Add 2.5 volumes cold 100% ethanol
-   - Precipitate at -20°C for 30 minutes
-   - Centrifuge 15,000g for 15 minutes at 4°C
-   - Wash pellet with 70% ethanol
-   - Air dry and resuspend in RNase-free water
-
-7. QUALITY CONTROL:
-   - Analyze by agarose gel electrophoresis
-   - Quantify using spectrophotometer (A260/A280 ratio ~2.0)
-   - Store at -80°C in small aliquots
-
-EXPECTED YIELDS:
-- 10-50 μg dsRNA per 20 μL reaction
-- Higher yields with optimal templates (G at +1 position)
-
-TROUBLESHOOTING:
-- Low yield: Check template quality, extend incubation
-- Degradation: Ensure RNase-free conditions
-- Poor annealing: Optimize cooling rate
-
-APPLICATION NOTES:
-- For RNAi in insects: 100-500 ng dsRNA per organism
-- For plant applications: 1-10 μg/mL in infiltration buffer
-- Store dsRNA at -80°C in single-use aliquots
-- Always use RNase-free conditions throughout protocol
-"""
-            
-            st.download_button(
-                label="📄 Download Complete Protocol",
-                data=protocol_text,
-                file_name="t7_dsrna_protocol.txt",
-                mime="text/plain"
-            )
     
     # Footer
     st.markdown("---")
