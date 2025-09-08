@@ -2573,8 +2573,8 @@ def create_primer_visualization(primers: List[PrimerPair]):
         st.error(f"Error creating visualization: {e}")
         return None
 
-def create_sequence_diagram(sequence: str, primers: List[PrimerPair], selected_primer: int = 0):
-    """Create a sequence diagram showing primer binding sites"""
+def create_enhanced_sequence_diagram(sequence: str, primers: List[PrimerPair], selected_primer: int = 0):
+    """Create an enhanced sequence diagram with better scaling and interactivity"""
     if not primers or selected_primer >= len(primers) or not sequence:
         return None
     
@@ -2582,23 +2582,35 @@ def create_sequence_diagram(sequence: str, primers: List[PrimerPair], selected_p
         primer = primers[selected_primer]
         seq_len = len(sequence)
         
+        # Calculate appropriate padding and scaling
+        padding = max(50, seq_len * 0.05)  # 5% padding or minimum 50bp
+        x_range = [-padding, seq_len + padding]
+        
         fig = go.Figure()
         
+        # Main sequence line with better scaling
         fig.add_shape(
             type="rect",
             x0=0, y0=0.4, x1=seq_len, y1=0.6,
             fillcolor="lightgray",
-            line=dict(color="black", width=1),
+            line=dict(color="black", width=2),
         )
         
-        # Determine primer length for visualization
+        # Determine primer sequences and lengths
         if hasattr(primer, 'has_t7_promoter') and primer.has_t7_promoter:
-            forward_len = len(primer.core_forward_seq)
-            reverse_len = len(primer.core_reverse_seq)
+            forward_seq = primer.core_forward_seq
+            reverse_seq = primer.core_reverse_seq
+            forward_len = len(forward_seq)
+            reverse_len = len(reverse_seq)
+            t7_promoter = primer.t7_promoter_seq
         else:
-            forward_len = len(primer.forward_seq)
-            reverse_len = len(primer.reverse_seq)
+            forward_seq = primer.forward_seq
+            reverse_seq = primer.reverse_seq
+            forward_len = len(forward_seq)
+            reverse_len = len(reverse_seq)
+            t7_promoter = None
         
+        # Forward primer
         fig.add_shape(
             type="rect",
             x0=primer.forward_start, y0=0.6, 
@@ -2607,6 +2619,7 @@ def create_sequence_diagram(sequence: str, primers: List[PrimerPair], selected_p
             line=dict(color="darkblue", width=2),
         )
         
+        # Reverse primer
         fig.add_shape(
             type="rect",
             x0=primer.reverse_start - reverse_len + 1, y0=0.2,
@@ -2615,29 +2628,320 @@ def create_sequence_diagram(sequence: str, primers: List[PrimerPair], selected_p
             line=dict(color="darkred", width=2),
         )
         
+        # T7 promoter visualization if present
+        if t7_promoter:
+            t7_len = len(t7_promoter)
+            # T7 promoter for forward primer
+            fig.add_shape(
+                type="rect",
+                x0=primer.forward_start - t7_len, y0=0.6, 
+                x1=primer.forward_start, y1=0.8,
+                fillcolor="lightblue",
+                line=dict(color="blue", width=1, dash="dash"),
+            )
+            # T7 promoter for reverse primer
+            fig.add_shape(
+                type="rect",
+                x0=primer.reverse_start + 1, y0=0.2,
+                x1=primer.reverse_start + 1 + t7_len, y1=0.4,
+                fillcolor="lightcoral",
+                line=dict(color="red", width=1, dash="dash"),
+            )
+        
+        # Product region
+        product_start = primer.forward_start + forward_len
+        product_end = primer.reverse_start - reverse_len + 1
+        if product_end > product_start:
+            fig.add_shape(
+                type="rect",
+                x0=product_start, y0=0.45, 
+                x1=product_end, y1=0.55,
+                fillcolor="green",
+                line=dict(color="darkgreen", width=1),
+                opacity=0.3
+            )
+        
+        # Position markers at regular intervals
+        marker_interval = max(100, seq_len // 10)  # 10 markers or every 100bp
+        for pos in range(0, seq_len + 1, marker_interval):
+            fig.add_vline(x=pos, line_dash="dot", line_color="gray", opacity=0.5)
+            fig.add_annotation(
+                x=pos, y=0.35,
+                text=f"{pos:,}",
+                showarrow=False,
+                font=dict(size=10, color="gray"),
+                yshift=-10
+            )
+        
+        # Enhanced annotations with hover information
         fig.add_annotation(
             x=primer.forward_start + forward_len/2, y=0.7,
-            text=f"Forward<br>Tm: {primer.forward_tm:.1f}°C",
-            showarrow=True, arrowhead=2, arrowcolor="blue"
+            text=f"Forward Primer<br>Tm: {primer.forward_tm:.1f}°C<br>Length: {forward_len} bp",
+            showarrow=True, arrowhead=2, arrowcolor="blue",
+            font=dict(size=12, color="darkblue"),
+            bgcolor="white",
+            bordercolor="blue",
+            borderwidth=1
         )
         
         fig.add_annotation(
             x=primer.reverse_start - reverse_len/2, y=0.3,
-            text=f"Reverse<br>Tm: {primer.reverse_tm:.1f}°C",
-            showarrow=True, arrowhead=2, arrowcolor="red"
+            text=f"Reverse Primer<br>Tm: {primer.reverse_tm:.1f}°C<br>Length: {reverse_len} bp",
+            showarrow=True, arrowhead=2, arrowcolor="red",
+            font=dict(size=12, color="darkred"),
+            bgcolor="white",
+            bordercolor="red",
+            borderwidth=1
+        )
+        
+        # Product size annotation
+        if product_end > product_start:
+            product_center = (product_start + product_end) / 2
+            fig.add_annotation(
+                x=product_center, y=0.5,
+                text=f"Product: {primer.product_size} bp",
+                showarrow=False,
+                font=dict(size=12, color="darkgreen", weight="bold"),
+                bgcolor="lightgreen",
+                bordercolor="green",
+                borderwidth=1
+            )
+        
+        # T7 promoter annotations
+        if t7_promoter:
+            fig.add_annotation(
+                x=primer.forward_start - t7_len/2, y=0.7,
+                text="T7 Promoter",
+                showarrow=False,
+                font=dict(size=10, color="blue"),
+                bgcolor="lightblue",
+                bordercolor="blue"
+            )
+            fig.add_annotation(
+                x=primer.reverse_start + 1 + t7_len/2, y=0.3,
+                text="T7 Promoter",
+                showarrow=False,
+                font=dict(size=10, color="red"),
+                bgcolor="lightcoral",
+                bordercolor="red"
+            )
+        
+        fig.update_layout(
+            title=f"Enhanced Primer Binding Sites - Pair {selected_primer + 1}",
+            xaxis_title="Sequence Position (bp)",
+            yaxis=dict(range=[0, 1], showticklabels=False),
+            height=400,
+            showlegend=False,
+            xaxis=dict(range=x_range),
+            hovermode='x unified'
+        )
+        
+        return fig
+    except Exception as e:
+        st.error(f"Error creating enhanced sequence diagram: {e}")
+        return None
+
+def create_multi_primer_comparison(sequence: str, primers: List[PrimerPair], max_primers: int = 5):
+    """Create a comparison view of multiple primer pairs on the same sequence"""
+    if not primers or not sequence:
+        return None
+    
+    try:
+        seq_len = len(sequence)
+        padding = max(50, seq_len * 0.05)
+        x_range = [-padding, seq_len + padding]
+        
+        fig = go.Figure()
+        
+        # Main sequence line
+        fig.add_shape(
+            type="rect",
+            x0=0, y0=0.4, x1=seq_len, y1=0.6,
+            fillcolor="lightgray",
+            line=dict(color="black", width=2),
+        )
+        
+        # Color palette for different primer pairs
+        colors = ['blue', 'red', 'green', 'orange', 'purple', 'brown', 'pink', 'gray', 'olive', 'cyan']
+        
+        # Plot each primer pair
+        for i in range(min(max_primers, len(primers))):
+            primer = primers[i]
+            color = colors[i % len(colors)]
+            
+            # Determine primer sequences and lengths
+            if hasattr(primer, 'has_t7_promoter') and primer.has_t7_promoter:
+                forward_len = len(primer.core_forward_seq)
+                reverse_len = len(primer.core_reverse_seq)
+            else:
+                forward_len = len(primer.forward_seq)
+                reverse_len = len(primer.reverse_seq)
+            
+            # Calculate y position for this primer pair
+            y_offset = 0.1 * i
+            forward_y = 0.6 + y_offset
+            reverse_y = 0.4 - y_offset
+            
+            # Forward primer
+            fig.add_shape(
+                type="rect",
+                x0=primer.forward_start, y0=forward_y, 
+                x1=primer.forward_start + forward_len, y1=forward_y + 0.08,
+                fillcolor=color,
+                line=dict(color=color, width=1),
+                opacity=0.7
+            )
+            
+            # Reverse primer
+            fig.add_shape(
+                type="rect",
+                x0=primer.reverse_start - reverse_len + 1, y0=reverse_y - 0.08,
+                x1=primer.reverse_start + 1, y1=reverse_y,
+                fillcolor=color,
+                line=dict(color=color, width=1, dash="dash"),
+                opacity=0.7
+            )
+            
+            # Product region
+            product_start = primer.forward_start + forward_len
+            product_end = primer.reverse_start - reverse_len + 1
+            if product_end > product_start:
+                fig.add_shape(
+                    type="rect",
+                    x0=product_start, y0=0.45, 
+                    x1=product_end, y1=0.55,
+                    fillcolor=color,
+                    line=dict(color=color, width=1),
+                    opacity=0.2
+                )
+            
+            # Legend entry
+            fig.add_trace(go.Scatter(
+                x=[None], y=[None],
+                mode='markers',
+                marker=dict(size=10, color=color),
+                name=f"Pair {i+1} (Product: {primer.product_size} bp)",
+                showlegend=True
+            ))
+        
+        # Position markers
+        marker_interval = max(100, seq_len // 10)
+        for pos in range(0, seq_len + 1, marker_interval):
+            fig.add_vline(x=pos, line_dash="dot", line_color="gray", opacity=0.3)
+            if pos % (marker_interval * 2) == 0:  # Show every other marker
+                fig.add_annotation(
+                    x=pos, y=0.35,
+                    text=f"{pos:,}",
+                    showarrow=False,
+                    font=dict(size=10, color="gray"),
+                    yshift=-10
+                )
+        
+        fig.update_layout(
+            title=f"Multi-Primer Comparison ({min(max_primers, len(primers))} pairs)",
+            xaxis_title="Sequence Position (bp)",
+            yaxis=dict(range=[0, 1], showticklabels=False),
+            height=500,
+            showlegend=True,
+            xaxis=dict(range=x_range),
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+        )
+        
+        return fig
+    except Exception as e:
+        st.error(f"Error creating multi-primer comparison: {e}")
+        return None
+
+def create_primer_coverage_heatmap(sequence: str, primers: List[PrimerPair], window_size: int = 100):
+    """Create a heatmap showing primer coverage density across the sequence"""
+    if not primers or not sequence:
+        return None
+    
+    try:
+        seq_len = len(sequence)
+        num_windows = seq_len // window_size + (1 if seq_len % window_size > 0 else 0)
+        
+        # Initialize coverage array
+        coverage = [0] * num_windows
+        
+        # Calculate coverage for each window
+        for primer in primers:
+            # Determine primer lengths
+            if hasattr(primer, 'has_t7_promoter') and primer.has_t7_promoter:
+                forward_len = len(primer.core_forward_seq)
+                reverse_len = len(primer.core_reverse_seq)
+            else:
+                forward_len = len(primer.forward_seq)
+                reverse_len = len(primer.reverse_seq)
+            
+            # Forward primer coverage
+            forward_start_window = primer.forward_start // window_size
+            forward_end_window = (primer.forward_start + forward_len - 1) // window_size
+            
+            for window in range(forward_start_window, min(forward_end_window + 1, num_windows)):
+                if 0 <= window < num_windows:
+                    coverage[window] += 1
+            
+            # Reverse primer coverage
+            reverse_start_window = (primer.reverse_start - reverse_len + 1) // window_size
+            reverse_end_window = primer.reverse_start // window_size
+            
+            for window in range(reverse_start_window, min(reverse_end_window + 1, num_windows)):
+                if 0 <= window < num_windows:
+                    coverage[window] += 1
+        
+        # Create heatmap data
+        window_positions = [i * window_size for i in range(num_windows)]
+        max_coverage = max(coverage) if coverage else 1
+        
+        # Create the heatmap
+        fig = go.Figure()
+        
+        # Add coverage bars
+        fig.add_trace(go.Bar(
+            x=window_positions,
+            y=coverage,
+            marker=dict(
+                color=coverage,
+                colorscale='Reds',
+                cmin=0,
+                cmax=max_coverage,
+                colorbar=dict(title="Primer Count")
+            ),
+            name="Primer Coverage",
+            hovertemplate="Position: %{x}-%{xend}<br>Primers: %{y}<extra></extra>"
+        ))
+        
+        # Add sequence length indicator
+        fig.add_vline(x=seq_len, line_dash="dash", line_color="black", 
+                     annotation_text=f"Sequence End ({seq_len:,} bp)")
+        
+        # Add coverage statistics
+        avg_coverage = sum(coverage) / len(coverage) if coverage else 0
+        max_coverage_pos = window_positions[coverage.index(max_coverage)] if coverage else 0
+        
+        fig.add_annotation(
+            x=0.02, y=0.98,
+            xref="paper", yref="paper",
+            text=f"Avg Coverage: {avg_coverage:.1f}<br>Max Coverage: {max_coverage} at {max_coverage_pos:,} bp",
+            showarrow=False,
+            font=dict(size=12),
+            bgcolor="white",
+            bordercolor="black",
+            borderwidth=1
         )
         
         fig.update_layout(
-            title=f"Primer Binding Sites - Pair {selected_primer + 1}",
+            title=f"Primer Coverage Heatmap (Window Size: {window_size} bp)",
             xaxis_title="Sequence Position (bp)",
-            yaxis=dict(range=[0, 1], showticklabels=False),
-            height=300,
+            yaxis_title="Number of Primers",
+            height=400,
             showlegend=False
         )
         
         return fig
     except Exception as e:
-        st.error(f"Error creating sequence diagram: {e}")
+        st.error(f"Error creating coverage heatmap: {e}")
         return None
 
 def display_primer3_complementarity_analysis(primer_pair, selected_primer_index, primer3_results=None):
@@ -4270,7 +4574,6 @@ def main():
         # Check session state validity fresh for this tab
         current_state_check = check_session_state_validity()
         
-        
         if not current_state_check['has_primers']:
             st.info("No primers designed yet. Please use the Input tab to design primers.")
             st.stop()
@@ -4281,28 +4584,119 @@ def main():
         if t7_enabled:
             st.info("🧬 **T7 dsRNA Analysis Mode** - Showing analysis for dsRNA production primers")
         
+        # Primer visualization charts
+        st.subheader("Primer Properties Overview")
         fig = create_primer_visualization(primers)
         if fig:
             st.plotly_chart(fig, use_container_width=True)
         else:
             st.warning("Could not create primer visualization")
         
+        # Enhanced sequence visualization section
         if current_state_check['has_sequence']:
-            st.subheader("Primer Binding Sites")
-            selected_for_diagram = st.selectbox(
-                "Select primer pair for binding site visualization:", 
-                range(len(primers)), 
-                format_func=lambda x: f"Pair {x+1}",
-                key="diagram_select"
+            st.subheader("Sequence Visualization Options")
+            
+            # Visualization type selector
+            viz_type = st.radio(
+                "Choose visualization type:",
+                ["Single Primer Detail", "Multi-Primer Comparison", "Coverage Heatmap"],
+                horizontal=True
             )
             
-            seq_fig = create_sequence_diagram(
-                st.session_state.current_sequence, 
-                primers, 
-                selected_for_diagram
-            )
-            if seq_fig:
-                st.plotly_chart(seq_fig, use_container_width=True)
+            if viz_type == "Single Primer Detail":
+                st.write("**Detailed view of individual primer binding sites**")
+                selected_for_diagram = st.selectbox(
+                    "Select primer pair for detailed visualization:", 
+                    range(len(primers)), 
+                    format_func=lambda x: f"Pair {x+1} (Product: {primers[x].product_size} bp, Penalty: {primers[x].penalty:.3f})",
+                    key="enhanced_diagram_select"
+                )
+                
+                enhanced_fig = create_enhanced_sequence_diagram(
+                    st.session_state.current_sequence, 
+                    primers, 
+                    selected_for_diagram
+                )
+                if enhanced_fig:
+                    st.plotly_chart(enhanced_fig, use_container_width=True)
+                    
+                    # Additional primer details
+                    primer = primers[selected_for_diagram]
+                    
+                    col1, col2, col3, col4 = st.columns(4)
+                    with col1:
+                        if hasattr(primer, 'has_t7_promoter') and primer.has_t7_promoter:
+                            st.metric("Core Forward Length", f"{len(primer.core_forward_seq)} bp")
+                        else:
+                            st.metric("Forward Length", f"{len(primer.forward_seq)} bp")
+                    with col2:
+                        if hasattr(primer, 'has_t7_promoter') and primer.has_t7_promoter:
+                            st.metric("Core Reverse Length", f"{len(primer.core_reverse_seq)} bp")
+                        else:
+                            st.metric("Reverse Length", f"{len(primer.reverse_seq)} bp")
+                    with col3:
+                        st.metric("Forward Position", f"{primer.forward_start:,}")
+                    with col4:
+                        st.metric("Reverse Position", f"{primer.reverse_start:,}")
+            
+            elif viz_type == "Multi-Primer Comparison":
+                st.write("**Compare multiple primer pairs on the same sequence**")
+                max_primers_to_show = st.slider("Number of primer pairs to compare:", 2, min(10, len(primers)), 5)
+                
+                multi_fig = create_multi_primer_comparison(
+                    st.session_state.current_sequence,
+                    primers,
+                    max_primers_to_show
+                )
+                if multi_fig:
+                    st.plotly_chart(multi_fig, use_container_width=True)
+                    
+                    # Summary table for compared primers
+                    st.write("**Comparison Summary:**")
+                    comparison_data = []
+                    for i in range(min(max_primers_to_show, len(primers))):
+                        primer = primers[i]
+                        comparison_data.append({
+                            'Pair': i + 1,
+                            'Product Size': f"{primer.product_size} bp",
+                            'Forward Tm': f"{primer.forward_tm:.1f}°C",
+                            'Reverse Tm': f"{primer.reverse_tm:.1f}°C",
+                            'Penalty': f"{primer.penalty:.3f}",
+                            'Forward Pos': f"{primer.forward_start:,}",
+                            'Reverse Pos': f"{primer.reverse_start:,}"
+                        })
+                    
+                    comparison_df = pd.DataFrame(comparison_data)
+                    st.dataframe(comparison_df, use_container_width=True)
+            
+            elif viz_type == "Coverage Heatmap":
+                st.write("**Primer coverage density across the sequence**")
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    window_size = st.selectbox(
+                        "Window size for coverage analysis:",
+                        [50, 100, 200, 500, 1000],
+                        index=1,
+                        help="Larger windows show broader coverage patterns"
+                    )
+                with col2:
+                    seq_len = len(st.session_state.current_sequence)
+                    coverage_percent = (len(primers) * 50) / seq_len * 100  # Rough estimate
+                    st.metric("Estimated Coverage", f"{coverage_percent:.1f}%")
+                
+                heatmap_fig = create_primer_coverage_heatmap(
+                    st.session_state.current_sequence,
+                    primers,
+                    window_size
+                )
+                if heatmap_fig:
+                    st.plotly_chart(heatmap_fig, use_container_width=True)
+                    
+                    st.write("**Coverage Analysis:**")
+                    st.write("- Dark regions indicate high primer density")
+                    st.write("- Light regions indicate low primer density")
+                    st.write("- This helps identify over/under-represented sequence regions")
         
         # dsRNA-specific analysis
         if t7_enabled and primers:
