@@ -1555,7 +1555,7 @@ class PrimerDesigner:
             return {
                 'dsrna_length': dsrna_length,
                 'dsrna_gc_content': gc_content,
-                'target_sequence': target_sequence[:100] + '...' if len(target_sequence) > 100 else target_sequence,
+                'target_sequence': target_sequence,
                 'optimal_length': optimal_length,
                 'moderate_gc': moderate_gc,
                 'transcription_efficiency': t7_efficiency,
@@ -4512,8 +4512,9 @@ def main():
                         st.write(f"**Estimated Yield:** {dsrna_props.get('estimated_yield', 'N/A')}")
                         
                         if 'target_sequence' in dsrna_props:
-                            st.write("**Target Sequence (first 100 bp):**")
+                            st.write("**Complete Target Sequence (for gBlock synthesis):**")
                             st.code(dsrna_props['target_sequence'], language="text")
+                            st.info("💡 **gBlock Synthesis**: This complete sequence can be used to order a synthetic DNA fragment (gBlock) as a positive control for your dsRNA production.")
                         
                         # siRNA Analysis within dsRNA
                         st.subheader("siRNA Analysis within dsRNA")
