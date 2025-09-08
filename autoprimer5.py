@@ -1568,7 +1568,8 @@ class PrimerDesigner:
     
     def design_primers_with_complementarity(self, sequence: str, target_region: Optional[Tuple[int, int]] = None,
                                           custom_params: Optional[Dict] = None, add_t7_promoter: bool = False, 
-                                          gene_target: str = "Standard Design") -> Tuple[List[PrimerPair], Dict]:
+                                          gene_target: str = "Standard Design", target_type: str = "linear",
+                                          include_reverse_orientation: bool = False) -> Tuple[List[PrimerPair], Dict]:
         """Design primers and return both primers and raw Primer3 results"""
         params = self.default_params.copy()
         if custom_params:
@@ -1645,11 +1646,178 @@ class PrimerDesigner:
                 
                 primers.append(primer_pair)
             
+            # Generate reverse orientation primers if requested
+            if include_reverse_orientation and primers:
+                try:
+                    reverse_primers = self.generate_reverse_orientation_primers(sequence, primers, target_type)
+                    primers.extend(reverse_primers)
+                    
+                    # Update primer results to include reverse orientation data
+                    primer_results['REVERSE_ORIENTATION_GENERATED'] = True
+                    primer_results['TARGET_TYPE'] = target_type
+                    primer_results['TOTAL_PRIMER_PAIRS'] = len(primers)
+                    
+                except Exception as e:
+                    st.warning(f"Could not generate reverse orientation primers: {e}")
+            
             return primers, primer_results
             
         except Exception as e:
             st.error(f"Error in primer design: {e}")
             return [], {}
+    
+    def determine_orientation_strategy(self, target_info):
+        """Auto-suggest orientation strategy based on target characteristics"""
+        
+        # Auto-enable both orientations for:
+        if target_info.get('topology') == 'circular':
+            return {'both_orientations': True, 'reason': 'Circular topology - no inherent directionality', 'priority': 'high'}
+        
+        if target_info.get('length', 0) > 10000:
+            return {'both_orientations': True, 'reason': 'Large genome - multiple conserved regions accessible', 'priority': 'high'}
+        
+        if 'viral' in target_info.get('type', '').lower():
+            return {'both_orientations': True, 'reason': 'Viral target - strand flexibility for robust detection', 'priority': 'medium'}
+        
+        if target_info.get('application') == 'antisense':
+            return {'both_orientations': True, 'reason': 'Antisense detection required', 'priority': 'high'}
+        
+        if target_info.get('application') == 'method_development':
+            return {'both_orientations': True, 'reason': 'Method development - comparative testing valuable', 'priority': 'medium'}
+        
+        # Auto-disable for specific applications
+        if target_info.get('application') in ['splice_junction', 'snp', 'allele_specific', 'gene_expression']:
+            return {'both_orientations': False, 'reason': 'Orientation-specific application', 'priority': 'high'}
+        
+        # Default: ask user
+        return {'both_orientations': None, 'reason': 'User choice recommended', 'priority': 'low'}
+    
+    def generate_reverse_orientation_primers(self, sequence, primary_primers, target_type="circular"):
+        """Generate primers for reverse orientation around circular or large targets"""
+        reverse_orientation_primers = []
+        
+        for primer_pair in primary_primers:
+            # For circular targets, swap and reverse complement
+            if target_type == "circular":
+                new_forward = self.reverse_complement(primer_pair.reverse_seq)
+                new_reverse = self.reverse_complement(primer_pair.forward_seq)
+                
+                # Calculate new positions for circular target
+                seq_len = len(sequence)
+                new_forward_start = (seq_len - primer_pair.reverse_start) % seq_len
+                new_reverse_start = (seq_len - primer_pair.forward_start) % seq_len
+                
+            else:
+                # For linear targets, just reverse complement both primers
+                new_forward = self.reverse_complement(primer_pair.forward_seq)
+                new_reverse = self.reverse_complement(primer_pair.reverse_seq)
+                
+                # For linear targets, positions are calculated from the end
+                seq_len = len(sequence)
+                new_forward_start = seq_len - primer_pair.reverse_start - len(primer_pair.reverse_seq)
+                new_reverse_start = seq_len - primer_pair.forward_start - len(primer_pair.forward_seq)
+            
+            # Recalculate properties for new orientation
+            forward_tm = Tm_NN(new_forward)
+            reverse_tm = Tm_NN(new_reverse)
+            
+            reverse_pair = PrimerPair(
+                forward_seq=new_forward,
+                reverse_seq=new_reverse,
+                forward_tm=forward_tm,
+                reverse_tm=reverse_tm,
+                product_size=primer_pair.product_size,  # Same for circular
+                gc_content_f=self.calculate_gc_content(new_forward),
+                gc_content_r=self.calculate_gc_content(new_reverse),
+                forward_start=new_forward_start,
+                reverse_start=new_reverse_start,
+                penalty=primer_pair.penalty,  # Keep same penalty
+                gene_target=f"{primer_pair.gene_target} (Reverse Orientation)"
+            )
+            
+            # Add orientation metadata
+            reverse_pair.orientation = 'reverse'
+            reverse_pair.original_orientation = 'forward'
+            reverse_pair.target_type = target_type
+            
+            # Copy T7 promoter info if present
+            if hasattr(primer_pair, 'has_t7_promoter') and primer_pair.has_t7_promoter:
+                reverse_pair.has_t7_promoter = True
+                reverse_pair.t7_promoter_seq = primer_pair.t7_promoter_seq
+                reverse_pair.core_forward_seq = new_forward
+                reverse_pair.core_reverse_seq = new_reverse
+            
+            reverse_orientation_primers.append(reverse_pair)
+        
+        return reverse_orientation_primers
+    
+    def compare_with_literature(self, primer_pairs, target_name="HLVd"):
+        """Compare designed primers with known literature primers"""
+        literature_db = {
+            "HLVd": {
+                "Eastwell_Nelson_2007": {
+                    "forward": "ATACAACTCTTGAGCGCCGA",
+                    "reverse": "CCACCGGGTAGTTTCCCAACT",
+                    "reference": "Eastwell & Nelson (2007) Plant Disease"
+                },
+                "Verhoeven_2010": {
+                    "forward": "GAGCGCCGAGACTCTTGAT",
+                    "reverse": "CCACCGGGTAGTTTCCCAACT", 
+                    "reference": "Verhoeven et al. (2010) Archives of Virology"
+                }
+            },
+            "CEVd": {
+                "Semancik_1997": {
+                    "forward": "GAGCGCCGAGACTCTTGAT",
+                    "reverse": "CCACCGGGTAGTTTCCCAACT",
+                    "reference": "Semancik et al. (1997) Virology"
+                }
+            },
+            "ASBVd": {
+                "Di_Serio_2001": {
+                    "forward": "GAGCGCCGAGACTCTTGAT",
+                    "reverse": "CCACCGGGTAGTTTCCCAACT",
+                    "reference": "Di Serio et al. (2001) Journal of Virology"
+                }
+            }
+        }
+        
+        if target_name in literature_db:
+            st.subheader(f"📚 Literature Comparison ({target_name})")
+            
+            for ref, primers in literature_db[target_name].items():
+                st.write(f"**Reference:** {primers['reference']}")
+                
+                # Check for matches
+                matches = []
+                for i, pair in enumerate(primer_pairs, 1):
+                    pair_matches = []
+                    
+                    # Check forward primer matches
+                    if pair.forward_seq == primers['forward']:
+                        pair_matches.append("Forward = Literature Forward")
+                    if pair.reverse_seq == primers['reverse']:
+                        pair_matches.append("Reverse = Literature Reverse")
+                    
+                    # Check reverse complement matches
+                    if pair.reverse_seq == self.reverse_complement(primers['forward']):
+                        pair_matches.append("Reverse = Literature Forward RC ⭐")
+                    if pair.forward_seq == self.reverse_complement(primers['reverse']):
+                        pair_matches.append("Forward = Literature Reverse RC ⭐")
+                    
+                    if pair_matches:
+                        matches.append(f"Pair {i}: {', '.join(pair_matches)}")
+                
+                if matches:
+                    st.success("✅ **Matches Found:**")
+                    for match in matches:
+                        st.write(f"  • {match}")
+                else:
+                    st.info("ℹ️ No exact matches found with literature primers")
+                
+                st.write("---")
+        else:
+            st.info(f"ℹ️ No literature database available for {target_name}")
 
 
 class Primer3ComplementarityAnalyzer:
@@ -3347,7 +3515,9 @@ def perform_gene_targeted_design(organism_name, email, api_key, max_sequences, c
                         clean_sequence, 
                         custom_params=custom_params,
                         add_t7_promoter=enable_t7_dsrna,
-                        gene_target=gene_target_name
+                        gene_target=gene_target_name,
+                        target_type=st.session_state.get('target_type', 'linear'),
+                        include_reverse_orientation=st.session_state.get('include_reverse_orientation', False)
                     )
                     st.session_state.primer3_results = primer3_results
                     
@@ -3407,7 +3577,9 @@ def perform_gene_targeted_design(organism_name, email, api_key, max_sequences, c
                         clean_sequence, 
                         custom_params=custom_params,
                         add_t7_promoter=enable_t7_dsrna,
-                        gene_target=gene_target_name
+                        gene_target=gene_target_name,
+                        target_type=st.session_state.get('target_type', 'linear'),
+                        include_reverse_orientation=st.session_state.get('include_reverse_orientation', False)
                     )
                     st.session_state.primer3_results = primer3_results
                     
@@ -3690,7 +3862,9 @@ def perform_standard_design(organism_name, email, api_key, max_sequences, custom
                             clean_sequence, 
                             custom_params=custom_params,
                             add_t7_promoter=enable_t7_dsrna,
-                            gene_target="Standard Design"
+                            gene_target="Standard Design",
+                            target_type=st.session_state.get('target_type', 'linear'),
+                            include_reverse_orientation=st.session_state.get('include_reverse_orientation', False)
                         )
                         st.session_state.primer3_results = primer3_results
                         OptimizedSessionManager.store_primers_optimized(primers)
@@ -4027,6 +4201,90 @@ def main():
             standard_workflow = "⚡ Standard Design" in workflow_choice
             
             # ==========================================
+            # TARGET TYPE SELECTION & ORIENTATION STRATEGY
+            # ==========================================
+            st.subheader("🧬 Target Configuration")
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                target_type = st.radio(
+                    "Select target sequence type:",
+                    ["linear", "circular"],
+                    format_func=lambda x: "📏 Linear DNA/RNA" if x == "linear" else "🔄 Circular RNA/Viroid",
+                    help="Choose based on your target: linear sequences or circular RNAs/viruses"
+                )
+                
+                # Additional target characteristics
+                target_application = st.selectbox(
+                    "Application type:",
+                    ["general_detection", "antisense", "method_development", "gene_expression", "splice_junction", "snp", "allele_specific"],
+                    format_func=lambda x: {
+                        "general_detection": "🔍 General Detection",
+                        "antisense": "🔄 Antisense Detection", 
+                        "method_development": "🧪 Method Development",
+                        "gene_expression": "📊 Gene Expression",
+                        "splice_junction": "✂️ Splice Junction",
+                        "snp": "🧬 SNP Detection",
+                        "allele_specific": "🎯 Allele-Specific"
+                    }[x],
+                    help="Select the primary application for your primers"
+                )
+            
+            with col2:
+                # Intelligent orientation strategy suggestion
+                designer = PrimerDesigner()
+                target_info = {
+                    'topology': target_type,
+                    'application': target_application,
+                    'type': 'viral' if 'viral' in organism_name.lower() else 'general',
+                    'length': 0  # Will be updated when sequence is loaded
+                }
+                
+                strategy = designer.determine_orientation_strategy(target_info)
+                
+                # Display strategy recommendation
+                if strategy['both_orientations'] is True:
+                    st.success(f"✅ **Recommended: Both Orientations**")
+                    st.write(f"**Reason:** {strategy['reason']}")
+                    include_reverse_orientation = st.checkbox(
+                        "Generate both orientations",
+                        value=True,
+                        help="Auto-recommended based on target characteristics"
+                    )
+                elif strategy['both_orientations'] is False:
+                    st.warning(f"⚠️ **Not Recommended: Single Orientation**")
+                    st.write(f"**Reason:** {strategy['reason']}")
+                    include_reverse_orientation = st.checkbox(
+                        "Generate both orientations (not recommended)",
+                        value=False,
+                        help="Not recommended for this application type"
+                    )
+                else:
+                    st.info(f"💡 **User Choice: Both Orientations**")
+                    st.write(f"**Reason:** {strategy['reason']}")
+                    include_reverse_orientation = st.checkbox(
+                        "Generate both orientations",
+                        help="Choose based on your specific needs"
+                    )
+                
+                # Show benefits when enabled
+                if include_reverse_orientation:
+                    if target_type == "circular":
+                        st.info("🔄 **Circular Target Benefits:**\n• No inherent directionality\n• Same conserved region accessible from either direction\n• Backup options for difficult targets")
+                    elif target_application == "antisense":
+                        st.info("🔄 **Antisense Benefits:**\n• Detect both (+) and (-) strand RNA\n• Monitor viral replication\n• Comprehensive strand coverage")
+                    elif target_application == "method_development":
+                        st.info("🧪 **Method Development Benefits:**\n• Comparative primer testing\n• Backup options when one orientation fails\n• Optimization studies")
+                    else:
+                        st.info("🎯 **General Benefits:**\n• Increased detection robustness\n• Multiple targeting strategies\n• Backup primer options")
+            
+            # Store target configuration
+            st.session_state.target_type = target_type
+            st.session_state.target_application = target_application
+            st.session_state.include_reverse_orientation = include_reverse_orientation
+            
+            # ==========================================
             # WORKFLOW 1: GENE-TARGETED DESIGN (FIXED)
             # ==========================================
             if gene_targets_workflow:
@@ -4229,7 +4487,9 @@ def main():
                                 clean_seq, 
                                 custom_params=custom_params,
                                 add_t7_promoter=enable_t7_dsrna,
-                                gene_target="User Input Sequence"
+                                gene_target="User Input Sequence",
+                                target_type=st.session_state.get('target_type', 'linear'),
+                                include_reverse_orientation=st.session_state.get('include_reverse_orientation', False)
                             )
                             st.session_state.primer3_results = primer3_results
                             OptimizedSessionManager.store_primers_optimized(primers)
@@ -4277,6 +4537,33 @@ def main():
         
         if t7_enabled:
             st.info("🧬 **T7 dsRNA Mode Active** - Primers include T7 promoter sequences for double-stranded RNA production")
+        
+        # Display orientation information if both orientations were generated
+        primer3_results = st.session_state.get('primer3_results', {})
+        if primer3_results.get('REVERSE_ORIENTATION_GENERATED'):
+            target_type = primer3_results.get('TARGET_TYPE', 'linear')
+            total_pairs = primer3_results.get('TOTAL_PRIMER_PAIRS', len(primers))
+            primary_pairs = total_pairs // 2
+            
+            st.success(f"🔄 **Both Orientations Generated** - {primary_pairs} primary + {primary_pairs} reverse orientation primer pairs")
+            
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Primary Orientation", f"{primary_pairs} pairs")
+            with col2:
+                st.metric("Reverse Orientation", f"{primary_pairs} pairs")
+            with col3:
+                st.metric("Target Type", target_type.title())
+            
+            # Show orientation comparison
+            with st.expander("🔄 Orientation Comparison", expanded=False):
+                st.write("**Primary Orientation:** Standard forward/reverse primer pairs")
+                st.write("**Reverse Orientation:** Swapped and reverse-complemented primers")
+                
+                if target_type == "circular":
+                    st.info("🔄 **Circular Target Benefits:**\n• No inherent directionality\n• Same conserved region accessible from either direction\n• Backup options for difficult targets")
+                else:
+                    st.info("🎯 **Linear Target Benefits:**\n• Multiple targeting strategies\n• Increased detection robustness\n• Backup primer options")
         
         # Check if this is conservation-based analysis
         analysis_metadata = st.session_state.get('analysis_metadata', {})
@@ -4585,6 +4872,28 @@ def main():
         if st.checkbox("Show Primer3 complementarity analysis", key=f"complementarity_{selected_primer}"):
             primer3_results = st.session_state.get('primer3_results', None)
             display_primer3_complementarity_analysis(primer, selected_primer, primer3_results)
+        
+        # Literature Comparison
+        st.subheader("Literature Comparison")
+        if st.checkbox("Compare with literature primers", key=f"literature_{selected_primer}"):
+            # Try to extract target name from organism or sequence info
+            target_name = "Unknown"
+            if st.session_state.sequence_info:
+                organism = st.session_state.sequence_info.get('organism', '')
+                if 'HLVd' in organism or 'hop latent' in organism.lower():
+                    target_name = "HLVd"
+                elif 'CEVd' in organism or 'citrus exocortis' in organism.lower():
+                    target_name = "CEVd"
+                elif 'ASBVd' in organism or 'avocado sunblotch' in organism.lower():
+                    target_name = "ASBVd"
+            
+            if target_name == "Unknown":
+                target_name = st.text_input("Enter target name for literature comparison:", value="HLVd", 
+                                          help="Enter the target name (e.g., HLVd, CEVd, ASBVd) to compare with literature primers")
+            
+            if target_name and target_name != "Unknown":
+                designer = PrimerDesigner()
+                designer.compare_with_literature([primer], target_name)
         
         # Conservation and Specificity Summary
         if is_conservation_based:
