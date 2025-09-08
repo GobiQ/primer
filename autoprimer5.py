@@ -16,8 +16,22 @@ import random
 from dataclasses import dataclass
 from Bio.SeqUtils.MeltingTemp import Tm_NN
 from Bio.Align import PairwiseAligner
-from Bio.SeqUtils import GC
 import plotly.express as px
+import primer3
+import re
+from Bio import Entrez, SeqIO
+import io
+import pickle
+import gzip
+from datetime import datetime, timedelta
+from functools import wraps
+from urllib.error import HTTPError
+from Bio.Blast import NCBIWWW, NCBIXML
+from pathlib import Path
+import base64
+from collections import defaultdict
+import warnings
+warnings.filterwarnings("ignore")
 
 def get_related_organisms(target_organism, max_organisms=100):
     """Get comprehensive list of related organisms for specificity testing (100+ organisms)"""
@@ -123,7 +137,6 @@ def get_related_organisms(target_organism, max_organisms=100):
             all_organisms.extend(organisms)
         
         # Add random selection from remaining organisms
-        import random
         remaining_organisms = [org for org in all_organisms if org not in diverse_set]
         if remaining_organisms:
             diverse_set.extend(random.sample(remaining_organisms, min(remaining_needed, len(remaining_organisms))))
@@ -1260,46 +1273,6 @@ def generate_gene_target_statistics():
     except Exception as e:
         st.error(f"Error generating statistics: {e}")
         return {}, {}, {}
-
-#!/usr/bin/env python3
-"""
-Streamlit Web Application for Automated Primer Design - COMPLETE FIXED VERSION
-============================================================================
-
-Complete version with T7 dsRNA functionality and all bug fixes.
-
-"""
-
-import streamlit as st
-import pandas as pd
-import plotly.express as px
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
-import requests
-import json
-import time
-import io
-import random
-import pickle
-import gzip
-from datetime import datetime, timedelta
-from functools import wraps
-from urllib.error import HTTPError
-from typing import Dict, List, Optional, Tuple
-from dataclasses import dataclass
-from Bio import Entrez, SeqIO
-from Bio.Seq import Seq
-from Bio.SeqUtils.MeltingTemp import Tm_NN
-from Bio.Align import PairwiseAligner
-from Bio.Blast import NCBIWWW, NCBIXML
-import primer3
-import re
-from pathlib import Path
-import base64
-import numpy as np
-from collections import defaultdict
-import warnings
-warnings.filterwarnings("ignore")
 
 # Configure Streamlit page
 st.set_page_config(
@@ -4750,6 +4723,81 @@ def main():
         """, 
         unsafe_allow_html=True
     )
+
+class OptimizedSessionManager:
+    """Optimized session state manager for large primer datasets"""
+    
+    @staticmethod
+    def store_primers_optimized(primers: List[PrimerPair]):
+        """Store primers in session state with compression for large datasets"""
+        try:
+            if len(primers) > 50:  # Compress large datasets
+                compressed_data = OptimizedSessionManager.compress_session_data(primers)
+                st.session_state.primers_designed = compressed_data
+            else:
+                st.session_state.primers_designed = primers
+        except Exception as e:
+            st.error(f"Error storing primers: {e}")
+            st.session_state.primers_designed = primers
+    
+    @staticmethod
+    def get_primers_optimized() -> List[PrimerPair]:
+        """Retrieve primers from session state with decompression if needed"""
+        try:
+            primers_data = st.session_state.get('primers_designed', [])
+            
+            if isinstance(primers_data, dict) and primers_data.get('_compressed'):
+                return OptimizedSessionManager.decompress_session_data(primers_data)
+            elif isinstance(primers_data, list):
+                return primers_data
+            else:
+                return []
+        except Exception as e:
+            st.error(f"Error retrieving primers: {e}")
+            return []
+    
+    @staticmethod
+    def compress_session_data(data):
+        """Compress large datasets for session state"""
+        try:
+            compressed = gzip.compress(pickle.dumps(data))
+            return {
+                '_compressed': True,
+                'data': base64.b64encode(compressed).decode('utf-8'),
+                'timestamp': datetime.now().isoformat()
+            }
+        except Exception as e:
+            st.error(f"Compression failed: {e}")
+            return data
+    
+    @staticmethod
+    def decompress_session_data(compressed_data):
+        """Decompress session state data"""
+        try:
+            if compressed_data.get('_compressed'):
+                compressed = base64.b64decode(compressed_data['data'])
+                return pickle.loads(gzip.decompress(compressed))
+            else:
+                return compressed_data
+        except Exception as e:
+            st.error(f"Decompression failed: {e}")
+            return []
+    
+    @staticmethod
+    def cleanup_session_state():
+        """Clean up stale session state data"""
+        try:
+            # Remove old compressed data
+            if 'primers_designed' in st.session_state:
+                primers_data = st.session_state.primers_designed
+                if isinstance(primers_data, dict) and primers_data.get('_compressed'):
+                    timestamp = primers_data.get('timestamp')
+                    if timestamp:
+                        data_time = datetime.fromisoformat(timestamp)
+                        if datetime.now() - data_time > timedelta(hours=24):
+                            del st.session_state.primers_designed
+        except Exception as e:
+            pass  # Silent cleanup failure
 
 if __name__ == "__main__":
     main()
