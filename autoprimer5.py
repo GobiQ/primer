@@ -3547,8 +3547,7 @@ def main():
         if var not in st.session_state:
             st.session_state[var] = default_value
     
-    st.title("🧬 Automated Primer Design Tool")
-    st.markdown("### Design PCR primers with NCBI database integration and T7 dsRNA functionality")
+    st.title("AutoPrimer")
     
     
     # Sidebar configuration
