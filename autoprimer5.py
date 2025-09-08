@@ -3249,11 +3249,15 @@ def perform_gene_targeted_design(organism_name, email, api_key, max_sequences, c
         
         designer = PrimerDesigner()
         
+        # Get user-configured limit or default to 5
+        max_genes = st.session_state.get('max_genes_to_process', 5)
+        genes_to_process = selected_genes[:max_genes]
+        
         with st.spinner(f"Designing gene-targeted primers for {organism_name}..."):
-            for i, gene_info in enumerate(selected_genes[:5]):
+            for i, gene_info in enumerate(genes_to_process):
                 try:
-                    progress_bar.progress((i + 1) / min(len(selected_genes), 5))
-                    status_text.text(f"Processing gene {i+1}/{min(len(selected_genes), 5)}: {gene_info}")
+                    progress_bar.progress((i + 1) / len(genes_to_process))
+                    status_text.text(f"Processing gene {i+1}/{len(genes_to_process)}: {gene_info}")
                     
                     # Parse gene info: "Category: Gene name"
                     if ': ' in gene_info:
@@ -4071,10 +4075,33 @@ def main():
                             
                             # Show selected genes
                             st.write("**Selected Gene Targets:**")
+                            total_genes = 0
                             for category in selected_categories:
                                 st.write(f"**{category}:**")
                                 for gene in organism_targets['gene_targets'][category]:
                                     st.write(f"  • {gene}")
+                                    total_genes += 1
+                            
+                            # Gene processing limit configuration
+                            st.subheader("⚙️ Processing Configuration")
+                            col1, col2 = st.columns(2)
+                            
+                            with col1:
+                                max_genes_to_process = st.number_input(
+                                    "Maximum genes to process:",
+                                    min_value=1,
+                                    max_value=min(50, total_genes),
+                                    value=min(5, total_genes),
+                                    help=f"Processing {total_genes} total genes. Higher numbers take longer but provide more comprehensive results."
+                                )
+                            
+                            with col2:
+                                if total_genes > 5:
+                                    st.warning(f"⚠️ Processing {total_genes} genes may take several minutes")
+                                    st.info("💡 **Tip**: Start with 5 genes for faster results, then increase if needed")
+                            
+                            # Store the max genes setting
+                            st.session_state.max_genes_to_process = max_genes_to_process
                             
                             # Design button
                             if st.button("🎯 Design Gene-Targeted Primers", type="primary", key="gene_design_final"):
