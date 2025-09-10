@@ -1262,8 +1262,12 @@ PCR Protocol for dsRNA Production:
             
             return score
         
+        # Calculate scores and add them to the candidates
+        for sirna in sirna_candidates:
+            sirna['score'] = score_sirna(sirna)
+        
         # Sort by score (highest first)
-        return sorted(sirna_candidates, key=score_sirna, reverse=True)
+        return sorted(sirna_candidates, key=lambda x: x['score'], reverse=True)
 
 def create_conservation_map(sequences: Dict[str, str], results_df: pd.DataFrame) -> go.Figure:
     """Create a clear graphical conservation map with color-coded regions"""
@@ -2850,6 +2854,11 @@ def main():
         # Comprehensive Analysis Section
         st.subheader("🧬 Comprehensive Analysis")
         
+        # Check if analysis data exists
+        if 'amplicon_analysis' not in primer_results:
+            st.error("Analysis data not found. Please regenerate primers.")
+            return
+        
         # Amplicon Analysis
         st.subheader("📊 Amplicon Analysis")
         amplicon_analysis = primer_results['amplicon_analysis']
@@ -2883,6 +2892,10 @@ def main():
         
         # RNA Analysis
         st.subheader("🧬 Transcribed RNA Analysis")
+        if 'rna_analysis' not in primer_results:
+            st.error("RNA analysis data not found. Please regenerate primers.")
+            return
+        
         rna_analysis = primer_results['rna_analysis']
         
         col1, col2, col3 = st.columns(3)
@@ -2917,6 +2930,10 @@ def main():
         
         # siRNA Analysis
         st.subheader("🎯 siRNA Production Analysis")
+        if 'sirna_analysis' not in primer_results:
+            st.error("siRNA analysis data not found. Please regenerate primers.")
+            return
+        
         sirna_analysis = primer_results['sirna_analysis']
         
         col1, col2, col3 = st.columns(3)
@@ -2929,10 +2946,12 @@ def main():
         
         # Top siRNA candidates
         st.write("**Top siRNA Candidates:**")
+        st.info("💡 **Scoring System**: siRNA candidates are scored out of 20 based on GC content (40-60% optimal), thermodynamic stability, asymmetry (important for RISC loading), and absence of problematic sequences (consecutive Gs/Cs). Higher scores indicate better siRNA candidates.")
         top_sirnas = sirna_analysis['top_sirnas']
         
         for i, sirna in enumerate(top_sirnas[:5]):  # Show top 5
-            with st.expander(f"siRNA #{i+1}: {sirna['sequence']} (Score: {sirna.get('score', 'N/A')})"):
+            score = sirna.get('score', 0)
+            with st.expander(f"siRNA #{i+1}: {sirna['sequence']} (Score: {score:.1f})"):
                 col1, col2 = st.columns(2)
                 
                 with col1:
@@ -2941,6 +2960,7 @@ def main():
                     st.write(f"- Position: {sirna['position']}")
                     st.write(f"- Source: {sirna['source']}")
                     st.write(f"- GC Content: {sirna['gc_content']:.1f}%")
+                    st.write(f"- Quality Score: {score:.1f}/20")
                 
                 with col2:
                     st.write("**Thermodynamic Properties:**")
@@ -2960,15 +2980,18 @@ def main():
         
         # siRNA export
         sirna_export_data = "siRNA Analysis Results\n" + "="*50 + "\n\n"
-        sirna_export_data += f"Total candidates: {sirna_analysis['total_sirna_candidates']}\n"
-        sirna_export_data += f"Average GC content: {sirna_analysis['average_gc_content']:.1f}%\n\n"
-        
-        sirna_export_data += "Top siRNA Candidates:\n" + "-"*30 + "\n"
-        for i, sirna in enumerate(top_sirnas[:10]):
-            sirna_export_data += f"{i+1}. {sirna['sequence']}\n"
-            sirna_export_data += f"   Position: {sirna['position']}, Source: {sirna['source']}\n"
-            sirna_export_data += f"   GC Content: {sirna['gc_content']:.1f}%\n"
-            sirna_export_data += f"   Stability: {sirna['thermodynamic_properties']['thermodynamic_stability']}\n\n"
+        if 'sirna_analysis' in primer_results:
+            sirna_export_data += f"Total candidates: {sirna_analysis['total_sirna_candidates']}\n"
+            sirna_export_data += f"Average GC content: {sirna_analysis['average_gc_content']:.1f}%\n\n"
+            
+            sirna_export_data += "Top siRNA Candidates:\n" + "-"*30 + "\n"
+            for i, sirna in enumerate(top_sirnas[:10]):
+                sirna_export_data += f"{i+1}. {sirna['sequence']}\n"
+                sirna_export_data += f"   Position: {sirna['position']}, Source: {sirna['source']}\n"
+                sirna_export_data += f"   GC Content: {sirna['gc_content']:.1f}%\n"
+                sirna_export_data += f"   Stability: {sirna['thermodynamic_properties']['thermodynamic_stability']}\n\n"
+        else:
+            sirna_export_data = "siRNA analysis data not available. Please regenerate primers."
         
         
         # Export options
@@ -3008,13 +3031,22 @@ Type: {primer_results['type']}
         
         with col2:
             # Export RNA sequence
-            st.download_button(
-                label="📥 Download RNA Sequence",
-                data=rna_analysis['sequence'],
-                file_name=f"rna_{primer_results['type']}_{rna_analysis['length']}nt.fasta",
-                mime="text/plain",
-                help="Download the transcribed RNA sequence in FASTA format"
-            )
+            if 'rna_analysis' in primer_results:
+                st.download_button(
+                    label="📥 Download RNA Sequence",
+                    data=rna_analysis['sequence'],
+                    file_name=f"rna_{primer_results['type']}_{rna_analysis['length']}nt.fasta",
+                    mime="text/plain",
+                    help="Download the transcribed RNA sequence in FASTA format"
+                )
+            else:
+                st.download_button(
+                    label="📥 Download RNA Sequence",
+                    data="RNA analysis data not available",
+                    file_name="rna_analysis_not_available.txt",
+                    mime="text/plain",
+                    help="RNA analysis data not available. Please regenerate primers."
+                )
         
         with col3:
             # Export amplicon sequence
