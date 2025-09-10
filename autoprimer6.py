@@ -784,6 +784,11 @@ class PrimerGenerator:
         amplicon_length = len(target_sequence)
         amplicon_sequence = target_sequence
         
+        # Perform comprehensive analysis
+        amplicon_analysis = self.analyze_amplicon(amplicon_sequence, "dsRNA")
+        rna_analysis = self.analyze_transcribed_rna(amplicon_sequence, "dsRNA")
+        sirna_analysis = self.analyze_sirna_production(rna_analysis, "dsRNA")
+        
         return {
             "type": "dsRNA",
             "forward_primer": {
@@ -801,7 +806,9 @@ class PrimerGenerator:
                 "sequence": amplicon_sequence,
                 "description": "Full target sequence with T7 promoters for dsRNA production"
             },
-            "protocol": self._generate_dsrna_protocol()
+            "amplicon_analysis": amplicon_analysis,
+            "rna_analysis": rna_analysis,
+            "sirna_analysis": sirna_analysis
         }
     
     def design_hairpin_primers(self, target_sequence: str, loop_type: str = "medium", 
@@ -835,6 +842,11 @@ class PrimerGenerator:
         forward_props = self._calculate_primer_properties(forward_primer)
         reverse_props = self._calculate_primer_properties(reverse_primer)
         
+        # Perform comprehensive analysis
+        amplicon_analysis = self.analyze_amplicon(hairpin_construct, "hairpin")
+        rna_analysis = self.analyze_transcribed_rna(hairpin_construct, "hairpin")
+        sirna_analysis = self.analyze_sirna_production(rna_analysis, "hairpin")
+        
         return {
             "type": "hairpin",
             "forward_primer": {
@@ -854,7 +866,9 @@ class PrimerGenerator:
                 "loop_type": loop_type,
                 "description": f"Hairpin construct with {loop_type} loop for RNAi"
             },
-            "protocol": self._generate_hairpin_protocol()
+            "amplicon_analysis": amplicon_analysis,
+            "rna_analysis": rna_analysis,
+            "sirna_analysis": sirna_analysis
         }
     
     def _find_optimal_binding_site(self, sequence: str, primer_length: int) -> str:
@@ -988,35 +1002,268 @@ PCR Protocol for dsRNA Production:
 4. Expected Yield: 50-200 μg dsRNA per reaction
         """
     
-    def _generate_hairpin_protocol(self) -> str:
-        """Generate PCR protocol for hairpin RNA production"""
-        return """
-PCR Protocol for Hairpin RNA Production:
-
-1. PCR Reaction Setup (50 μL):
-   - Template DNA: 1-10 ng
-   - Forward primer (T7): 0.5 μM
-   - Reverse primer (T7): 0.5 μM
-   - dNTPs: 200 μM each
-   - Taq polymerase: 1.25 U
-   - Buffer: 1x
-   - Water: to 50 μL
-
-2. PCR Conditions:
-   - Initial denaturation: 95°C for 5 min
-   - 35 cycles:
-     * Denaturation: 95°C for 30 sec
-     * Annealing: 60°C for 30 sec
-     * Extension: 72°C for 1 min/kb
-   - Final extension: 72°C for 10 min
-
-3. In Vitro Transcription:
-   - Use T7 RNA polymerase
-   - Incubate at 37°C for 2-4 hours
-   - RNA will form hairpin structure automatically
-
-4. Expected Yield: 50-200 μg hairpin RNA per reaction
-        """
+    def analyze_amplicon(self, amplicon_sequence: str, amplicon_type: str) -> Dict:
+        """Analyze the amplicon that will be produced"""
+        analysis = {
+            "length": len(amplicon_sequence),
+            "gc_content": self._calculate_gc_content(amplicon_sequence),
+            "base_composition": self._calculate_base_composition(amplicon_sequence),
+            "complexity": self._calculate_sequence_complexity([amplicon_sequence]),
+            "type": amplicon_type
+        }
+        
+        if amplicon_type == "hairpin":
+            # Analyze hairpin structure
+            loop_start = len(amplicon_sequence) // 2 - 5  # Approximate loop position
+            loop_end = len(amplicon_sequence) // 2 + 5
+            
+            # Find the actual loop by looking for the loop sequence
+            for loop_seq in self.HAIRPIN_LOOPS.values():
+                if loop_seq in amplicon_sequence:
+                    loop_start = amplicon_sequence.find(loop_seq)
+                    loop_end = loop_start + len(loop_seq)
+                    break
+            
+            analysis.update({
+                "loop_position": (loop_start, loop_end),
+                "stem_length": loop_start,
+                "loop_length": loop_end - loop_start,
+                "hairpin_stability": self._predict_hairpin_stability(amplicon_sequence, loop_start, loop_end)
+            })
+        
+        return analysis
+    
+    def analyze_transcribed_rna(self, amplicon_sequence: str, amplicon_type: str) -> Dict:
+        """Analyze the RNA that will be transcribed"""
+        # Convert DNA to RNA (T -> U)
+        rna_sequence = amplicon_sequence.replace('T', 'U')
+        
+        analysis = {
+            "sequence": rna_sequence,
+            "length": len(rna_sequence),
+            "gc_content": self._calculate_gc_content(rna_sequence),
+            "base_composition": self._calculate_base_composition(rna_sequence),
+            "type": amplicon_type
+        }
+        
+        if amplicon_type == "hairpin":
+            # Analyze hairpin RNA structure
+            loop_start = len(rna_sequence) // 2 - 5
+            loop_end = len(rna_sequence) // 2 + 5
+            
+            # Find the actual loop
+            for loop_seq in self.HAIRPIN_LOOPS.values():
+                rna_loop = loop_seq.replace('T', 'U')
+                if rna_loop in rna_sequence:
+                    loop_start = rna_sequence.find(rna_loop)
+                    loop_end = loop_start + len(rna_loop)
+                    break
+            
+            analysis.update({
+                "loop_position": (loop_start, loop_end),
+                "stem_length": loop_start,
+                "loop_length": loop_end - loop_start,
+                "predicted_structure": self._predict_rna_secondary_structure(rna_sequence, loop_start, loop_end),
+                "thermodynamic_stability": self._calculate_rna_stability(rna_sequence, loop_start, loop_end)
+            })
+        else:
+            # dsRNA analysis
+            analysis.update({
+                "strand_complementarity": self._analyze_strand_complementarity(rna_sequence),
+                "predicted_ds_structure": "Double-stranded RNA with T7 promoters"
+            })
+        
+        return analysis
+    
+    def analyze_sirna_production(self, rna_analysis: Dict, amplicon_type: str) -> Dict:
+        """Analyze siRNA production from the transcribed RNA"""
+        rna_sequence = rna_analysis['sequence']
+        
+        # Generate potential siRNA sequences (21-23 bp)
+        sirna_candidates = []
+        
+        if amplicon_type == "hairpin":
+            # For hairpin RNA, analyze both stem regions
+            loop_start, loop_end = rna_analysis['loop_position']
+            stem1 = rna_sequence[:loop_start]
+            stem2 = rna_analysis['sequence'][loop_end:]
+            
+            # Generate siRNAs from both stems
+            for stem_seq in [stem1, stem2]:
+                for i in range(len(stem_seq) - 20):
+                    sirna = stem_seq[i:i+21]
+                    if len(sirna) == 21:
+                        sirna_candidates.append({
+                            "sequence": sirna,
+                            "position": i,
+                            "source": "stem1" if stem_seq == stem1 else "stem2",
+                            "gc_content": self._calculate_gc_content(sirna),
+                            "thermodynamic_properties": self._analyze_sirna_thermodynamics(sirna)
+                        })
+        else:
+            # For dsRNA, analyze the entire sequence
+            for i in range(len(rna_sequence) - 20):
+                sirna = rna_sequence[i:i+21]
+                if len(sirna) == 21:
+                    sirna_candidates.append({
+                        "sequence": sirna,
+                        "position": i,
+                        "source": "dsRNA",
+                        "gc_content": self._calculate_gc_content(sirna),
+                        "thermodynamic_properties": self._analyze_sirna_thermodynamics(sirna)
+                    })
+        
+        # Rank siRNA candidates
+        ranked_sirnas = self._rank_sirna_candidates(sirna_candidates)
+        
+        return {
+            "total_sirna_candidates": len(sirna_candidates),
+            "top_sirnas": ranked_sirnas[:10],  # Top 10 candidates
+            "average_gc_content": sum(s['gc_content'] for s in sirna_candidates) / len(sirna_candidates) if sirna_candidates else 0,
+            "optimal_length_range": "21-23 bp",
+            "recommended_sirnas": ranked_sirnas[:3]  # Top 3 recommendations
+        }
+    
+    def _calculate_base_composition(self, sequence: str) -> Dict:
+        """Calculate base composition"""
+        total = len(sequence)
+        return {
+            "A": sequence.count('A') / total * 100,
+            "T": sequence.count('T') / total * 100,
+            "G": sequence.count('G') / total * 100,
+            "C": sequence.count('C') / total * 100,
+            "U": sequence.count('U') / total * 100
+        }
+    
+    def _calculate_sequence_complexity(self, sequences: List[str]) -> float:
+        """Calculate sequence complexity (Shannon entropy)"""
+        if not sequences:
+            return 0.0
+        
+        combined_seq = ''.join(sequences)
+        base_counts = {}
+        for base in combined_seq:
+            if base in 'ATGCU':
+                base_counts[base] = base_counts.get(base, 0) + 1
+        
+        if not base_counts:
+            return 0.0
+        
+        total_bases = sum(base_counts.values())
+        entropy = 0.0
+        
+        for count in base_counts.values():
+            if count > 0:
+                p = count / total_bases
+                entropy -= p * math.log2(p)
+        
+        return entropy
+    
+    def _predict_hairpin_stability(self, sequence: str, loop_start: int, loop_end: int) -> str:
+        """Predict hairpin stability based on stem length and GC content"""
+        stem1 = sequence[:loop_start]
+        stem2 = sequence[loop_end:]
+        
+        if len(stem1) != len(stem2):
+            return "Unstable (unequal stem lengths)"
+        
+        stem_gc = (stem1.count('G') + stem1.count('C') + stem2.count('G') + stem2.count('C')) / (2 * len(stem1)) * 100
+        
+        if stem_gc > 60 and len(stem1) > 15:
+            return "Very stable"
+        elif stem_gc > 50 and len(stem1) > 10:
+            return "Stable"
+        elif stem_gc > 40 and len(stem1) > 8:
+            return "Moderately stable"
+        else:
+            return "Unstable"
+    
+    def _predict_rna_secondary_structure(self, rna_sequence: str, loop_start: int, loop_end: int) -> str:
+        """Predict RNA secondary structure"""
+        stem_length = loop_start
+        loop_length = loop_end - loop_start
+        
+        if stem_length > 20 and loop_length < 15:
+            return "Stable hairpin with long stems"
+        elif stem_length > 15 and loop_length < 12:
+            return "Moderate hairpin structure"
+        elif stem_length > 10 and loop_length < 10:
+            return "Short hairpin structure"
+        else:
+            return "Weak or no hairpin structure"
+    
+    def _calculate_rna_stability(self, rna_sequence: str, loop_start: int, loop_end: int) -> float:
+        """Calculate thermodynamic stability of RNA structure"""
+        stem1 = rna_sequence[:loop_start]
+        stem2 = rna_sequence[loop_end:]
+        
+        # Simplified stability calculation based on GC content and length
+        gc_content = (stem1.count('G') + stem1.count('C') + stem2.count('G') + stem2.count('C')) / (2 * len(stem1)) * 100
+        length_factor = min(len(stem1) / 20, 1.0)  # Normalize to max length of 20
+        
+        stability_score = (gc_content / 100) * length_factor
+        return stability_score
+    
+    def _analyze_strand_complementarity(self, rna_sequence: str) -> Dict:
+        """Analyze complementarity between RNA strands"""
+        # For dsRNA, we assume perfect complementarity
+        return {
+            "complementarity_percentage": 100.0,
+            "mismatches": 0,
+            "structure": "Perfect double-stranded RNA"
+        }
+    
+    def _analyze_sirna_thermodynamics(self, sirna_sequence: str) -> Dict:
+        """Analyze thermodynamic properties of siRNA"""
+        gc_content = self._calculate_gc_content(sirna_sequence)
+        
+        # Analyze 5' and 3' ends
+        five_prime = sirna_sequence[:2]
+        three_prime = sirna_sequence[-2:]
+        
+        # Calculate asymmetry (important for RISC loading)
+        five_prime_gc = (five_prime.count('G') + five_prime.count('C')) / 2 * 100
+        three_prime_gc = (three_prime.count('G') + three_prime.count('C')) / 2 * 100
+        asymmetry = abs(five_prime_gc - three_prime_gc)
+        
+        return {
+            "gc_content": gc_content,
+            "five_prime_end": five_prime,
+            "three_prime_end": three_prime,
+            "asymmetry_score": asymmetry,
+            "thermodynamic_stability": "High" if 40 <= gc_content <= 60 else "Suboptimal"
+        }
+    
+    def _rank_sirna_candidates(self, sirna_candidates: List[Dict]) -> List[Dict]:
+        """Rank siRNA candidates by quality"""
+        def score_sirna(sirna):
+            score = 0
+            
+            # GC content scoring (40-60% is optimal)
+            gc = sirna['gc_content']
+            if 40 <= gc <= 60:
+                score += 10
+            else:
+                score += max(0, 10 - abs(gc - 50) / 5)
+            
+            # Thermodynamic properties
+            thermo = sirna['thermodynamic_properties']
+            if thermo['thermodynamic_stability'] == "High":
+                score += 5
+            
+            # Asymmetry scoring (lower is better for RISC loading)
+            asymmetry = thermo['asymmetry_score']
+            score += max(0, 5 - asymmetry / 10)
+            
+            # Avoid sequences with too many consecutive Gs or Cs
+            seq = sirna['sequence']
+            if 'GGGG' in seq or 'CCCC' in seq:
+                score -= 3
+            
+            return score
+        
+        # Sort by score (highest first)
+        return sorted(sirna_candidates, key=score_sirna, reverse=True)
 
 def create_conservation_map(sequences: Dict[str, str], results_df: pd.DataFrame) -> go.Figure:
     """Create a clear graphical conservation map with color-coded regions"""
@@ -2600,14 +2847,134 @@ def main():
             
             st.code(formatted_amplicon, language=None)
         
-        # PCR Protocol
-        st.subheader("PCR Protocol")
-        st.text(primer_results['protocol'])
+        # Comprehensive Analysis Section
+        st.subheader("🧬 Comprehensive Analysis")
+        
+        # Amplicon Analysis
+        st.subheader("📊 Amplicon Analysis")
+        amplicon_analysis = primer_results['amplicon_analysis']
+        
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Length", f"{amplicon_analysis['length']} bp")
+        with col2:
+            st.metric("GC Content", f"{amplicon_analysis['gc_content']:.1f}%")
+        with col3:
+            st.metric("Complexity", f"{amplicon_analysis['complexity']:.2f}")
+        with col4:
+            if primer_results['type'] == 'hairpin':
+                st.metric("Stability", amplicon_analysis['hairpin_stability'])
+        
+        # Base composition
+        st.write("**Base Composition:**")
+        base_comp = amplicon_analysis['base_composition']
+        col1, col2, col3, col4, col5 = st.columns(5)
+        with col1:
+            st.metric("A", f"{base_comp['A']:.1f}%")
+        with col2:
+            st.metric("T", f"{base_comp['T']:.1f}%")
+        with col3:
+            st.metric("G", f"{base_comp['G']:.1f}%")
+        with col4:
+            st.metric("C", f"{base_comp['C']:.1f}%")
+        with col5:
+            if 'U' in base_comp:
+                st.metric("U", f"{base_comp['U']:.1f}%")
+        
+        # RNA Analysis
+        st.subheader("🧬 Transcribed RNA Analysis")
+        rna_analysis = primer_results['rna_analysis']
+        
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("RNA Length", f"{rna_analysis['length']} nt")
+        with col2:
+            st.metric("RNA GC Content", f"{rna_analysis['gc_content']:.1f}%")
+        with col3:
+            if primer_results['type'] == 'hairpin':
+                st.metric("Predicted Structure", rna_analysis['predicted_structure'])
+        
+        if primer_results['type'] == 'hairpin':
+            st.write("**Hairpin Structure Details:**")
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Stem Length", f"{rna_analysis['stem_length']} nt")
+            with col2:
+                st.metric("Loop Length", f"{rna_analysis['loop_length']} nt")
+            with col3:
+                st.metric("Thermodynamic Stability", f"{rna_analysis['thermodynamic_stability']:.2f}")
+        
+        # Show RNA sequence
+        with st.expander("View Transcribed RNA Sequence"):
+            rna_seq = rna_analysis['sequence']
+            formatted_rna = ""
+            for i in range(0, len(rna_seq), 60):
+                line_num = i // 60 + 1
+                line_seq = rna_seq[i:i+60]
+                formatted_rna += f"{line_num:3d}: {line_seq}\n"
+            
+            st.code(formatted_rna, language=None)
+        
+        # siRNA Analysis
+        st.subheader("🎯 siRNA Production Analysis")
+        sirna_analysis = primer_results['sirna_analysis']
+        
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Total siRNA Candidates", sirna_analysis['total_sirna_candidates'])
+        with col2:
+            st.metric("Average GC Content", f"{sirna_analysis['average_gc_content']:.1f}%")
+        with col3:
+            st.metric("Optimal Length", sirna_analysis['optimal_length_range'])
+        
+        # Top siRNA candidates
+        st.write("**Top siRNA Candidates:**")
+        top_sirnas = sirna_analysis['top_sirnas']
+        
+        for i, sirna in enumerate(top_sirnas[:5]):  # Show top 5
+            with st.expander(f"siRNA #{i+1}: {sirna['sequence']} (Score: {sirna.get('score', 'N/A')})"):
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    st.write("**Sequence Information:**")
+                    st.write(f"- Sequence: {sirna['sequence']}")
+                    st.write(f"- Position: {sirna['position']}")
+                    st.write(f"- Source: {sirna['source']}")
+                    st.write(f"- GC Content: {sirna['gc_content']:.1f}%")
+                
+                with col2:
+                    st.write("**Thermodynamic Properties:**")
+                    thermo = sirna['thermodynamic_properties']
+                    st.write(f"- 5' End: {thermo['five_prime_end']}")
+                    st.write(f"- 3' End: {thermo['three_prime_end']}")
+                    st.write(f"- Asymmetry Score: {thermo['asymmetry_score']:.1f}")
+                    st.write(f"- Stability: {thermo['thermodynamic_stability']}")
+        
+        # Recommended siRNAs
+        st.write("**Recommended siRNAs for RNAi:**")
+        recommended = sirna_analysis['recommended_sirnas']
+        
+        for i, sirna in enumerate(recommended):
+            st.write(f"**Recommendation #{i+1}:** {sirna['sequence']}")
+            st.write(f"- Source: {sirna['source']} | Position: {sirna['position']} | GC: {sirna['gc_content']:.1f}%")
+        
+        # siRNA export
+        sirna_export_data = "siRNA Analysis Results\n" + "="*50 + "\n\n"
+        sirna_export_data += f"Total candidates: {sirna_analysis['total_sirna_candidates']}\n"
+        sirna_export_data += f"Average GC content: {sirna_analysis['average_gc_content']:.1f}%\n\n"
+        
+        sirna_export_data += "Top siRNA Candidates:\n" + "-"*30 + "\n"
+        for i, sirna in enumerate(top_sirnas[:10]):
+            sirna_export_data += f"{i+1}. {sirna['sequence']}\n"
+            sirna_export_data += f"   Position: {sirna['position']}, Source: {sirna['source']}\n"
+            sirna_export_data += f"   GC Content: {sirna['gc_content']:.1f}%\n"
+            sirna_export_data += f"   Stability: {sirna['thermodynamic_properties']['thermodynamic_stability']}\n\n"
+        
         
         # Export options
         st.subheader("Export Options")
         
-        col1, col2, col3 = st.columns(3)
+        col1, col2, col3, col4 = st.columns(4)
         
         with col1:
             # Export primer sequences
@@ -2640,13 +3007,13 @@ Type: {primer_results['type']}
             )
         
         with col2:
-            # Export PCR protocol
+            # Export RNA sequence
             st.download_button(
-                label="📥 Download PCR Protocol",
-                data=primer_results['protocol'],
-                file_name=f"pcr_protocol_{primer_results['type']}.txt",
+                label="📥 Download RNA Sequence",
+                data=rna_analysis['sequence'],
+                file_name=f"rna_{primer_results['type']}_{rna_analysis['length']}nt.fasta",
                 mime="text/plain",
-                help="Download the PCR protocol as a text file"
+                help="Download the transcribed RNA sequence in FASTA format"
             )
         
         with col3:
@@ -2657,6 +3024,16 @@ Type: {primer_results['type']}
                 file_name=f"amplicon_{primer_results['type']}_{amplicon['length']}bp.fasta",
                 mime="text/plain",
                 help="Download the amplicon sequence in FASTA format"
+            )
+        
+        with col4:
+            # Export siRNA analysis
+            st.download_button(
+                label="📥 Download siRNA Analysis",
+                data=sirna_export_data,
+                file_name=f"sirna_analysis_{primer_results['type']}_{selected_region['start']}-{selected_region['end']}.txt",
+                mime="text/plain",
+                help="Download siRNA analysis results as a text file"
             )
 
 if __name__ == "__main__":
