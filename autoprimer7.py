@@ -9,6 +9,7 @@ from Bio.SeqUtils import MeltingTemp as MT
 from Bio.SeqUtils.ProtParam import ProteinAnalysis
 from Bio import pairwise2
 from Bio.pairwise2 import format_alignment
+import io
 import requests
 import json
 import time
@@ -622,6 +623,11 @@ def enhanced_gene_search_variations(clean_gene: str, organism_name: str) -> List
             out.append(v)
     return out
 
+def is_rRNA_target(gene_terms: List[str]) -> bool:
+    """Check if gene terms indicate rRNA targets"""
+    key = " ".join(gene_terms).lower()
+    return any(t in key for t in ["lsu", "28s", "large subunit rrna", "rnl", "rrl", "rrnl", "ribosomal large subunit"])
+
 def find_nuccore_via_protein(organism_name: str, gene_variations: List[str], max_results: int = 5) -> List[str]:
     """Find nucleotide sequences via protein database linking"""
     try:
@@ -648,12 +654,12 @@ def find_nuccore_via_protein(organism_name: str, gene_variations: List[str], max
         return []
 
 def _record_mentions_target_gene(desc: str, features_text: str, gene_variations: List[str]) -> bool:
-    """Check if record annotations mention the target gene"""
+    """Check if record annotations mention the target gene using synonym engine"""
     hay = f"{desc}\n{features_text}".lower()
-    for term in gene_variations:
-        t = term.replace('"', '').lower()
-        # Accept generous matches but avoid tiny tokens like "act"
-        if len(t) >= 4 and t in hay:
+    # Use first 25 synonyms to keep checks efficient
+    gene_terms = [t.lower().replace('"', '') for t in gene_variations[:25] if len(t) >= 3]
+    for t in gene_terms:
+        if t in hay:
             return True
     return False
 
@@ -1572,11 +1578,14 @@ class ResilientNCBIConnector:
     
     def __init__(self, email: str, api_key: Optional[str] = None):
         Entrez.email = email
+        Entrez.tool = "autoprimer"
         if api_key:
             Entrez.api_key = api_key
         self.base_delay = 0.34 if not api_key else 0.1
         self.max_retries = 3
         self.timeout = 30
+        # Polite NCBI usage - throttle between requests
+        self.throttle_sec = st.session_state.get("ncbi_throttle_sec", 0.34)
         
     def _exponential_backoff(self, attempt: int) -> float:
         """Calculate delay with exponential backoff and jitter"""
@@ -1587,6 +1596,9 @@ class ResilientNCBIConnector:
     @retry_with_backoff(max_retries=3, base_delay=0.34)
     def search_sequences(self, query: str, database: str = "nucleotide", max_results: int = 100) -> List[str]:
         """Search with timeout and retry logic"""
+        # Polite NCBI usage - throttle between requests
+        time.sleep(self.throttle_sec)
+        
         handle = Entrez.esearch(
             db=database, 
             term=query, 
@@ -1631,6 +1643,54 @@ class ResilientNCBIConnector:
             "organism": record.annotations.get("organism", "Unknown"),
             "sequence": str(record.seq)
         }
+    
+    @retry_with_backoff(max_retries=3, base_delay=0.34)
+    def fetch_sequence_nuccore(self, seq_id: str) -> Optional[Dict]:
+        """
+        Returns dict with keys: id, description, sequence, length, organism
+        Falls back to FASTA if GenBank XML lacks GBSeq_sequence (e.g., CON records).
+        """
+        # Polite NCBI usage - throttle between requests
+        time.sleep(self.throttle_sec)
+        
+        Entrez.email = st.session_state.get("ncbi_email", "your.email@example.com")
+        Entrez.tool = "autoprimer"
+        try:
+            # First try GenBank XML (rich metadata)
+            with Entrez.efetch(db="nuccore", id=seq_id, rettype="gb", retmode="xml") as h:
+                recs = Entrez.read(h)
+            if recs and isinstance(recs, list):
+                gb = recs[0]
+                seq = gb.get("GBSeq_sequence")
+                if seq:
+                    seq = str(seq).replace("\n", "").replace(" ", "").lower()
+                    return {
+                        "id": gb.get("GBSeq_primary-accession") or seq_id,
+                        "description": gb.get("GBSeq_definition") or "",
+                        "sequence": seq,
+                        "length": len(seq),
+                        "organism": gb.get("GBSeq_organism") or "",
+                    }
+            # Fallback: FASTA (text) – reliable sequence even for CON/assembly components
+            with Entrez.efetch(db="nuccore", id=seq_id, rettype="fasta", retmode="text") as h:
+                fasta_text = h.read()
+            if not fasta_text.strip():
+                return None
+            handle = io.StringIO(fasta_text)
+            fasta = next(SeqIO.parse(handle, "fasta"), None)
+            if not fasta or not str(fasta.seq):
+                return None
+            seq = str(fasta.seq).lower()
+            return {
+                "id": fasta.id,
+                "description": fasta.description,
+                "sequence": seq,
+                "length": len(seq),
+                "organism": "",  # unknown from FASTA only; safe default
+            }
+        except Exception as e:
+            st.warning(f"NCBI efetch failed for {seq_id}: {e}")
+            return None
     
     def validate_api_key(self) -> bool:
         """Validate API key by making a test request"""
@@ -3727,13 +3787,24 @@ def perform_gene_targeted_design(organism_name, email, api_key, max_sequences, c
                                     'Fusarium oxysporum f. sp. niveum'
                                 ])
                             
-                            # Build ranked queries: prefer mRNA/CDS/RefSeq, exact organism
                             # Define common junk terms to exclude
-                            NEG = 'NOT (vector[Title] OR plasmid[Title] OR unverified[Title] OR synthetic[Title] OR artificial[Title] OR partial[Title] OR incomplete[Title])'
+                            NEG = 'NOT (vector[Title] OR plasmid[Title] OR unverified[Title] OR synthetic[Title] OR artificial[Title] OR partial[Title] OR incomplete[Title] OR environmental sample[Title] OR "CONSTRUCTED"[Title] OR "assembly"[Title])'
                             
-                            search_queries = []
-                            for org_var in organism_variations:
-                                search_queries.extend([
+                            # Check if this is an rRNA target
+                            if is_rRNA_target(gene_variations):
+                                # rRNA-specific queries (skip protein linking)
+                                rrna_terms = ['"28S ribosomal RNA"', '"large subunit rRNA"', '"LSU rRNA"', '"rnl"', '"rrl"']
+                                search_queries = []
+                                for org_var in organism_variations:
+                                    search_queries.extend([
+                                        f'"{org_var}"[Organism] AND ({" OR ".join(rrna_terms)}) AND (complete genome[Title] OR chromosome[Title] OR rRNA[Title]) {NEG}',
+                                        f'"{org_var}"[Organism] AND ({" OR ".join(rrna_terms)}) {NEG}',
+                                    ])
+                            else:
+                                # Build ranked queries: prefer mRNA/CDS/RefSeq, exact organism
+                                search_queries = []
+                                for org_var in organism_variations:
+                                    search_queries.extend([
                                     # Highest quality: RefSeq mRNA/CDS with explicit gene field
                                     f'"{org_var}"[organism] AND ({gene_var}[gene] OR {gene_var}[title] OR {gene_var}[All Fields]) '
                                     f'AND (("mRNA"[Title]) OR ("cds"[Feature])) AND (refseq[Filter]) {NEG}',
@@ -3756,8 +3827,8 @@ def perform_gene_targeted_design(organism_name, email, api_key, max_sequences, c
                                 except Exception as e:
                                     continue
                         
-                        # If no nucleotide hits found, try protein-to-nucleotide linking
-                        if not seq_ids:
+                        # If no nucleotide hits found, try protein-to-nucleotide linking (skip for rRNA)
+                        if not seq_ids and not is_rRNA_target(gene_variations):
                             st.info(f"Trying protein-to-nucleotide linking for {clean_gene}...")
                             seq_ids = find_nuccore_via_protein(organism_name, gene_variations, max_results=10)
                         
@@ -3767,6 +3838,11 @@ def perform_gene_targeted_design(organism_name, email, api_key, max_sequences, c
                                 if sequence and len(sequence) > 100:
                                     # Get sequence info for provenance and annotation verification
                                     seq_info = ncbi.fetch_sequence_info(seq_id)
+                                    
+                                    # Guard against None before using .get()
+                                    if not seq_info or not seq_info.get("sequence"):
+                                        st.warning(f"Skipping {seq_id}: no sequence content.")
+                                        continue
                                     
                                     # Check annotation verification first (faster than BLAST)
                                     features_text = " ".join([
