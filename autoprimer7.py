@@ -175,65 +175,9 @@ TARGET_TAXON = "Fusarium_oxysporum"   # positive control DB (must hit)
 BOWTIE2_DB_ROOT = Path("db/bowtie2")  # adjust if your repo uses a different path
 
 # ---- Small utilities ----
-from dataclasses import dataclass, asdict
-from datetime import datetime
-
-@dataclass
-class SpeciesDBRef:
-    role: str            # "target" or "exclusion"
-    guild: str           # e.g., "plants", "fungi", "beneficials", ...
-    species: str         # e.g., "cannabis_sativa"
-    prefix: str          # full path prefix to Bowtie2 index
-    found: bool          # whether all *.bt2 files exist
-    missing_exts: List[str]  # any missing *.bt2 extensions (if found=False)
-
-BT2_EXTS = [".1.bt2",".2.bt2",".3.bt2",".4.bt2",".rev.1.bt2",".rev.2.bt2"]
-
-def _have_bt2(prefix: Path) -> bool:
-    return all((Path(str(prefix) + ext)).exists() for ext in BT2_EXTS)
-
-def _missing_bt2_exts(prefix: Path) -> List[str]:
-    return [ext for ext in BT2_EXTS if not (Path(str(prefix) + ext)).exists()]
-
-def _bowtie2_prefix(guild: str, species: str) -> Path:
-    return (BOWTIE2_DB_ROOT / f"{guild}_{species}").resolve()
-
 def _revcomp(seq: str) -> str:
     t = str.maketrans("ACGTUacgtu","TGCAAtgcaa")
     return seq.translate(t)[::-1]
-
-def build_db_ref_list(bowtie_root: str,
-                      target_taxon: str,
-                      guild_flags: Dict[str, bool]) -> Tuple[SpeciesDBRef, List[SpeciesDBRef]]:
-    """Return (target_ref, exclusion_refs) with existence checks."""
-    # Target
-    target_prefix = (Path(bowtie_root) / f"fungi_{target_taxon.replace(' ', '_')}").resolve()
-    target_ref = SpeciesDBRef(
-        role="target",
-        guild="fungi",
-        species=target_taxon.replace(" ", "_"),
-        prefix=str(target_prefix),
-        found=_have_bt2(target_prefix),
-        missing_exts=_missing_bt2_exts(target_prefix)
-    )
-
-    # Exclusions (respect guild toggles)
-    exclusion_refs: List[SpeciesDBRef] = []
-    for guild, species_list in EXCLUSION_SPECIES.items():
-        if not guild_flags.get(guild, True):
-            continue
-        for sp in species_list:
-            pfx = (Path(bowtie_root) / f"{guild}_{sp}").resolve()
-            exclusion_refs.append(SpeciesDBRef(
-                role="exclusion",
-                guild=guild,
-                species=sp,
-                prefix=str(pfx),
-                found=_have_bt2(pfx),
-                missing_exts=_missing_bt2_exts(pfx)
-            ))
-
-    return target_ref, exclusion_refs
 
 def enumerate_kmers_both_strands(seq: str, k: int = 21) -> List[Tuple[int,str,str]]:
     s = seq.upper().replace("U","T")
@@ -242,6 +186,12 @@ def enumerate_kmers_both_strands(seq: str, k: int = 21) -> List[Tuple[int,str,st
     out += [(i, "-", rc[i:i+k]) for i in range(0, len(rc)-k+1)]
     return out
 
+def _bowtie2_prefix(guild: str, species: str) -> Path:
+    return (BOWTIE2_DB_ROOT / f"{guild}_{species}").resolve()
+
+def _have_bt2(prefix: Path) -> bool:
+    exts = [".1.bt2",".2.bt2",".3.bt2",".4.bt2",".rev.1.bt2",".rev.2.bt2"]
+    return all((Path(str(prefix)+e)).exists() for e in exts)
 
 def _bowtie2_exact_match(kmers: List[str], db_prefix: Path, threads: int = 4) -> List[int]:
     """
@@ -304,26 +254,19 @@ class AmpliconScreenResult:
     kmer_uniqueness_fraction: float
     risky_kmers: List[KmerHit]
 
-@dataclass
-class AmpliconScreenDetail:
-    off_target_perfect_total: int
-    kmer_uniqueness_fraction: float
-    risky_kmers: List[KmerHit]
-    per_db_hits: Dict[str, int]  # prefix -> count of perfect 21-mer hits
-
 # ---- One-call amplicon screening (exact 21-mers) ----
-def screen_amplicon_exact21(amplicon_seq: str, db_target: str, db_exclude: List[str], threads: int = 4) -> AmpliconScreenResult:
+def screen_amplicon_exact21(amplicon_seq: str, db_target: str, db_exclude: List[str]) -> AmpliconScreenResult:
     km = enumerate_kmers_both_strands(amplicon_seq, k=21)
     if not km:
         return AmpliconScreenResult(0, 0.0, [])
     kmers = [k for _,_,k in km]
 
     # must have at least one exact 21-mer in target DB (sanity)
-    target_hits = set(_bowtie2_exact_match(kmers, Path(db_target), threads=threads))
+    target_hits = set(_bowtie2_exact_match(kmers, Path(db_target)))
     # aggregate off-target hits across all exclusion DBs
     off_idx = set()
     for db in db_exclude:
-        off_idx.update(_bowtie2_exact_match(kmers, Path(db), threads=threads))
+        off_idx.update(_bowtie2_exact_match(kmers, Path(db)))
 
     risky = [KmerHit(kmers[i], km[i][0], km[i][1], "any_exclusion_db") for i in sorted(off_idx)]
     # uniqueness = kmers that hit target but NOT exclusions (if target index is absent, we don't penalize uniqueness)
@@ -337,40 +280,6 @@ def screen_amplicon_exact21(amplicon_seq: str, db_target: str, db_exclude: List[
                                 kmer_uniqueness_fraction=uniq_frac,
                                 risky_kmers=risky)
 
-def screen_amplicon_exact21_detailed(amplicon_seq: str,
-                                     db_target_prefix: str,
-                                     exclusion_prefixes: List[str],
-                                     threads: int = 4) -> AmpliconScreenDetail:
-    km = enumerate_kmers_both_strands(amplicon_seq, k=21)
-    if not km:
-        return AmpliconScreenDetail(0, 0.0, [], {})
-
-    kmers = [k for _,_,k in km]
-    # Target (sanity / uniqueness basis)
-    target_hits = set(_bowtie2_exact_match(kmers, Path(db_target_prefix), threads=threads))
-
-    per_db_hits: Dict[str, int] = {}
-    off_idx = set()
-    for dbp in exclusion_prefixes:
-        hits = set(_bowtie2_exact_match(kmers, Path(dbp), threads=threads))
-        per_db_hits[dbp] = len(hits)
-        off_idx.update(hits)
-
-    risky = [KmerHit(kmers[i], km[i][0], km[i][1], "exclusion_db") for i in sorted(off_idx)]
-
-    if target_hits:
-        unique_ok = target_hits - off_idx
-        uniq_frac = len(unique_ok) / len(kmers)
-    else:
-        uniq_frac = 0.0
-
-    return AmpliconScreenDetail(
-        off_target_perfect_total=len(off_idx),
-        kmer_uniqueness_fraction=uniq_frac,
-        risky_kmers=risky,
-        per_db_hits=per_db_hits
-    )
-
 # ---- Combine with your Primer3 score (drop-in) ----
 def primer_specificity_score(primer3_penalty: float,
                              spec: AmpliconScreenResult,
@@ -380,86 +289,6 @@ def primer_specificity_score(primer3_penalty: float,
     # Normalize primer3_penalty to 0..1 quality (lower penalty is better)
     q = max(0.0, 1.0 - min(primer3_penalty, 5.0)/5.0)
     return 0.6*spec.kmer_uniqueness_fraction + 0.4*q
-
-def render_specificity_audit(candidate_label: str,
-                             target_ref: SpeciesDBRef,
-                             exclusion_refs: List[SpeciesDBRef],
-                             detail: AmpliconScreenDetail):
-    """
-    Renders a transparency report of exactly which organisms were checked and the hit counts.
-    """
-    rows = []
-
-    # Target row
-    rows.append({
-        "role": "target",
-        "guild": target_ref.guild,
-        "organism": target_ref.species,
-        "db_prefix": target_ref.prefix,
-        "status": "checked" if target_ref.found else "missing",
-        "perfect_21mer_hits": "n/a (sanity)" if target_ref.found else "n/a",
-        "notes": "" if target_ref.found else f"missing: {','.join(target_ref.missing_exts)}"
-    })
-
-    # Exclusions
-    for e in exclusion_refs:
-        status = "checked" if e.found else "missing"
-        hits = detail.per_db_hits.get(e.prefix, 0) if e.found else None
-        notes = "" if e.found else f"missing: {','.join(e.missing_exts)}"
-        rows.append({
-            "role": "exclusion",
-            "guild": e.guild,
-            "organism": e.species,
-            "db_prefix": e.prefix,
-            "status": status,
-            "perfect_21mer_hits": hits,
-            "notes": notes
-        })
-
-    df = pd.DataFrame(rows).sort_values(["role","guild","organism"]).reset_index(drop=True)
-
-    with st.expander(f"🧪 Specificity Audit — {candidate_label}", expanded=False):
-        st.caption("Shows every organism the app attempted to screen against, whether the Bowtie2 index was found, and per-DB perfect 21-mer hit counts.")
-        st.dataframe(df, use_container_width=True)
-
-        stamp = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
-        payload = {
-            "generated_at_utc": stamp,
-            "candidate": candidate_label,
-            "summary": {
-                "off_target_perfect_total": detail.off_target_perfect_total,
-                "kmer_uniqueness_fraction": round(detail.kmer_uniqueness_fraction, 4),
-            },
-            "target": asdict(target_ref),
-            "exclusions": [asdict(e) for e in exclusion_refs],
-            "per_db_hits": detail.per_db_hits,
-        }
-        json_bytes = io.BytesIO(json.dumps(payload, indent=2).encode("utf-8"))
-        st.download_button(
-            "Download Specificity Audit (JSON)",
-            data=json_bytes,
-            file_name=f"specificity_audit_{candidate_label.replace(' ','_')}.json",
-            mime="application/json"
-        )
-
-        # Optional CSV export (exclusions table only)
-        csv_bytes = io.BytesIO(df.to_csv(index=False).encode("utf-8"))
-        st.download_button(
-            "Download Exclusions Table (CSV)",
-            data=csv_bytes,
-            file_name=f"specificity_exclusions_{candidate_label.replace(' ','_')}.csv",
-            mime="text/csv"
-        )
-
-def get_bowtie2_version() -> Optional[str]:
-    try:
-        p = subprocess.run(["bowtie2", "--version"], text=True, capture_output=True)
-        if p.returncode == 0:
-            first = (p.stdout or p.stderr).splitlines()[0].strip()
-            return first  # e.g., "bowtie2-align-s version 2.5.1"
-    except Exception:
-        pass
-    return None
 
 # --- SPECIFICITY SCREENING DATACLASSES (LEGACY - KEEP FOR COMPATIBILITY) ---
 @dataclass
@@ -786,7 +615,7 @@ def design_primers_with_specificity(designer, sequence: str, target_region: Opti
         amplicon_seq = sequence[primer_pair.forward_start:primer_pair.reverse_start + len(primer_pair.reverse_seq)]
         
         # Screen for specificity using inline system
-        spec = screen_amplicon_exact21(amplicon_seq, db_target, db_exclude, threads=4)
+        spec = screen_amplicon_exact21(amplicon_seq, db_target, db_exclude)
         
         # Get Primer3 penalty (if available)
         primer3_penalty = 0.0
@@ -6652,13 +6481,6 @@ def _st_app():
     threads = st.sidebar.number_input("Bowtie2 threads", min_value=1, max_value=32, value=4, step=1)
     target_taxon = st.sidebar.text_input("Target taxon (positive DB)", TARGET_TAXON)
     st.sidebar.caption("Ensure Bowtie2 indexes exist for the target and exclusions. Missing DBs are skipped with a warning.")
-    
-    # Show Bowtie2 version
-    bt2_ver = get_bowtie2_version()
-    if bt2_ver:
-        st.sidebar.caption(f"Bowtie2: {bt2_ver}")
-    else:
-        st.sidebar.caption("Bowtie2: not found on PATH")
 
     # Allow toggling guilds (optional)
     st.sidebar.subheader("Exclude guilds")
@@ -6705,27 +6527,15 @@ def _st_app():
         BOWTIE2_DB_ROOT = Path(bowtie_root)
         TARGET_TAXON = target_taxon
 
-        # Build structured DB reference list
-        target_ref, exclusion_refs = build_db_ref_list(bowtie_root, target_taxon, guild_flags)
-        
-        # Show database status in sidebar
-        with st.sidebar.expander("Databases to be checked", expanded=False):
-            st.write(f"**Target DB:** {'✅' if target_ref.found else '⚠️'} {target_ref.guild}/{target_ref.species}")
-            if not target_ref.found:
-                st.caption(f"Missing: {', '.join(target_ref.missing_exts)}")
-
-            total = len(exclusion_refs)
-            available = sum(1 for e in exclusion_refs if e.found)
-            st.write(f"**Exclusion DBs:** {available}/{total} available")
-
-            # Show a compact preview (first ~10 for brevity)
-            preview = [f"{'✅' if e.found else '⚠️'} {e.guild}/{e.species}" for e in exclusion_refs[:10]]
-            if preview:
-                st.caption("Preview:\n" + "\n".join(preview))
-            if total > 10:
-                st.caption(f"...and {total-10} more")
-        
-        return target_ref, exclusion_refs
+        paths = get_exclusion_paths_inline()
+        # Filter exclusions by guild selection
+        filtered = []
+        for g, species_list in EXCLUSION_SPECIES.items():
+            if not guild_flags.get(g, True):
+                continue
+            for sp in species_list:
+                filtered.append(str((Path(bowtie_root) / f"{g}_{sp}").resolve()))
+        return {"target": paths["target"], "exclude": filtered}
 
     # Main action
     if run:
@@ -6733,68 +6543,46 @@ def _st_app():
             st.error("Please upload or paste a target sequence.")
             st.stop()
 
-        target_ref, exclusion_refs = _resolve_paths()
+        paths = _resolve_paths()
+        target_db = paths["target"]
+        exclude_dbs = paths["exclude"]
 
-        # Generate primer candidates using real primer designer
+        # Generate primer candidates (replace this with your real function)
+        # Expect a list of dicts: {"primer_id", "amplicon_seq", "primer3_penalty", ...}
         primer_candidates = []
         if want_design:
             try:
-                designer = PrimerDesigner()
-                designed, p3 = designer.design_primers_with_complementarity(
-                    sequence=seq, target_region=None, custom_params=None, add_t7_promoter=False
-                )
-                primer_candidates = [
-                    {
-                        "primer_id": f"pair_{i+1}",
-                        "amplicon_seq": seq[p.forward_start : p.reverse_start + len(p.reverse_seq)],
-                        "primer3_penalty": p3.get(f"PRIMER_PAIR_{i}_PENALTY", 2.5),
-                    }
-                    for i, p in enumerate(designed[:int(max_pairs)])
-                ]
+                # If you already have a generator, call it here:
+                # primer_candidates = design_primers_with_specificity(seq, max_pairs=max_pairs, ...)
+                # Fallback demo: single amplicon = whole sequence (replace in your codebase)
+                primer_candidates = [{"primer_id": f"cand_{i+1}",
+                                      "amplicon_seq": seq,
+                                      "primer3_penalty": 2.5} for i in range(int(max_pairs))]
             except Exception as e:
                 st.error(f"Primer design failed: {e}")
                 st.stop()
 
         # Specificity screen + scoring
         rows = []
-        for i, cand in enumerate(primer_candidates):
-            # Use detailed screening for per-DB hit tracking
-            detail = screen_amplicon_exact21_detailed(
+        for cand in primer_candidates:
+            spec = screen_amplicon_exact21(
                 amplicon_seq=cand["amplicon_seq"],
-                db_target_prefix=target_ref.prefix,
-                exclusion_prefixes=[e.prefix for e in exclusion_refs if e.found],
-                threads=int(threads)
+                db_target=target_db,
+                db_exclude=exclude_dbs
             )
-            
-            # Convert to legacy format for scoring
-            spec = AmpliconScreenResult(
-                off_target_perfect=detail.off_target_perfect_total,
-                kmer_uniqueness_fraction=detail.kmer_uniqueness_fraction,
-                risky_kmers=detail.risky_kmers
-            )
-            
             score = primer_specificity_score(
                 primer3_penalty=cand.get("primer3_penalty", 2.5),
                 spec=spec,
                 hard_block_offtargets=strict_block
             )
-            
             rows.append({
                 "primer_id": cand["primer_id"],
                 "amplicon_len": len(cand["amplicon_seq"]),
                 "primer3_penalty": cand.get("primer3_penalty", 2.5),
-                "off_target_perfect": detail.off_target_perfect_total,
-                "kmer_uniqueness_fraction": round(detail.kmer_uniqueness_fraction, 4),
+                "off_target_perfect": spec.off_target_perfect,
+                "kmer_uniqueness_fraction": round(spec.kmer_uniqueness_fraction, 4),
                 "score": score
             })
-            
-            # Show specificity audit for each candidate
-            render_specificity_audit(
-                candidate_label=f"Amplicon {i+1}",
-                target_ref=target_ref,
-                exclusion_refs=exclusion_refs,
-                detail=detail
-            )
 
         # Filter & sort
         rows = [r for r in rows if r["score"] != float("-inf")]
@@ -6816,5 +6604,5 @@ if _HAS_STREAMLIT and os.environ.get("AUTOPRIMER_UI_DISABLED","0") != "1":
     _st_app()
 # ======== end Streamlit UI ========
 
-if __name__ == "__main__" and (not _HAS_STREAMLIT or os.environ.get("AUTOPRIMER_UI_DISABLED","0") == "1"):
+if __name__ == "__main__":
     main()
