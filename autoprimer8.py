@@ -312,10 +312,10 @@ class AmpliconScreenDetail:
     per_db_hits: Dict[str, int]  # prefix -> count of perfect 21-mer hits
 
 # ---- One-call amplicon screening (exact 21-mers) ----
-def screen_amplicon_exact21(amplicon_seq: str, db_target: str, db_exclude: list[str], threads: int = 4) -> AmpliconScreenResult:
+def screen_amplicon_exact21(amplicon_seq: str, db_target: str, db_exclude: list[str], threads: int = 4, force_py: bool = False) -> AmpliconScreenResult:
     km = enumerate_kmers_both_strands(amplicon_seq, k=21)
     kmers = [k for _,_,k in km]
-    have_bowtie = shutil.which("bowtie2") and shutil.which("bowtie2-build") and any_bt2_present(BOWTIE2_DB_ROOT)
+    have_bowtie = (not force_py) and shutil.which("bowtie2") and shutil.which("bowtie2-build") and any_bt2_present(BOWTIE2_DB_ROOT)
 
     off_idx = set()
     target_hits = set()
@@ -352,21 +352,48 @@ def screen_amplicon_exact21(amplicon_seq: str, db_target: str, db_exclude: list[
 def screen_amplicon_exact21_detailed(amplicon_seq: str,
                                      db_target_prefix: str,
                                      exclusion_prefixes: List[str],
-                                     threads: int = 4) -> AmpliconScreenDetail:
+                                     threads: int = 4,
+                                     force_py: bool = False) -> AmpliconScreenDetail:
     km = enumerate_kmers_both_strands(amplicon_seq, k=21)
     if not km:
         return AmpliconScreenDetail(0, 0.0, [], {})
 
     kmers = [k for _,_,k in km]
-    # Target (sanity / uniqueness basis)
-    target_hits = set(_bowtie2_exact_match(kmers, Path(db_target_prefix), threads=threads))
+    have_bowtie = (not force_py) and shutil.which("bowtie2") and shutil.which("bowtie2-build") and any_bt2_present(BOWTIE2_DB_ROOT)
 
     per_db_hits: Dict[str, int] = {}
     off_idx = set()
-    for dbp in exclusion_prefixes:
-        hits = set(_bowtie2_exact_match(kmers, Path(dbp), threads=threads))
-        per_db_hits[dbp] = len(hits)
-        off_idx.update(hits)
+    target_hits = set()
+
+    if have_bowtie:
+        # Target (sanity / uniqueness basis)
+        target_hits = set(_bowtie2_exact_match(kmers, Path(db_target_prefix), threads=threads))
+        for dbp in exclusion_prefixes:
+            hits = set(_bowtie2_exact_match(kmers, Path(dbp), threads=threads))
+            per_db_hits[dbp] = len(hits)
+            off_idx.update(hits)
+    else:
+        # Parse guild/species from prefix names
+        def parse_prefix(p: str):
+            name = Path(p).name
+            return name.split("_", 1)
+        
+        tg, ts = parse_prefix(db_target_prefix)
+        try:
+            ensure_exclusion_assets({tg:[ts]}, build_blast=False, only_missing=True, refseq_only=True, verbose=False)
+        except Exception:
+            pass
+        target_hits |= exact21_offtargets_python(kmers, tg, ts)
+        
+        for dbp in exclusion_prefixes:
+            eg, es = parse_prefix(dbp)
+            try:
+                ensure_exclusion_assets({eg:[es]}, build_blast=False, only_missing=True, refseq_only=True, verbose=False)
+            except Exception:
+                pass
+            hits = exact21_offtargets_python(kmers, eg, es)
+            per_db_hits[dbp] = len(hits)
+            off_idx.update(hits)
 
     risky = [KmerHit(kmers[i], km[i][0], km[i][1], "exclusion_db") for i in sorted(off_idx)]
 
@@ -6908,6 +6935,7 @@ def _st_app():
     st.sidebar.header("Settings")
     bowtie_root = st.sidebar.text_input("Bowtie2 DB root", str(BOWTIE2_DB_ROOT), help="Folder containing db/bowtie2/<guild>_<species>.*.bt2")
     strict_block = st.sidebar.checkbox("Strict block on any perfect 21/21 off-target", value=True)
+    force_py = st.sidebar.checkbox("Force pure-Python matcher (Community Cloud)", value=True, help="Use Python fallback even if Bowtie2 is available")
     threads = st.sidebar.number_input("Bowtie2 threads", min_value=1, max_value=32, value=4, step=1)
     target_taxon = st.sidebar.text_input("Target taxon (positive DB)", TARGET_TAXON)
     st.sidebar.caption("Ensure Bowtie2 indexes exist for the target and exclusions. Missing DBs are skipped with a warning.")
@@ -7071,7 +7099,8 @@ def _st_app():
                 amplicon_seq=cand["amplicon_seq"],
                 db_target_prefix=target_ref.prefix,
                 exclusion_prefixes=[e.prefix for e in exclusion_refs if e.found],
-                threads=int(threads)
+                threads=int(threads),
+                force_py=force_py
             )
             
             # Convert to legacy format for scoring
