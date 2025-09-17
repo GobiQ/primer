@@ -4388,9 +4388,9 @@ def perform_gene_targeted_design(organism_name, email, api_key, max_sequences, c
                                         (match_type == 'weak' and blast_verified) or
                                         (match_type == 'none' and blast_verified)):
                                         gene_sequences.append({
-                                            'gene': clean_gene,
-                                            'category': category,
-                                            'sequence': sequence,
+                                        'gene': clean_gene,
+                                        'category': category,
+                                        'sequence': sequence,
                                             'id': seq_id,
                                             'blast_verified': True,
                                             'description': seq_info.get('description', ''),
@@ -6634,6 +6634,157 @@ class OptimizedSessionManager:
         except Exception as e:
             pass  # Silent cleanup failure
 
+# ====== INLINE NCBI FETCH + DB BUILD (no extra files) =========================
+# Uses the EXCLUSION_SPECIES dict you already have in this file.
+
+import os, time, subprocess, shutil, hashlib
+from pathlib import Path
+from typing import Dict, List, Iterable, Tuple
+
+DATA_DIR = Path("data/exclude")      # FASTAs: data/exclude/<guild>/<species>/<species>_cds.fna
+BT_DIR   = Path("db/bowtie2")        # Bowtie2 indexes: db/bowtie2/<guild>_<species>*.bt2
+BL_DIR   = Path("db/blast")          # BLAST dbs (optional): db/blast/<guild>_<species>.*
+
+for p in (DATA_DIR, BT_DIR, BL_DIR): p.mkdir(parents=True, exist_ok=True)
+
+# Query templates (plants/fungi/insects: mRNA/CDS; bacteria: genomic allowed)
+_NCBI_QUERY_DEFAULT = "{NAME}[Organism] AND biomol_mrna[PROP]"
+_NCBI_QUERY_BACTERIA = "{NAME}[Organism] AND (biomol_genomic[PROP] OR biomol_mrna[PROP])"
+
+def _fasta_path(guild: str, species: str) -> Path:
+    d = DATA_DIR / guild / species
+    d.mkdir(parents=True, exist_ok=True)
+    return d / f"{species}_cds.fna"
+
+def _bt2_prefix(guild: str, species: str) -> Path:
+    return (BT_DIR / f"{guild}_{species}").resolve()
+
+def _blast_prefix(guild: str, species: str) -> Path:
+    return (BL_DIR / f"{guild}_{species}").resolve()
+
+def _have_bt2(prefix: Path) -> bool:
+    return all((Path(str(prefix)+ext)).exists() for ext in [".1.bt2",".2.bt2",".3.bt2",".4.bt2",".rev.1.bt2",".rev.2.bt2"])
+
+def _have_blast(prefix: Path) -> bool:
+    return all((Path(str(prefix)+ext)).exists() for ext in [".nhr",".nin",".nsq"])
+
+def _dedup_fasta(text: str) -> str:
+    """Deduplicate by sequence (case-insensitive, U->T), keep first header."""
+    out = []
+    seen = set()
+    seq = []
+    hdr = None
+    def _flush():
+        nonlocal hdr, seq
+        if hdr is None: return
+        s = "".join(seq).upper().replace("U","T")
+        s = "".join(c for c in s if c in "ACGT")  # keep DNA only
+        if not s: 
+            hdr, seq = None, []
+            return
+        h = hashlib.sha256(s.encode()).hexdigest()
+        if h not in seen:
+            seen.add(h)
+            out.append(hdr)
+            # wrap 70 cols
+            for i in range(0, len(s), 70):
+                out.append(s[i:i+70])
+        hdr, seq = None, []
+    for line in text.splitlines():
+        if line.startswith(">"):
+            _flush()
+            hdr = line.rstrip()
+            seq = []
+        else:
+            seq.append(line.strip())
+    _flush()
+    return "\n".join(out) + ("\n" if out else "")
+
+def _ncbi_fetch_to_fasta(guild: str, species: str, max_ids:int=200000, refseq_only:bool=False) -> str:
+    """Return FASTA text for species; requires NCBI_EMAIL (and optional NCBI_API_KEY)."""
+    email = os.environ.get("NCBI_EMAIL")
+    if not email:
+        raise RuntimeError("NCBI_EMAIL not set; export NCBI_EMAIL=you@example.com")
+    try:
+        from Bio import Entrez
+    except Exception:
+        raise RuntimeError("Biopython not installed. Run: pip install biopython")
+    Entrez.email = email
+    api = os.environ.get("NCBI_API_KEY")
+    if api: Entrez.api_key = api
+    name = species.replace("_"," ")
+    q = (_NCBI_QUERY_BACTERIA if guild=="bacteria" else _NCBI_QUERY_DEFAULT).format(NAME=name)
+    if refseq_only:
+        q = f"({q}) AND refseq[filter]"
+    # Search
+    h = Entrez.esearch(db="nuccore", term=q, retmax=max_ids)
+    rec = Entrez.read(h); h.close()
+    ids = rec.get("IdList", [])
+    if not ids: return ""
+    # Fetch in chunks
+    buf, chunk = [], 400
+    for i in range(0, len(ids), chunk):
+        time.sleep(0.34)  # be nice to NCBI
+        sub = ",".join(ids[i:i+chunk])
+        ef = Entrez.efetch(db="nuccore", id=sub, rettype="fasta", retmode="text")
+        buf.append(ef.read()); ef.close()
+    return "".join(buf)
+
+def ensure_exclusion_assets(guilds: Dict[str,List[str]],
+                            build_blast: bool=False,
+                            only_missing: bool=True,
+                            max_ids:int=200000,
+                            refseq_only: bool=False,
+                            verbose: bool=True) -> List[Tuple[str,str,str]]:
+    """
+    For every species in guilds:
+      - download & deduplicate FASTA if missing (or overwrite if only_missing=False)
+      - build Bowtie2 (and optional BLAST) databases if missing
+    Returns list of (guild, species, status) rows.
+    """
+    rows = []
+    for guild, species_list in guilds.items():
+        for species in species_list:
+            fa = _fasta_path(guild, species)
+            bt = _bt2_prefix(guild, species)
+            bl = _blast_prefix(guild, species)
+            # 1) FASTA
+            if fa.exists() and fa.stat().st_size>0 and only_missing:
+                if verbose: print(f"[skip] FASTA exists: {fa}")
+            else:
+                if verbose: print(f"[*] Fetching {guild}/{species} from NCBI...")
+                raw = _ncbi_fetch_to_fasta(guild, species, max_ids=max_ids, refseq_only=refseq_only)
+                if not raw:
+                    rows.append((guild,species,"no_records"))
+                    if verbose: print(f"[warn] No records for {guild}/{species}")
+                    continue
+                de = _dedup_fasta(raw)
+                fa.write_text(de)
+                if verbose: print(f"[ok] Wrote {fa} ({len(de)} chars)")
+            # 2) Bowtie2
+            if not _have_bt2(bt):
+                if not shutil.which("bowtie2-build"):
+                    rows.append((guild,species,"missing_bowtie2_build"))
+                    if verbose: print("[warn] bowtie2-build not found on PATH; skipping index")
+                else:
+                    if verbose: print(f"[*] bowtie2-build {fa} -> {bt}")
+                    subprocess.run(["bowtie2-build", str(fa), str(bt)], check=True)
+                    rows.append((guild,species,"bt2_built"))
+            else:
+                rows.append((guild,species,"bt2_ok"))
+            # 3) BLAST (optional)
+            if build_blast:
+                if not _have_blast(bl):
+                    if not shutil.which("makeblastdb"):
+                        if verbose: print("[warn] makeblastdb not found; skipping BLAST db")
+                    else:
+                        if verbose: print(f"[*] makeblastdb -in {fa} -dbtype nucl -out {bl}")
+                        subprocess.run(["makeblastdb","-in",str(fa),"-dbtype","nucl","-out",str(bl)], check=True)
+                else:
+                    if verbose: print(f"[ok] BLAST db exists: {bl}")
+    return rows
+# ==============================================================================
+
 # ======== STREAMLIT UI (optional, same file) ========
 # This adds a simple UI without changing your CLI behavior.
 try:
@@ -6665,6 +6816,42 @@ def _st_app():
     guild_flags = {}
     for g in EXCLUSION_SPECIES.keys():
         guild_flags[g] = st.sidebar.checkbox(g, value=True)
+    
+    # Database bootstrap section
+    st.sidebar.subheader("Exclusion DB bootstrap")
+    email = st.sidebar.text_input("NCBI email (required for fetch)", value=os.environ.get("NCBI_EMAIL",""))
+    api   = st.sidebar.text_input("NCBI API key (optional)", value=os.environ.get("NCBI_API_KEY",""))
+    refseq_only = st.sidebar.checkbox("Use RefSeq only (smaller/cleaner)", value=True)
+    do_build = st.sidebar.button("Fetch & build missing DBs")
+
+    if do_build:
+        if not email:
+            st.error("Set NCBI email first.")
+        else:
+            os.environ["NCBI_EMAIL"] = email
+            if api: os.environ["NCBI_API_KEY"] = api
+            with st.spinner("Downloading FASTAs and building Bowtie2 indexes..."):
+                # Use your full EXCLUSION_SPECIES plus the target
+                bootstrap = EXCLUSION_SPECIES.copy()
+                # Ensure target too
+                bootstrap.setdefault("fungi", [])
+                t_sp = TARGET_TAXON.replace(" ", "_")
+                if t_sp not in bootstrap["fungi"]:
+                    bootstrap["fungi"] = ["Fusarium_oxysporum"] + bootstrap["fungi"]
+                rows = ensure_exclusion_assets(
+                    guilds=bootstrap,
+                    build_blast=False,
+                    only_missing=True,
+                    refseq_only=refseq_only,
+                    verbose=True
+                )
+            st.success("Done.")
+            
+            # Show results summary
+            if rows:
+                st.subheader("Build Results Summary")
+                results_df = pd.DataFrame(rows, columns=["Guild", "Species", "Status"])
+                st.dataframe(results_df, use_container_width=True)
 
     # Target sequence entry
     st.subheader("Target sequence (FASTA or raw DNA)")
@@ -6817,4 +7004,33 @@ if _HAS_STREAMLIT and os.environ.get("AUTOPRIMER_UI_DISABLED","0") != "1":
 # ======== end Streamlit UI ========
 
 if __name__ == "__main__" and (not _HAS_STREAMLIT or os.environ.get("AUTOPRIMER_UI_DISABLED","0") == "1"):
-    main()
+    # CLI mode - you can also use the database builder here
+    import sys
+    if len(sys.argv) > 1 and sys.argv[1] == "bootstrap":
+        # Example CLI usage for database bootstrap
+        print("Bootstraping exclusion databases...")
+        print("Set NCBI_EMAIL environment variable first!")
+        print("Example: export NCBI_EMAIL='you@domain.com'")
+        print("Optional: export NCBI_API_KEY='your_ncbi_key'")
+        
+        # Small test with a few species
+        test_guilds = {
+            "fungi": ["Fusarium_oxysporum", "trichoderma_harzianum"],
+            "plants": ["cannabis_sativa"]
+        }
+        
+        try:
+            rows = ensure_exclusion_assets(
+                guilds=test_guilds,
+                build_blast=False,
+                only_missing=True,
+                refseq_only=True,
+                verbose=True
+            )
+            print("\nBootstrap complete!")
+            for guild, species, status in rows:
+                print(f"{guild}/{species}: {status}")
+        except Exception as e:
+            print(f"Error: {e}")
+    else:
+        main()
