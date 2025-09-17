@@ -14,6 +14,11 @@ import requests
 import json
 import time
 import random
+import subprocess
+import sqlite3
+import os
+import shutil
+from pathlib import Path
 from dataclasses import dataclass
 from Bio.SeqUtils.MeltingTemp import Tm_NN
 from Bio.Align import PairwiseAligner
@@ -33,6 +38,52 @@ import base64
 from collections import defaultdict
 import warnings
 warnings.filterwarnings("ignore")
+
+# --- PRIMER PAIR DATACLASS ---
+@dataclass
+class PrimerPair:
+    """Class to store primer pair information"""
+    forward_seq: str
+    reverse_seq: str
+    forward_tm: float
+    reverse_tm: float
+    product_size: int
+    gc_content_f: float
+    gc_content_r: float
+    forward_start: int
+    reverse_start: int
+    forward_penalty: float
+    reverse_penalty: float
+    pair_penalty: float
+    complementarity: float
+    hairpin_f: float
+    hairpin_r: float
+    end_stability_f: float
+    end_stability_r: float
+    repeat_f: float
+    repeat_r: float
+    template_mispriming: float
+    template_mispriming_th: float
+    pair_complementarity: float
+    pair_template_mispriming: float
+    pair_template_mispriming_th: float
+    left_end: int
+    right_end: int
+    internal_oligo: Optional[str] = None
+    internal_tm: Optional[float] = None
+    internal_gc: Optional[float] = None
+    internal_penalty: Optional[float] = None
+    internal_hairpin: Optional[float] = None
+    internal_template_mispriming: Optional[float] = None
+    internal_template_mispriming_th: Optional[float] = None
+    internal_end_stability: Optional[float] = None
+    internal_repeat: Optional[float] = None
+    internal_complementarity: Optional[float] = None
+    internal_pair_complementarity: Optional[float] = None
+    internal_pair_template_mispriming: Optional[float] = None
+    internal_pair_template_mispriming_th: Optional[float] = None
+    internal_left_end: Optional[int] = None
+    internal_right_end: Optional[int] = None
 
 # --- BEGIN SYNONYM PROVIDERS (GLOBAL) ---
 
@@ -60,11 +111,375 @@ class TTLCache:
 
 SYN_CACHE = TTLCache(ttl_seconds=7*24*3600)  # 7 days
 
+
 # ---------- Static seed map (keep yours; this is the "starter pack") ----------
 @dataclass(frozen=True)
 class GeneSynonyms:
     canonical: str
     aliases: List[str]
+
+# =========================
+# INLINE EXCLUSION + SCREEN
+# =========================
+
+# ---- Exclusion species (base + CA cannabis specialization) ----
+EXCLUSION_SPECIES: Dict[str, List[str]] = {
+    "plants": [
+        "cannabis_sativa","humulus_lupulus","zea_mays","glycine_max","triticum_aestivum","oryza_sativa",
+        "solanum_lycopersicum","solanum_tuberosum","capsicum_annuum","cucumis_sativus","vitis_vinifera",
+        "citrus_sinensis","brassica_oleracea","gossypium_hirsutum","arabidopsis_thaliana","sorghum_bicolor",
+        "hordeum_vulgare","saccharum_officinarum","helianthus_annuus","arachis_hypogaea","fragaria_x_ananassa",
+        "malus_domestica","prunus_persica","prunus_dulcis","vaccinium_corymbosum","coffea_arabica",
+        "theobroma_cacao","persea_americana","musa_acuminata","lactuca_sativa","spinacia_oleracea",
+        "allium_cepa","allium_sativum",
+    ],
+    "fungi": [
+        "trichoderma_harzianum","trichoderma_virens","trichoderma_asperellum","trichoderma_atroviride",
+        "trichoderma_koningii","trichoderma_reesei",
+        "rhizophagus_irregularis","glomus_mosseae","glomus_etunicatum","claroideoglomus_claroideum","gigaspora_margarita",
+        "serendipita_indica","epichloe_festucae","aureobasidium_pullulans","candida_sake",
+        "metschinikowia_pulcherrima","wickerhamomyces_anomalus","saccharomyces_cerevisiae",
+        "beauveria_bassiana","metarhizium_anisopliae",
+    ],
+    "bacteria": [
+        "bacillus_subtilis","bacillus_amyloliquefaciens","bacillus_velezensis","bacillus_pumilus","bacillus_licheniformis",
+        "pseudomonas_fluorescens","pseudomonas_putida","pseudomonas_chlororaphis","azospirillum_brasilense",
+        "azotobacter_vinelandii","rhizobium_leguminosarum","bradyrhizobium_japonicum",
+        "streptomyces_lydicus","streptomyces_griseoviridis","paenibacillus_polymyxa",
+    ],
+    "insects_mites": [
+        # pollinators
+        "apis_mellifera","bombus_terrestris","osmia_bicornis",
+        # predators/parasitoids
+        "phytoseiulus_persimilis","amblyseius_swirskii","neoseiulus_californicus",
+        "aphidius_colemani","encarsia_formosa","orius_insidiosus","feltiella_acarisuga",
+        "coccinella_septempunctata","chrysoperla_carnea",
+        # CA cannabis add-ons
+        "galendromus_occidentalis","amblyseius_andersoni","neoseiulus_cucumeris",
+        "stratiolaelaps_scimitus","dalotia_coriaria",
+    ],
+    "nematodes_soil": [
+        "steinernema_feltiae","heterorhabditis_bacteriophora","caenorhabditis_elegans",
+        "folsomia_candida","eisenia_fetida",
+    ],
+    "companion_cover_crops": [
+        "trifolium_repens","trifolium_pratense","vicia_villosa","medicago_sativa","ocimum_basilicum",
+        "coriandrum_sativum","petroselinum_crispum","anethum_graveolens","achillea_millefolium",
+        "calendula_officinalis","tagetes_erecta","tropaeolum_majus","foeniculum_vulgare","matricaria_chamomilla",
+    ],
+    "optional_sentinels": ["homo_sapiens","amaranthus_palmeri","chenopodium_album"],
+}
+TARGET_TAXON = "Fusarium_oxysporum"   # positive control DB (must hit)
+
+# Where your Bowtie2 indexes live
+BOWTIE2_DB_ROOT = Path("db/bowtie2")  # adjust if your repo uses a different path
+
+# ---- Small utilities ----
+from dataclasses import dataclass, asdict
+from datetime import datetime
+
+@dataclass
+class SpeciesDBRef:
+    role: str            # "target" or "exclusion"
+    guild: str           # e.g., "plants", "fungi", "beneficials", ...
+    species: str         # e.g., "cannabis_sativa"
+    prefix: str          # full path prefix to Bowtie2 index
+    found: bool          # whether all *.bt2 files exist
+    missing_exts: List[str]  # any missing *.bt2 extensions (if found=False)
+
+BT2_EXTS = [".1.bt2",".2.bt2",".3.bt2",".4.bt2",".rev.1.bt2",".rev.2.bt2"]
+
+def _have_bt2(prefix: Path) -> bool:
+    return all((Path(str(prefix) + ext)).exists() for ext in BT2_EXTS)
+
+def _missing_bt2_exts(prefix: Path) -> List[str]:
+    return [ext for ext in BT2_EXTS if not (Path(str(prefix) + ext)).exists()]
+
+def _bowtie2_prefix(guild: str, species: str) -> Path:
+    return (BOWTIE2_DB_ROOT / f"{guild}_{species}").resolve()
+
+def _revcomp(seq: str) -> str:
+    t = str.maketrans("ACGTUacgtu","TGCAAtgcaa")
+    return seq.translate(t)[::-1]
+
+def build_db_ref_list(bowtie_root: str,
+                      target_taxon: str,
+                      guild_flags: Dict[str, bool]) -> Tuple[SpeciesDBRef, List[SpeciesDBRef]]:
+    """Return (target_ref, exclusion_refs) with existence checks."""
+    # Target
+    target_prefix = (Path(bowtie_root) / f"fungi_{target_taxon.replace(' ', '_')}").resolve()
+    target_ref = SpeciesDBRef(
+        role="target",
+        guild="fungi",
+        species=target_taxon.replace(" ", "_"),
+        prefix=str(target_prefix),
+        found=_have_bt2(target_prefix),
+        missing_exts=_missing_bt2_exts(target_prefix)
+    )
+
+    # Exclusions (respect guild toggles)
+    exclusion_refs: List[SpeciesDBRef] = []
+    for guild, species_list in EXCLUSION_SPECIES.items():
+        if not guild_flags.get(guild, True):
+            continue
+        for sp in species_list:
+            pfx = (Path(bowtie_root) / f"{guild}_{sp}").resolve()
+            exclusion_refs.append(SpeciesDBRef(
+                role="exclusion",
+                guild=guild,
+                species=sp,
+                prefix=str(pfx),
+                found=_have_bt2(pfx),
+                missing_exts=_missing_bt2_exts(pfx)
+            ))
+
+    return target_ref, exclusion_refs
+
+def enumerate_kmers_both_strands(seq: str, k: int = 21) -> List[Tuple[int,str,str]]:
+    s = seq.upper().replace("U","T")
+    out = [(i, "+", s[i:i+k]) for i in range(0, len(s)-k+1)]
+    rc = _revcomp(s)
+    out += [(i, "-", rc[i:i+k]) for i in range(0, len(rc)-k+1)]
+    return out
+
+
+def _bowtie2_exact_match(kmers: List[str], db_prefix: Path, threads: int = 4) -> List[int]:
+    """
+    Returns indices of kmers that have at least one perfect alignment in db_prefix.
+    Uses: bowtie2 -N 0 -L 21 (exact), single-end from stdin.
+    """
+    if not shutil.which("bowtie2"):
+        print("[warn] bowtie2 not found on PATH; skipping DB", db_prefix, flush=True)
+        return []
+    if not _have_bt2(db_prefix):
+        print(f"[warn] missing Bowtie2 index: {db_prefix}*.bt2 — skipping this DB", flush=True)
+        return []
+
+    # Prepare FASTA on stdin
+    fa = "\n".join(f">q{i}\n{km}" for i, km in enumerate(kmers))
+    cmd = [
+        "bowtie2","-x",str(db_prefix),
+        "-U","-",
+        "-N","0","-L","21",
+        "--quiet","--threads",str(threads),
+        "--score-min","L,0,-0.1",
+    ]
+    p = subprocess.run(cmd, input=fa, text=True, capture_output=True)
+    if p.returncode not in (0,1):  # 1 can mean "no alignments", which is not an error
+        raise RuntimeError(f"bowtie2 error on {db_prefix}:\n{p.stderr}")
+
+    hit_idx = []
+    for line in p.stdout.splitlines():
+        if not line or line[0] == "@":  # SAM header
+            continue
+        cols = line.split("\t")
+        rname = cols[2]
+        if rname == "*":  # unmapped
+            continue
+        qname = cols[0]
+        if qname.startswith("q"):
+            hit_idx.append(int(qname[1:]))
+    return hit_idx
+
+# ---- Public resolver for DB prefixes (no external files) ----
+def get_exclusion_paths_inline() -> Dict[str, List[str]]:
+    target = str(_bowtie2_prefix("fungi", TARGET_TAXON.replace(" ", "_")))
+    exclude = []
+    for guild, species_list in EXCLUSION_SPECIES.items():
+        for sp in species_list:
+            exclude.append(str(_bowtie2_prefix(guild, sp)))
+    return {"target": target, "exclude": exclude}
+
+# ---- Screening + scoring data classes ----
+@dataclass
+class KmerHit:
+    kmer: str
+    pos: int
+    strand: str
+    db: str
+
+@dataclass
+class AmpliconScreenResult:
+    off_target_perfect: int
+    kmer_uniqueness_fraction: float
+    risky_kmers: List[KmerHit]
+
+@dataclass
+class AmpliconScreenDetail:
+    off_target_perfect_total: int
+    kmer_uniqueness_fraction: float
+    risky_kmers: List[KmerHit]
+    per_db_hits: Dict[str, int]  # prefix -> count of perfect 21-mer hits
+
+# ---- One-call amplicon screening (exact 21-mers) ----
+def screen_amplicon_exact21(amplicon_seq: str, db_target: str, db_exclude: List[str], threads: int = 4) -> AmpliconScreenResult:
+    km = enumerate_kmers_both_strands(amplicon_seq, k=21)
+    if not km:
+        return AmpliconScreenResult(0, 0.0, [])
+    kmers = [k for _,_,k in km]
+
+    # must have at least one exact 21-mer in target DB (sanity)
+    target_hits = set(_bowtie2_exact_match(kmers, Path(db_target), threads=threads))
+    # aggregate off-target hits across all exclusion DBs
+    off_idx = set()
+    for db in db_exclude:
+        off_idx.update(_bowtie2_exact_match(kmers, Path(db), threads=threads))
+
+    risky = [KmerHit(kmers[i], km[i][0], km[i][1], "any_exclusion_db") for i in sorted(off_idx)]
+    # uniqueness = kmers that hit target but NOT exclusions (if target index is absent, we don't penalize uniqueness)
+    if target_hits:
+        unique_ok = target_hits - off_idx
+        uniq_frac = len(unique_ok) / len(kmers)
+    else:
+        uniq_frac = 0.0  # if no target hits (e.g., target DB missing), be conservative
+
+    return AmpliconScreenResult(off_target_perfect=len(off_idx),
+                                kmer_uniqueness_fraction=uniq_frac,
+                                risky_kmers=risky)
+
+def screen_amplicon_exact21_detailed(amplicon_seq: str,
+                                     db_target_prefix: str,
+                                     exclusion_prefixes: List[str],
+                                     threads: int = 4) -> AmpliconScreenDetail:
+    km = enumerate_kmers_both_strands(amplicon_seq, k=21)
+    if not km:
+        return AmpliconScreenDetail(0, 0.0, [], {})
+
+    kmers = [k for _,_,k in km]
+    # Target (sanity / uniqueness basis)
+    target_hits = set(_bowtie2_exact_match(kmers, Path(db_target_prefix), threads=threads))
+
+    per_db_hits: Dict[str, int] = {}
+    off_idx = set()
+    for dbp in exclusion_prefixes:
+        hits = set(_bowtie2_exact_match(kmers, Path(dbp), threads=threads))
+        per_db_hits[dbp] = len(hits)
+        off_idx.update(hits)
+
+    risky = [KmerHit(kmers[i], km[i][0], km[i][1], "exclusion_db") for i in sorted(off_idx)]
+
+    if target_hits:
+        unique_ok = target_hits - off_idx
+        uniq_frac = len(unique_ok) / len(kmers)
+    else:
+        uniq_frac = 0.0
+
+    return AmpliconScreenDetail(
+        off_target_perfect_total=len(off_idx),
+        kmer_uniqueness_fraction=uniq_frac,
+        risky_kmers=risky,
+        per_db_hits=per_db_hits
+    )
+
+# ---- Combine with your Primer3 score (drop-in) ----
+def primer_specificity_score(primer3_penalty: float,
+                             spec: AmpliconScreenResult,
+                             hard_block_offtargets: bool = True) -> float:
+    if hard_block_offtargets and spec.off_target_perfect > 0:
+        return float("-inf")
+    # Normalize primer3_penalty to 0..1 quality (lower penalty is better)
+    q = max(0.0, 1.0 - min(primer3_penalty, 5.0)/5.0)
+    return 0.6*spec.kmer_uniqueness_fraction + 0.4*q
+
+def render_specificity_audit(candidate_label: str,
+                             target_ref: SpeciesDBRef,
+                             exclusion_refs: List[SpeciesDBRef],
+                             detail: AmpliconScreenDetail):
+    """
+    Renders a transparency report of exactly which organisms were checked and the hit counts.
+    """
+    rows = []
+
+    # Target row
+    rows.append({
+        "role": "target",
+        "guild": target_ref.guild,
+        "organism": target_ref.species,
+        "db_prefix": target_ref.prefix,
+        "status": "checked" if target_ref.found else "missing",
+        "perfect_21mer_hits": "n/a (sanity)" if target_ref.found else "n/a",
+        "notes": "" if target_ref.found else f"missing: {','.join(target_ref.missing_exts)}"
+    })
+
+    # Exclusions
+    for e in exclusion_refs:
+        status = "checked" if e.found else "missing"
+        hits = detail.per_db_hits.get(e.prefix, 0) if e.found else None
+        notes = "" if e.found else f"missing: {','.join(e.missing_exts)}"
+        rows.append({
+            "role": "exclusion",
+            "guild": e.guild,
+            "organism": e.species,
+            "db_prefix": e.prefix,
+            "status": status,
+            "perfect_21mer_hits": hits,
+            "notes": notes
+        })
+
+    df = pd.DataFrame(rows).sort_values(["role","guild","organism"]).reset_index(drop=True)
+
+    with st.expander(f"🧪 Specificity Audit — {candidate_label}", expanded=False):
+        st.caption("Shows every organism the app attempted to screen against, whether the Bowtie2 index was found, and per-DB perfect 21-mer hit counts.")
+        st.dataframe(df, use_container_width=True)
+
+        stamp = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+        payload = {
+            "generated_at_utc": stamp,
+            "candidate": candidate_label,
+            "summary": {
+                "off_target_perfect_total": detail.off_target_perfect_total,
+                "kmer_uniqueness_fraction": round(detail.kmer_uniqueness_fraction, 4),
+            },
+            "target": asdict(target_ref),
+            "exclusions": [asdict(e) for e in exclusion_refs],
+            "per_db_hits": detail.per_db_hits,
+        }
+        json_bytes = io.BytesIO(json.dumps(payload, indent=2).encode("utf-8"))
+        st.download_button(
+            "Download Specificity Audit (JSON)",
+            data=json_bytes,
+            file_name=f"specificity_audit_{candidate_label.replace(' ','_')}.json",
+            mime="application/json"
+        )
+
+        # Optional CSV export (exclusions table only)
+        csv_bytes = io.BytesIO(df.to_csv(index=False).encode("utf-8"))
+        st.download_button(
+            "Download Exclusions Table (CSV)",
+            data=csv_bytes,
+            file_name=f"specificity_exclusions_{candidate_label.replace(' ','_')}.csv",
+            mime="text/csv"
+        )
+
+def get_bowtie2_version() -> Optional[str]:
+    try:
+        p = subprocess.run(["bowtie2", "--version"], text=True, capture_output=True)
+        if p.returncode == 0:
+            first = (p.stdout or p.stderr).splitlines()[0].strip()
+            return first  # e.g., "bowtie2-align-s version 2.5.1"
+    except Exception:
+        pass
+    return None
+
+# --- SPECIFICITY SCREENING DATACLASSES (LEGACY - KEEP FOR COMPATIBILITY) ---
+@dataclass
+class KmerHitLegacy:
+    kmer: str
+    start: int
+    strand: str   # '+' or '-'
+    db_name: str
+    subject_id: str
+    mismatches: int
+
+@dataclass
+class AmpliconScreenResultLegacy:
+    primer_id: str
+    amplicon_len: int
+    total_kmers: int
+    off_target_perfect: int
+    off_target_near: int
+    risky_kmers: List[KmerHitLegacy]  # subset with details
+    kmer_uniqueness_fraction: float  # unique-to-target kmers / total_kmers
 
 # Add a few universal seeds if empty; keep yours if it exists
 GENE_SYNONYM_MAP: Dict[str, GeneSynonyms] = {
@@ -78,6 +493,7 @@ GENE_SYNONYM_MAP: Dict[str, GeneSynonyms] = {
             "K00698",                    # KEGG
             "PF01644", "PF03142",        # PFAM chitin synthase domains
             "GT2 family",                # CAZy
+            "putative chitin synthase", "predicted chitin synthase", "chitin synthase-like",
         ],
     ),
     "CHI": GeneSynonyms(
@@ -85,8 +501,12 @@ GENE_SYNONYM_MAP: Dict[str, GeneSynonyms] = {
         aliases=[
             "CHI", "chi", "chitinase", "endochitinase", "exochitinase",
             "glycoside hydrolase family 18", "GH18", "glycoside hydrolase family 19", "GH19",
+            "glycosyl hydrolase family 18", "glycosyl hydrolase 18", "glycosyl hydrolase family 19", "glycosyl hydrolase 19",
+            "glycoside hydrolase", "glycosyl hydrolase", "hydrolase family 18", "hydrolase family 19",
             "EC 3.2.1.14", "EC 3.2.1.52",
             "PF00182", "PF00704",       # PFAM lysozyme-like/GH families
+            "hypothetical protein",     # Common in sparse annotations
+            "putative chitinase", "predicted chitinase", "chitinase-like",
         ],
     ),
     "FKS": GeneSynonyms(
@@ -95,6 +515,7 @@ GENE_SYNONYM_MAP: Dict[str, GeneSynonyms] = {
             "FKS", "FKS1", "FKS2", "FKS3", "β-1,3-glucan synthase", "beta-1,3-glucan synthase",
             "glucan synthase", "GS", "GSC", "GSC1", "GS1",
             "EC 2.4.1.-", "K01017", "PF02364",
+            "putative glucan synthase", "predicted glucan synthase", "glucan synthase-like",
         ],
     ),
     "BGN": GeneSynonyms(
@@ -326,6 +747,84 @@ def get_all_synonyms(organism: str, gene_query: str, include_original: bool = Tr
     ranked = rank_terms(merged, gene_query)
     SYN_CACHE.set(key, ranked)
     return ranked
+
+
+def design_primers_with_specificity(designer, sequence: str, target_region: Optional[Tuple[int, int]] = None,
+                                  custom_params: Optional[Dict] = None, add_t7_promoter: bool = False,
+                                  gene_target: str = "Standard Design", target_type: str = "linear",
+                                  include_reverse_orientation: bool = False) -> Tuple[List[PrimerPair], Dict]:
+    """Design primers with inline specificity screening
+    
+    Returns:
+        Tuple of (filtered_primers, primer3_results_with_specificity)
+    """
+    # First, design primers normally
+    primers, primer3_results = designer.design_primers_with_complementarity(
+        sequence, target_region, custom_params, add_t7_promoter, 
+        gene_target, target_type, include_reverse_orientation
+    )
+    
+    # Check if specificity screening is enabled
+    if not st.session_state.get("specificity_enabled", False):
+        return primers, primer3_results
+    
+    # Get exclusion paths using inline system
+    try:
+        paths = get_exclusion_paths_inline()
+        db_target = paths["target"]
+        db_exclude = paths["exclude"]
+    except Exception as e:
+        st.warning(f"⚠️ Could not resolve exclusion database paths: {e}. Skipping specificity check.")
+        return primers, primer3_results
+    
+    # Screen each primer pair
+    st.info("🔍 Running specificity screening...")
+    primer_candidates = []
+    
+    for i, primer_pair in enumerate(primers):
+        # Generate amplicon sequence
+        amplicon_seq = sequence[primer_pair.forward_start:primer_pair.reverse_start + len(primer_pair.reverse_seq)]
+        
+        # Screen for specificity using inline system
+        spec = screen_amplicon_exact21(amplicon_seq, db_target, db_exclude, threads=4)
+        
+        # Get Primer3 penalty (if available)
+        primer3_penalty = 0.0
+        if "PRIMER_PAIR_0_PENALTY" in primer3_results:
+            primer3_penalty = primer3_results.get(f"PRIMER_PAIR_{i}_PENALTY", 0.0)
+        
+        # Calculate combined score
+        score = primer_specificity_score(primer3_penalty, spec, hard_block_offtargets=True)
+        
+        primer_candidates.append({
+            "primer_pair": primer_pair,
+            "primer3_penalty": primer3_penalty,
+            "amplicon_seq": amplicon_seq,
+            "off_target_perfect": spec.off_target_perfect,
+            "kmer_uniqueness_fraction": spec.kmer_uniqueness_fraction,
+            "specificity_hits": len(spec.risky_kmers),
+            "score": score
+        })
+    
+    # Filter out disqualified primers and sort by score
+    qualified_candidates = [c for c in primer_candidates if c["score"] != float("-inf")]
+    qualified_candidates.sort(key=lambda x: x["score"], reverse=True)
+    
+    # Extract top primers
+    filtered_primers = [c["primer_pair"] for c in qualified_candidates]
+    
+    # Add specificity results to primer3_results
+    primer3_results["specificity_screening"] = {
+        "enabled": True,
+        "db_target": db_target,
+        "db_exclude": db_exclude,
+        "total_primers": len(primers),
+        "qualified_primers": len(filtered_primers),
+        "disqualified_primers": len(primers) - len(filtered_primers),
+        "primer_scores": {f"primer_pair_{i+1}": c["score"] for i, c in enumerate(qualified_candidates)}
+    }
+    
+    return filtered_primers, primer3_results
 
 # --- END SYNONYM PROVIDERS (GLOBAL) ---
 
@@ -653,15 +1152,28 @@ def find_nuccore_via_protein(organism_name: str, gene_variations: List[str], max
     except Exception as e:
         return []
 
-def _record_mentions_target_gene(desc: str, features_text: str, gene_variations: List[str]) -> bool:
-    """Check if record annotations mention the target gene using synonym engine"""
+def _record_mentions_target_gene(desc: str, features_text: str, gene_variations: List[str]) -> Tuple[bool, str]:
+    """Check if record annotations mention the target gene using tiered synonym matching
+    
+    Returns:
+        (is_match, match_type): where match_type is 'strong', 'weak', or 'none'
+    """
     hay = f"{desc}\n{features_text}".lower()
-    # Use first 25 synonyms to keep checks efficient
-    gene_terms = [t.lower().replace('"', '') for t in gene_variations[:25] if len(t) >= 3]
-    for t in gene_terms:
+    
+    # Tier 1: Strong matches (specific gene terms, EC numbers, PFAM IDs)
+    strong_terms = [t.lower().replace('"', '') for t in gene_variations[:25] if len(t) >= 3 and not t.lower() in ['hypothetical protein', 'putative', 'predicted']]
+    for t in strong_terms:
         if t in hay:
-            return True
-    return False
+            return True, 'strong'
+    
+    # Tier 2: Weak matches (hypothetical protein, putative, etc.) - only if no strong matches
+    weak_terms = [t.lower().replace('"', '') for t in gene_variations if t.lower() in ['hypothetical protein', 'putative', 'predicted']]
+    if weak_terms:
+        for t in weak_terms:
+            if t in hay:
+                return True, 'weak'
+    
+    return False, 'none'
 
 def verify_gene_identity(sequence, target_gene, organism_name, ncbi_connector):
     """Verify that a sequence actually corresponds to the target gene using BLAST"""
@@ -2940,7 +3452,10 @@ def init_session_state():
         'gene_target_stats': {},
         # ADDITIONAL PERSISTENCE VARIABLES:
         'session_initialized': True,
-        'last_activity': None
+        'last_activity': None,
+    # SPECIFICITY SCREENING CONFIG:
+    'specificity_enabled': True,
+    'strict_perfect_block': True
     }
     
     for var, default_value in session_vars.items():
@@ -3852,14 +4367,26 @@ def perform_gene_targeted_design(organism_name, email, api_key, max_sequences, c
                                         " ".join(seq_info.get("features", []) if isinstance(seq_info.get("features"), list) else []),
                                     ])
                                     
-                                    if not _record_mentions_target_gene(str(seq_info), features_text, gene_variations):
-                                        st.warning(f"Annotation verification failed for {clean_gene} (ID: {seq_id}). Skipping this sequence.")
-                                        continue
+                                    annotation_match, match_type = _record_mentions_target_gene(str(seq_info), features_text, gene_variations)
+                                    
+                                    # Show appropriate message based on annotation quality
+                                    if match_type == 'strong':
+                                        st.success(f"✅ Strong annotation match for {clean_gene} (ID: {seq_id})")
+                                    elif match_type == 'weak':
+                                        st.info(f"⚠️ Weak annotation match for {clean_gene} (ID: {seq_id}). Will rely on BLAST verification.")
+                                    else:
+                                        st.warning(f"⚠️ No annotation match for {clean_gene} (ID: {seq_id}). Will rely on BLAST verification.")
                                     
                                     # Verify gene identity with BLAST check
                                     blast_verified = verify_gene_identity(sequence, clean_gene, organism_name, ncbi)
                                     
-                                    if blast_verified:
+                                    # Accept sequence if:
+                                    # 1. Strong annotation match, OR
+                                    # 2. Weak annotation match + BLAST verification, OR  
+                                    # 3. No annotation match but BLAST verification (for very sparse records)
+                                    if (match_type == 'strong' or 
+                                        (match_type == 'weak' and blast_verified) or
+                                        (match_type == 'none' and blast_verified)):
                                         gene_sequences.append({
                                             'gene': clean_gene,
                                             'category': category,
@@ -3930,8 +4457,8 @@ def perform_gene_targeted_design(organism_name, email, api_key, max_sequences, c
                     
                     # Design primers for fallback sequence
                     gene_target_name = "Gene-Targeted Design (Fallback)"
-                    primers, primer3_results = designer.design_primers_with_complementarity(
-                        clean_sequence, 
+                    primers, primer3_results = design_primers_with_specificity(
+                        designer, clean_sequence, 
                         custom_params=custom_params,
                         add_t7_promoter=enable_t7_dsrna,
                         gene_target=gene_target_name,
@@ -3993,8 +4520,8 @@ def perform_gene_targeted_design(organism_name, email, api_key, max_sequences, c
                         st.info(f"Using first 10kb of {gene_name} sequence for primer design")
                     
                     # Design primers for this gene
-                    gene_primers, primer3_results = designer.design_primers_with_complementarity(
-                        clean_sequence, 
+                    gene_primers, primer3_results = design_primers_with_specificity(
+                        designer, clean_sequence, 
                         custom_params=custom_params,
                         add_t7_promoter=enable_t7_dsrna,
                         gene_target=gene_target_name,
@@ -4278,8 +4805,8 @@ def perform_standard_design(organism_name, email, api_key, max_sequences, custom
                         }
                         
                         st.write("Designing primers...")
-                        primers, primer3_results = designer.design_primers_with_complementarity(
-                            clean_sequence, 
+                        primers, primer3_results = design_primers_with_specificity(
+                            designer, clean_sequence, 
                             custom_params=custom_params,
                             add_t7_promoter=enable_t7_dsrna,
                             gene_target="Standard Design",
@@ -4513,6 +5040,46 @@ def main():
         ),
     )
     st.session_state["strict_blast"] = strict_blast
+    
+    # --- Specificity Screening Configuration ---
+    st.sidebar.subheader("🎯 Specificity Screening")
+    specificity_enabled = st.sidebar.checkbox(
+        "Enable k-mer specificity screening",
+        value=st.session_state.get("specificity_enabled", True),
+        help="Screen primers for off-target hits using k-mer analysis"
+    )
+    st.session_state["specificity_enabled"] = specificity_enabled
+    
+    if specificity_enabled:
+        st.sidebar.info("🎯 **Inline Specificity Screening**\n\nUsing embedded exclusion lists with 100+ species across:\n• Plants (cannabis, crops, weeds)\n• Fungi (Trichoderma, beneficials)\n• Bacteria (Bacillus, Pseudomonas)\n• Insects/Mites (pollinators, predators)\n• CA Cannabis Specialization")
+        
+        # Show database status
+        try:
+            paths = get_exclusion_paths_inline()
+            target_exists = Path(paths["target"]).exists()
+            exclude_count = len([p for p in paths["exclude"] if Path(p).exists()])
+            total_exclude = len(paths["exclude"])
+            
+            if target_exists:
+                st.sidebar.success(f"✅ Target DB: {Path(paths['target']).name}")
+            else:
+                st.sidebar.warning(f"⚠️ Target DB missing: {Path(paths['target']).name}")
+            
+            st.sidebar.write(f"**Exclusion DBs**: {exclude_count}/{total_exclude} available")
+            
+            if exclude_count < total_exclude:
+                st.sidebar.info("💡 **To build missing databases:**\n1. Download FASTA files to `db/bowtie2/`\n2. Run: `bowtie2-build <fasta> <prefix>`\n3. Expected format: `guild_species.*.bt2`")
+                
+        except Exception as e:
+            st.sidebar.error(f"Database path resolution failed: {e}")
+        
+        # Configuration options
+        strict_block = st.sidebar.checkbox(
+            "Block perfect off-target hits",
+            value=st.session_state.get("strict_perfect_block", True),
+            help="Disqualify primers with perfect 21-mer matches in exclusion databases"
+        )
+        st.session_state["strict_perfect_block"] = strict_block
     
     # Custom Synonyms UI
     st.sidebar.subheader("📝 Custom Synonyms")
@@ -4962,8 +5529,8 @@ def main():
                                 "id": "user_sequence"
                             }
                             
-                            primers, primer3_results = designer.design_primers_with_complementarity(
-                                clean_seq, 
+                            primers, primer3_results = design_primers_with_specificity(
+                                designer, clean_seq, 
                                 custom_params=custom_params,
                                 add_t7_promoter=enable_t7_dsrna,
                                 gene_target="User Input Sequence",
@@ -5230,6 +5797,52 @@ def main():
                     st.info(f"🎯 Good specificity: {specific_orgs}/{total_orgs} organisms ({specificity_percentage:.0f}%)")
                 else:
                     st.warning(f"⚠️ Moderate specificity: {specific_orgs}/{total_orgs} organisms ({specificity_percentage:.0f}%)")
+        
+        # Specificity screening results
+        primer3_results = st.session_state.get('primer3_results', {})
+        if primer3_results.get('specificity_screening', {}).get('enabled', False):
+            st.subheader("🎯 Specificity Screening Results")
+            spec_data = primer3_results['specificity_screening']
+            
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("Total Primers", spec_data['total_primers'])
+            with col2:
+                st.metric("Qualified", spec_data['qualified_primers'])
+            with col3:
+                st.metric("Disqualified", spec_data['disqualified_primers'])
+            with col4:
+                disqual_rate = (spec_data['disqualified_primers'] / spec_data['total_primers'] * 100) if spec_data['total_primers'] > 0 else 0
+                st.metric("Disqualification Rate", f"{disqual_rate:.1f}%")
+            
+            if spec_data['disqualified_primers'] > 0:
+                st.warning(f"⚠️ {spec_data['disqualified_primers']} primer pairs were disqualified due to off-target hits")
+            else:
+                st.success("✅ All primer pairs passed specificity screening")
+            
+            # Show database information
+            with st.expander("📊 Database Configuration", expanded=False):
+                st.write(f"**Target Database**: `{spec_data.get('db_target', 'N/A')}`")
+                st.write(f"**Exclusion Databases**: {len(spec_data.get('db_exclude', []))} databases")
+                if spec_data.get('db_exclude'):
+                    st.write("**Excluded Species Categories**:")
+                    for i, db_path in enumerate(spec_data['db_exclude'][:10]):  # Show first 10
+                        db_name = Path(db_path).name
+                        st.write(f"  • {db_name}")
+                    if len(spec_data['db_exclude']) > 10:
+                        st.write(f"  • ... and {len(spec_data['db_exclude']) - 10} more")
+            
+            # Show primer scores if available
+            if spec_data.get('primer_scores'):
+                with st.expander("📈 Primer Scores", expanded=False):
+                    scores_data = []
+                    for primer_id, score in spec_data['primer_scores'].items():
+                        scores_data.append({
+                            "Primer Pair": primer_id,
+                            "Score": f"{score:.3f}" if score != float("-inf") else "DISQUALIFIED"
+                        })
+                    if scores_data:
+                        st.dataframe(scores_data, use_container_width=True)
         
         # Primer results table
         st.subheader("Primer Pairs")
@@ -6021,5 +6634,187 @@ class OptimizedSessionManager:
         except Exception as e:
             pass  # Silent cleanup failure
 
-if __name__ == "__main__":
+# ======== STREAMLIT UI (optional, same file) ========
+# This adds a simple UI without changing your CLI behavior.
+try:
+    import streamlit as st
+    _HAS_STREAMLIT = True
+except Exception:
+    _HAS_STREAMLIT = False
+
+def _st_app():
+    st.title("AutoPrimer 7 — RNAi 21-mer Specificity Designer")
+
+    # --- Inputs ---
+    st.sidebar.header("Settings")
+    bowtie_root = st.sidebar.text_input("Bowtie2 DB root", str(BOWTIE2_DB_ROOT), help="Folder containing db/bowtie2/<guild>_<species>.*.bt2")
+    strict_block = st.sidebar.checkbox("Strict block on any perfect 21/21 off-target", value=True)
+    threads = st.sidebar.number_input("Bowtie2 threads", min_value=1, max_value=32, value=4, step=1)
+    target_taxon = st.sidebar.text_input("Target taxon (positive DB)", TARGET_TAXON)
+    st.sidebar.caption("Ensure Bowtie2 indexes exist for the target and exclusions. Missing DBs are skipped with a warning.")
+    
+    # Show Bowtie2 version
+    bt2_ver = get_bowtie2_version()
+    if bt2_ver:
+        st.sidebar.caption(f"Bowtie2: {bt2_ver}")
+    else:
+        st.sidebar.caption("Bowtie2: not found on PATH")
+
+    # Allow toggling guilds (optional)
+    st.sidebar.subheader("Exclude guilds")
+    guild_flags = {}
+    for g in EXCLUSION_SPECIES.keys():
+        guild_flags[g] = st.sidebar.checkbox(g, value=True)
+
+    # Target sequence entry
+    st.subheader("Target sequence (FASTA or raw DNA)")
+    uploaded = st.file_uploader("Upload FASTA (optional)", type=["fa", "fasta", "txt"])
+    raw_text = st.text_area("…or paste sequence here", height=140, placeholder=">target\nACGT...")
+
+    def _read_seq(text: str) -> str:
+        if not text:
+            return ""
+        text = text.strip()
+        if text.startswith(">"):
+            lines = [ln.strip() for ln in text.splitlines() if not ln.startswith(">")]
+            return "".join(lines).upper().replace("U","T")
+        return "".join([c for c in text.upper() if c in "ACGTU"]).replace("U","T")
+
+    seq = ""
+    if uploaded is not None:
+        try:
+            buf = uploaded.read().decode("utf-8", errors="ignore")
+            seq = _read_seq(buf)
+        except Exception as e:
+            st.error(f"Could not read uploaded file: {e}")
+    if not seq:
+        seq = _read_seq(raw_text)
+
+    # Primer design parameters (hook these into your existing generator)
+    st.subheader("Primer design")
+    want_design = st.checkbox("Design primers for this target", value=True)
+    max_pairs = st.number_input("Max primer pairs", min_value=1, max_value=200, value=25, step=1)
+
+    # Run button
+    run = st.button("Run specificity screen")
+
+    # Resolve DB paths with guild filtering
+    def _resolve_paths():
+        # Override DB root if user changed it
+        global BOWTIE2_DB_ROOT, TARGET_TAXON
+        BOWTIE2_DB_ROOT = Path(bowtie_root)
+        TARGET_TAXON = target_taxon
+
+        # Build structured DB reference list
+        target_ref, exclusion_refs = build_db_ref_list(bowtie_root, target_taxon, guild_flags)
+        
+        # Show database status in sidebar
+        with st.sidebar.expander("Databases to be checked", expanded=False):
+            st.write(f"**Target DB:** {'✅' if target_ref.found else '⚠️'} {target_ref.guild}/{target_ref.species}")
+            if not target_ref.found:
+                st.caption(f"Missing: {', '.join(target_ref.missing_exts)}")
+
+            total = len(exclusion_refs)
+            available = sum(1 for e in exclusion_refs if e.found)
+            st.write(f"**Exclusion DBs:** {available}/{total} available")
+
+            # Show a compact preview (first ~10 for brevity)
+            preview = [f"{'✅' if e.found else '⚠️'} {e.guild}/{e.species}" for e in exclusion_refs[:10]]
+            if preview:
+                st.caption("Preview:\n" + "\n".join(preview))
+            if total > 10:
+                st.caption(f"...and {total-10} more")
+        
+        return target_ref, exclusion_refs
+
+    # Main action
+    if run:
+        if not seq:
+            st.error("Please upload or paste a target sequence.")
+            st.stop()
+
+        target_ref, exclusion_refs = _resolve_paths()
+
+        # Generate primer candidates using real primer designer
+        primer_candidates = []
+        if want_design:
+            try:
+                designer = PrimerDesigner()
+                designed, p3 = designer.design_primers_with_complementarity(
+                    sequence=seq, target_region=None, custom_params=None, add_t7_promoter=False
+                )
+                primer_candidates = [
+                    {
+                        "primer_id": f"pair_{i+1}",
+                        "amplicon_seq": seq[p.forward_start : p.reverse_start + len(p.reverse_seq)],
+                        "primer3_penalty": p3.get(f"PRIMER_PAIR_{i}_PENALTY", 2.5),
+                    }
+                    for i, p in enumerate(designed[:int(max_pairs)])
+                ]
+            except Exception as e:
+                st.error(f"Primer design failed: {e}")
+                st.stop()
+
+        # Specificity screen + scoring
+        rows = []
+        for i, cand in enumerate(primer_candidates):
+            # Use detailed screening for per-DB hit tracking
+            detail = screen_amplicon_exact21_detailed(
+                amplicon_seq=cand["amplicon_seq"],
+                db_target_prefix=target_ref.prefix,
+                exclusion_prefixes=[e.prefix for e in exclusion_refs if e.found],
+                threads=int(threads)
+            )
+            
+            # Convert to legacy format for scoring
+            spec = AmpliconScreenResult(
+                off_target_perfect=detail.off_target_perfect_total,
+                kmer_uniqueness_fraction=detail.kmer_uniqueness_fraction,
+                risky_kmers=detail.risky_kmers
+            )
+            
+            score = primer_specificity_score(
+                primer3_penalty=cand.get("primer3_penalty", 2.5),
+                spec=spec,
+                hard_block_offtargets=strict_block
+            )
+            
+            rows.append({
+                "primer_id": cand["primer_id"],
+                "amplicon_len": len(cand["amplicon_seq"]),
+                "primer3_penalty": cand.get("primer3_penalty", 2.5),
+                "off_target_perfect": detail.off_target_perfect_total,
+                "kmer_uniqueness_fraction": round(detail.kmer_uniqueness_fraction, 4),
+                "score": score
+            })
+            
+            # Show specificity audit for each candidate
+            render_specificity_audit(
+                candidate_label=f"Amplicon {i+1}",
+                target_ref=target_ref,
+                exclusion_refs=exclusion_refs,
+                detail=detail
+            )
+
+        # Filter & sort
+        rows = [r for r in rows if r["score"] != float("-inf")]
+        rows.sort(key=lambda r: r["score"], reverse=True)
+
+        import pandas as _pd
+        df = _pd.DataFrame(rows)
+        st.subheader("Results")
+        if df.empty:
+            st.info("No passing primers (strict block removed all). Try relaxing settings or fixing DBs.")
+        else:
+            st.dataframe(df, use_container_width=True)
+            st.download_button("Download CSV", df.to_csv(index=False).encode("utf-8"),
+                               file_name="autoprimer7_results.csv", mime="text/csv")
+
+# Decide whether to run Streamlit UI or normal CLI
+if _HAS_STREAMLIT and os.environ.get("AUTOPRIMER_UI_DISABLED","0") != "1":
+    # When launched via `streamlit run autoprimer5.py`, this block will execute.
+    _st_app()
+# ======== end Streamlit UI ========
+
+if __name__ == "__main__" and (not _HAS_STREAMLIT or os.environ.get("AUTOPRIMER_UI_DISABLED","0") == "1"):
     main()
