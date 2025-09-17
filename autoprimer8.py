@@ -312,30 +312,42 @@ class AmpliconScreenDetail:
     per_db_hits: Dict[str, int]  # prefix -> count of perfect 21-mer hits
 
 # ---- One-call amplicon screening (exact 21-mers) ----
-def screen_amplicon_exact21(amplicon_seq: str, db_target: str, db_exclude: List[str], threads: int = 4) -> AmpliconScreenResult:
+def screen_amplicon_exact21(amplicon_seq: str, db_target: str, db_exclude: list[str], threads: int = 4) -> AmpliconScreenResult:
     km = enumerate_kmers_both_strands(amplicon_seq, k=21)
-    if not km:
-        return AmpliconScreenResult(0, 0.0, [])
     kmers = [k for _,_,k in km]
+    have_bowtie = shutil.which("bowtie2") and shutil.which("bowtie2-build") and any_bt2_present(BOWTIE2_DB_ROOT)
 
-    # must have at least one exact 21-mer in target DB (sanity)
-    target_hits = set(_bowtie2_exact_match(kmers, Path(db_target), threads=threads))
-    # aggregate off-target hits across all exclusion DBs
     off_idx = set()
-    for db in db_exclude:
-        off_idx.update(_bowtie2_exact_match(kmers, Path(db), threads=threads))
+    target_hits = set()
+
+    if have_bowtie:
+        # existing Bowtie2 path (unchanged), using your _bowtie2_exact_match(...)
+        target_hits = set(_bowtie2_exact_match(kmers, Path(db_target), threads=threads))
+        for db in db_exclude:
+            off_idx.update(_bowtie2_exact_match(kmers, Path(db), threads=threads))
+    else:
+        # parse guild/species back out of the bowtie-style prefix name
+        def parse_prefix(p: str):
+            name = Path(p).name  # e.g., "fungi_trichoderma_harzianum"
+            return name.split("_", 1)
+        tg, ts = parse_prefix(db_target)
+        # ensure FASTAs are present (use your existing ensure_exclusion_assets if you want)
+        try:
+            ensure_exclusion_assets({tg:[ts]}, build_blast=False, only_missing=True, refseq_only=True, verbose=False)
+        except Exception:
+            pass
+        target_hits |= exact21_offtargets_python(kmers, tg, ts)
+        for db in db_exclude:
+            eg, es = parse_prefix(db)
+            try:
+                ensure_exclusion_assets({eg:[es]}, build_blast=False, only_missing=True, refseq_only=True, verbose=False)
+            except Exception:
+                pass
+            off_idx |= exact21_offtargets_python(kmers, eg, es)
 
     risky = [KmerHit(kmers[i], km[i][0], km[i][1], "any_exclusion_db") for i in sorted(off_idx)]
-    # uniqueness = kmers that hit target but NOT exclusions (if target index is absent, we don't penalize uniqueness)
-    if target_hits:
-        unique_ok = target_hits - off_idx
-        uniq_frac = len(unique_ok) / len(kmers)
-    else:
-        uniq_frac = 0.0  # if no target hits (e.g., target DB missing), be conservative
-
-    return AmpliconScreenResult(off_target_perfect=len(off_idx),
-                                kmer_uniqueness_fraction=uniq_frac,
-                                risky_kmers=risky)
+    uniq_frac = (len(target_hits - off_idx) / len(kmers)) if kmers else 0.0
+    return AmpliconScreenResult(off_target_perfect=len(off_idx), kmer_uniqueness_fraction=uniq_frac, risky_kmers=risky)
 
 def screen_amplicon_exact21_detailed(amplicon_seq: str,
                                      db_target_prefix: str,
@@ -6634,11 +6646,100 @@ class OptimizedSessionManager:
         except Exception as e:
             pass  # Silent cleanup failure
 
+# --- Prebuilt DB bundle bootstrap (from GitHub Releases) ---
+import io, zipfile, hashlib, requests
+from pathlib import Path
+
+BOWTIE2_DB_ROOT = Path("db/bowtie2")  # keep as your sidebar default
+BOWTIE2_DB_ROOT.mkdir(parents=True, exist_ok=True)
+
+def any_bt2_present(root: Path) -> bool:
+    return any(str(p).endswith(".bt2") for p in root.rglob("*"))
+
+def ensure_bowtie_bundle(repo="GobiQ/primer",
+                         tag="bowtie-dbs-latest",
+                         asset_name="bowtie2_db.zip",
+                         sha256="",
+                         dest_dir: Path = BOWTIE2_DB_ROOT) -> bool:
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    if any_bt2_present(dest_dir):
+        return True
+    url = f"https://github.com/{repo}/releases/download/{tag}/{asset_name}"
+    r = requests.get(url, timeout=120)
+    r.raise_for_status()
+    buf = r.content
+    if sha256:
+        h = hashlib.sha256(buf).hexdigest()
+        if h != sha256:
+            raise RuntimeError(f"DB bundle SHA256 mismatch: got {h}")
+    with zipfile.ZipFile(io.BytesIO(buf)) as zf:
+        zf.extractall(dest_dir)
+    return True
+
+# --- Pure-Python exact 21-mer index (fallback when bowtie2 isn't available) ---
+import pickle, zlib
+from functools import lru_cache
+
+DATA_DIR = Path("data/exclude")
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+def _fasta_path(guild: str, species: str) -> Path:
+    d = DATA_DIR / guild / species
+    d.mkdir(parents=True, exist_ok=True)
+    return d / f"{species}_cds.fna"
+
+def _index_path_for(guild: str, species: str) -> Path:
+    return DATA_DIR / guild / species / f"{species}.k21.pkl.zlib"
+
+def _clean_dna(s: str) -> str:
+    s = s.upper().replace("U","T")
+    return "".join(c for c in s if c in "ACGT")
+
+def _fasta_iter(path: Path):
+    hdr, seq = None, []
+    for ln in path.read_text().splitlines():
+        if ln.startswith(">"):
+            if hdr:
+                yield hdr, "".join(seq)
+            hdr, seq = ln[1:].strip(), []
+        else:
+            seq.append(ln.strip())
+    if hdr:
+        yield hdr, "".join(seq)
+
+def build_k21_index_for_species(guild: str, species: str) -> Path:
+    fa = _fasta_path(guild, species)
+    if not fa.exists() or fa.stat().st_size == 0:
+        raise RuntimeError(f"FASTA missing: {fa}")
+    kset = set()
+    for _, seq in _fasta_iter(fa):
+        s = _clean_dna(seq)
+        for i in range(0, max(0, len(s)-21+1)):
+            kset.add(s[i:i+21])
+    blob = zlib.compress(pickle.dumps(kset, protocol=pickle.HIGHEST_PROTOCOL))
+    p = _index_path_for(guild, species)
+    p.write_bytes(blob)
+    return p
+
+@lru_cache(maxsize=1024)
+def load_k21_index(guild: str, species: str):
+    p = _index_path_for(guild, species)
+    if not p.exists():
+        build_k21_index_for_species(guild, species)
+    return pickle.loads(zlib.decompress(p.read_bytes()))
+
+def exact21_offtargets_python(kmers: list[str], guild: str, species: str) -> set[int]:
+    kset = load_k21_index(guild, species)
+    hits = set()
+    for i, k in enumerate(kmers):
+        if k in kset:
+            hits.add(i)
+    return hits
+
 # ====== INLINE NCBI FETCH + DB BUILD (no extra files) =========================
 # Uses the EXCLUSION_SPECIES dict you already have in this file.
 
-import os, time, subprocess, shutil, hashlib
-from pathlib import Path
+import os, time, subprocess, shutil
 from typing import Dict, List, Iterable, Tuple
 
 DATA_DIR = Path("data/exclude")      # FASTAs: data/exclude/<guild>/<species>/<species>_cds.fna
@@ -6796,6 +6897,13 @@ except Exception:
 def _st_app():
     st.title("AutoPrimer 7 — RNAi 21-mer Specificity Designer")
 
+    # Try fetching prebuilt DBs if none exist; otherwise we'll use the Python fallback
+    try:
+        ensure_bowtie_bundle(repo="GobiQ/primer", tag="bowtie-dbs-latest", asset_name="bowtie2_db.zip", sha256="")
+    except Exception as e:
+        # It's okay if it fails; the pure-Python engine will kick in later.
+        pass
+
     # --- Inputs ---
     st.sidebar.header("Settings")
     bowtie_root = st.sidebar.text_input("Bowtie2 DB root", str(BOWTIE2_DB_ROOT), help="Folder containing db/bowtie2/<guild>_<species>.*.bt2")
@@ -6852,6 +6960,19 @@ def _st_app():
                 st.subheader("Build Results Summary")
                 results_df = pd.DataFrame(rows, columns=["Guild", "Species", "Status"])
                 st.dataframe(results_df, use_container_width=True)
+    
+    # Prebuilt bundle section
+    with st.sidebar.expander("Prebuilt DB bundle"):
+        repo = st.text_input("GitHub repo", "GobiQ/primer")
+        tag = st.text_input("Release tag", "bowtie-dbs-latest")
+        asset = st.text_input("Asset", "bowtie2_db.zip")
+        sha  = st.text_input("SHA256 (optional)", "")
+        if st.button("Fetch prebuilt DBs"):
+            try:
+                ensure_bowtie_bundle(repo=repo, tag=tag, asset_name=asset, sha256=sha, dest_dir=BOWTIE2_DB_ROOT)
+                st.success("Prebuilt Bowtie2 DBs ready.")
+            except Exception as e:
+                st.error(f"Download/extract failed: {e}")
 
     # Target sequence entry
     st.subheader("Target sequence (FASTA or raw DNA)")
