@@ -762,6 +762,24 @@ for target_info in selected_gene_targets:
         "path": f"auto_target_{target_info['organism']['scientific_name']}"
     })
 
+# If NCBI sequences are available, use them to populate the entries
+if 'ncbi_sequences' in st.session_state and st.session_state['ncbi_sequences']:
+    ncbi_sequences = st.session_state['ncbi_sequences']
+    
+    # Match NCBI sequences to our target organisms
+    for entry in entries:
+        organism_name = entry["organism"]
+        target_gene = entry["target"]
+        
+        # Find matching sequence from NCBI results
+        for ncbi_seq in ncbi_sequences:
+            if (organism_name.lower() in ncbi_seq.get("organism", "").lower() or 
+                ncbi_seq.get("organism", "").lower() in organism_name.lower()):
+                if target_gene.lower() in ncbi_seq.get("target", "").lower() or target_gene == "General":
+                    entry["sequence"] = ncbi_seq.get("sequence")
+                    entry["id"] = ncbi_seq.get("id")
+                    break
+
 selected = entries
 
 st.markdown("### 2) Primer design settings & constraints")
@@ -854,15 +872,32 @@ run = st.button("Auto‑design & assign 15‑plex")
 
 results: List[PrimerPair] = []
 if run:
+    # Check if sequences are available
+    sequences_available = any(entry and entry.get("sequence") for entry in selected)
+    
+    if not sequences_available:
+        st.warning("⚠️ **No sequences available yet!**")
+        st.info("📋 **Next steps:**")
+        st.write("1. Enter your NCBI email in the sidebar")
+        st.write("2. Click 'Fetch Sequences for All 15 Targets' to get sequences from NCBI")
+        st.write("3. Once sequences are loaded, you can run the primer design")
+        st.stop()
+    
     # Ensure we have 15 selected entries with sequences
     target_infos = []
+    missing_sequences = []
     for i, entry in enumerate(selected):
         if not entry or not entry.get("sequence"):
-            st.error(f"Target {i+1}: selected entry has no sequence. Adjust 'Sequence field key(s)' or pick a different target.")
+            missing_sequences.append(f"Target {i+1}: {entry.get('label', 'Unknown') if entry else 'No entry'}")
             target_infos.append(None)
             continue
         target_infos.append(entry)
+    
     if any(t is None for t in target_infos):
+        st.error("❌ **Some targets are missing sequences:**")
+        for missing in missing_sequences:
+            st.write(f"• {missing}")
+        st.info("💡 **Solution:** Click 'Fetch Sequences for All 15 Targets' in the sidebar to get sequences from NCBI")
         st.stop()
 
     # Compute choice grid
