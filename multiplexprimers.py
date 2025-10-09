@@ -29,75 +29,119 @@ except Exception:
     HAVE_BIO = False
 
 # -----------------------------
-# Embedded catalog & sequence extractor (no external fetch)
+# Catalog & sequence sources (LOCAL + optional NCBI fetch)
 # -----------------------------
 
-# Edit this dict to include your 15+ targets with embedded sequences.
-# You can also paste/override via the sidebar JSON editor or upload a JSON file.
+# Local, built‑in sample entries (you can keep or replace)
 LOCAL_CATALOG = {
     "Bacteria": {
         "Pathogens": [
-            {"common": "Escherichia coli", "scientific": "Escherichia coli", "target": "uidA", "sequence": "ATGCGTACGTAGCTAGCTAGCTGATCGATCGATGCTAGCTAGCTGATCGATCGATCGTAGCTAGCTAGCTAGCTAGCTAGCTAGCTAGC"},
-            {"common": "Salmonella enterica", "scientific": "Salmonella enterica", "target": "invA", "sequence": "ATGGCTAGCTAGCTAGCTAGCTAGCTAGGCTAGCTAGCTGATCGATCGATCGATGCTAGCTAGCTAGCTAGCTAGCTAGCTAGCTAAA"},
-            {"common": "Listeria monocytogenes", "scientific": "Listeria monocytogenes", "target": "hlyA", "sequence": "ATGAAAGCTAGCTAGCTAGCTAGCTAGCTAGCTTTGATCGATCGATCGATCGATCGTAGCTAGCTAGCTAGCTAGCTAGCTAGCTTGA"},
+            {"common": "Escherichia coli", "scientific": "Escherichia coli", "target": "uidA"},
+            {"common": "Salmonella enterica", "scientific": "Salmonella enterica", "target": "invA"},
+            {"common": "Listeria monocytogenes", "scientific": "Listeria monocytogenes", "target": "hlyA"},
         ]
     },
     "Viruses": {
         "Respiratory": [
-            {"common": "Influenza A", "scientific": "Influenza A virus", "target": "M1", "sequence": "ATGGAGAAAAGCTAGCTAGCTAGCTAGCTGATCGATCGATCGATCGTTAGCTAGCTAGCTAGCTAGCTAGCTAGCTAGCTAGCTAGC"},
-            {"common": "SARS-CoV-2", "scientific": "Severe acute respiratory syndrome coronavirus 2", "target": "N", "sequence": "ATGCTGCTGCTGCTGCTGCTGCTGATCGATCGATCGATCGATCGATGCTGCTGCTGCTGCTGCTGCTGCTGCTGCTGCTGCTGCTAA"},
-            {"common": "RSV", "scientific": "Respiratory syncytial virus", "target": "N", "sequence": "ATGGCTGCTGCTGCTGCTGCTGATCGATCGATCGATCGATCGATCGCTGCTGCTGCTGCTGCTGCTGCTGCTGCTGCTGCTGCTA"}
+            {"common": "Influenza A", "scientific": "Influenza A virus", "target": "M1"},
+            {"common": "SARS-CoV-2", "scientific": "Severe acute respiratory syndrome coronavirus 2", "target": "N"},
+            {"common": "RSV", "scientific": "Respiratory syncytial virus", "target": "N"}
         ]
     },
     "Fungi": {
         "Clinical": [
-            {"common": "Candida albicans", "scientific": "Candida albicans", "target": "ITS", "sequence": "ATGCTAGCTAGCTAGCTAGCTAGCTAGCTAGCTAGCTAGCTAGCTGATCGATCGATCGATCGATCGATCGATCGATCGATCGATC"},
-            {"common": "Aspergillus fumigatus", "scientific": "Aspergillus fumigatus", "target": "ITS", "sequence": "ATGGCTAGCTAGCTAGCTAGCTAGCTAGCTAGCTAGCTAGCTAGCTAGCTGATCGATCGATCGATCGATCGATCGATCGATCGA"}
+            {"common": "Candida albicans", "scientific": "Candida albicans", "target": "ITS"},
+            {"common": "Aspergillus fumigatus", "scientific": "Aspergillus fumigatus", "target": "ITS"}
         ]
     }
 }
 
+# Optional local override with actual sequences (used before NCBI)
+LOCAL_SEQUENCES = {
+    # Example mapping: (scientific, target) -> DNA string
+    # ("Escherichia coli", "uidA"): "ATG...",
+}
+
 @st.cache_data
 def load_catalog() -> Any:
-    """Return the embedded local catalog by default (no imports, no network)."""
+    """Return the embedded local catalog by default (no imports required)."""
     return LOCAL_CATALOG
 
 
 def clean_seq(s: str) -> str:
     return re.sub(r"[^ACGTNacgtn]", "", s).upper().replace("U", "T")
 
+# ---- NCBI fetching (optional, like the original app) ----
+try:
+    from Bio import Entrez
+    HAVE_ENTREZ = True
+except Exception:
+    HAVE_ENTREZ = False
+
+@st.cache_data(show_spinner=False)
+def ncbi_search_and_fetch(organism: str, gene: str, email: str, api_key: Optional[str], db: str = "nucleotide", retmax: int = 1) -> Optional[str]:
+    """Search NCBI for a nucleotide record for organism+gene and return FASTA sequence (first hit)."""
+    import urllib.parse, urllib.request
+    import json
+
+    def eutils_get(url, params):
+        q = urllib.parse.urlencode(params)
+        with urllib.request.urlopen(f"{url}?{q}") as resp:
+            return resp.read().decode()
+
+    # Use Biopython if available
+    if HAVE_ENTREZ:
+        Entrez.email = email
+        if api_key:
+            Entrez.api_key = api_key
+        handle = Entrez.esearch(db=db, term=f"{organism}[Organism] AND {gene}[Gene]", retmax=retmax)
+        rec = Entrez.read(handle)
+        ids = rec.get("IdList", [])
+        if not ids:
+            return None
+        fetch = Entrez.efetch(db=db, id=ids[0], rettype="fasta", retmode="text")
+        fasta = fetch.read()
+        seq = "".join([line.strip() for line in fasta.splitlines() if not line.startswith(">")])
+        return clean_seq(seq) if seq else None
+
+    # Fallback to raw E-utilities (no Biopython)
+    base = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
+    search_xml = eutils_get(f"{base}/esearch.fcgi", {
+        "db": db, "term": f"{organism}[Organism] AND {gene}[Gene]", "retmax": str(retmax),
+        "retmode": "json", **({"api_key": api_key} if api_key else {})
+    })
+    data = json.loads(search_xml)
+    ids = data.get("esearchresult", {}).get("idlist", [])
+    if not ids:
+        return None
+    fasta = eutils_get(f"{base}/efetch.fcgi", {
+        "db": db, "id": ids[0], "rettype": "fasta", "retmode": "text", **({"api_key": api_key} if api_key else {})
+    })
+    seq = "".join([line.strip() for line in fasta.splitlines() if not line.startswith(">")])
+    return clean_seq(seq) if seq else None
+
+# -----------------------------
+# Sequence extractor (prefers local, then NCBI if enabled)
+# -----------------------------
 
 def find_seq_in_obj(obj: Any, key_hints: List[str]) -> Optional[str]:
-    """Search an arbitrary nested object for a plausible DNA sequence.
-    Honors user-provided key hints for field names that hold sequences.
-    """
     # direct string
     if isinstance(obj, str):
         s = clean_seq(obj)
         if len(s) >= 60:
             return s
         return None
-    # dict with keys
     if isinstance(obj, dict):
-        # priority: user hints
         for k in key_hints:
             if k in obj and isinstance(obj[k], str):
                 s = clean_seq(obj[k])
                 if len(s) >= 60:
                     return s
-        # common defaults
-        for k in ["sequence","target_sequence","amplicon","region","locus_seq","seq","reference_sequence","template","amplicon_template"]:
-            if k in obj and isinstance(obj[k], str):
-                s = clean_seq(obj[k])
-                if len(s) >= 60:
-                    return s
-        # otherwise scan values
         for v in obj.values():
             s = find_seq_in_obj(v, key_hints)
             if s:
                 return s
         return None
-    # list/tuple -> scan items
     if isinstance(obj, (list, tuple)):
         for v in obj:
             s = find_seq_in_obj(v, key_hints)
@@ -106,64 +150,78 @@ def find_seq_in_obj(obj: Any, key_hints: List[str]) -> Optional[str]:
     return None
 
 @st.cache_data
-def flatten_catalog_with_sequences(catalog: Any, key_hints_csv: str) -> List[Dict[str,str]]:
-    """Flatten a wide range of catalog shapes into a list of dicts with organism, target, and sequence.
-    key_hints_csv is a comma-separated string of preferred field names for sequences.
+def flatten_catalog_with_sequences(catalog: Any, key_hints_csv: str, email: str = "", api_key: Optional[str] = None, enable_ncbi: bool = False) -> List[Dict[str,str]]:
+    """Flatten catalog into entries with (organism, target, sequence).
+    Order of preference: LOCAL_SEQUENCES -> embedded sequence fields -> NCBI fetch (if enabled).
     """
     key_hints = [k.strip() for k in key_hints_csv.split(',') if k.strip()]
     out: List[Dict[str,str]] = []
+    missing: List[Tuple[str,str]] = []
 
-    def push(label: str, organism: str, target: str, seq: str, path: str):
-        out.append({
-            "label": label,
-            "organism": organism or "Unknown",
-            "target": target or "Target",
-            "sequence": seq,
-            "path": path,
-        })
+    def push_entry(org: str, tgt: str, seq: Optional[str], path: str, label_hint: Optional[str] = None):
+        label = label_hint or f"{org} — {tgt}"
+        if seq:
+            out.append({"label": label, "organism": org, "target": tgt, "sequence": seq, "path": path})
+        else:
+            missing.append((org, tgt))
 
-    def walk(obj: Any, path: str = "$"):
+    def walk(obj: Any, path: str = "$", category: Optional[str] = None, subcat: Optional[str] = None):
         if obj is None:
             return
-        # If leaf has a sequence, try to infer organism/target names
-        seq = find_seq_in_obj(obj, key_hints)
-        if seq:
+        # If this node has an explicit sequence, infer labels
+        seq_here = find_seq_in_obj(obj, key_hints)
+        if seq_here:
             organism = None
             target = None
-            label = None
             if isinstance(obj, dict):
-                organism = obj.get("scientific") or obj.get("organism") or obj.get("species") or obj.get("name") or obj.get("common")
-                target = obj.get("target") or obj.get("gene") or obj.get("locus") or obj.get("amplicon_name")
-                label = obj.get("label") or obj.get("display")
-            if isinstance(obj, (list, tuple)) and len(obj) >= 3 and all(isinstance(x, str) for x in obj[:3]):
-                # Old pattern: [common, scientific, target, ...]
-                organism = obj[1] or organism
-                target = obj[2] or target
-                if not label:
-                    common = obj[0]
-                    label = f"{common} — {organism} — {target}"
-            if not label:
-                label = f"{organism or 'Unknown'} — {target or 'Target'}"
-            push(label, organism or "Unknown", target or "Target", seq, path)
+                organism = obj.get("scientific") or obj.get("organism") or obj.get("species") or obj.get("name") or obj.get("common") or category
+                target = obj.get("target") or obj.get("gene") or obj.get("marker") or obj.get("locus") or subcat or "Target"
+            elif isinstance(obj, (list, tuple)) and len(obj) >= 3 and all(isinstance(x, str) for x in obj[:3]):
+                organism = obj[1]
+                target = obj[2]
+            push_entry(organism or "Unknown", target or "Target", seq_here, path)
             return
-        # Recurse
+        # Otherwise recurse; when we find a leaf dict with organism + target but no seq, try LOCAL then NCBI
         if isinstance(obj, dict):
+            # Detect a leaf with organism/target names
+            if any(k in obj for k in ("scientific","organism","species","name","common")) and any(k in obj for k in ("target","gene","marker","locus")):
+                org = obj.get("scientific") or obj.get("organism") or obj.get("species") or obj.get("name") or obj.get("common") or category or "Unknown"
+                tgt = obj.get("target") or obj.get("gene") or obj.get("marker") or obj.get("locus") or subcat or "Target"
+                # 1) local override
+                seq = LOCAL_SEQUENCES.get((org, tgt)) or None
+                if seq:
+                    seq = clean_seq(seq)
+                # 2) embedded fields
+                if not seq:
+                    seq = find_seq_in_obj(obj, key_hints)
+                # 3) NCBI fetch
+                if not seq and enable_ncbi and email:
+                    seq = ncbi_search_and_fetch(org, tgt, email=email, api_key=api_key)
+                push_entry(org, tgt, seq, path)
+                return
             for k, v in obj.items():
-                walk(v, f"{path}.{k}")
+                if category is None:
+                    walk(v, f"{path}.{k}", category=k, subcat=None)
+                elif subcat is None and isinstance(v, (list, dict, tuple)):
+                    walk(v, f"{path}.{k}", category=category, subcat=k)
+                else:
+                    walk(v, f"{path}.{k}", category=category, subcat=subcat)
         elif isinstance(obj, (list, tuple)):
             for i, v in enumerate(obj):
-                walk(v, f"{path}[{i}]")
+                walk(v, f"{path}[{i}]", category=category, subcat=subcat)
 
     walk(catalog)
-    # Deduplicate labels
+    # Deduplicate entries
     seen = set()
     dedup = []
     for e in out:
-        key = (e["label"], e["organism"], e["target"], e["sequence"])
+        key = (e["organism"], e["target"], e["sequence"])
         if key in seen:
             continue
         seen.add(key)
         dedup.append(e)
+    # Attach missing info for UI
+    dedup.append({"_missing": missing})
     return dedup
 
 # -----------------------------
@@ -224,8 +282,7 @@ st.title("AutoPrimer5 — Multiplex (15 targets • 3 channels × 5 Tm slots)")
 
 with st.sidebar:
     st.header("Catalog & Conditions")
-    catalog_obj = load_catalog()
-    seq_key_hints = st.text_input("Sequence field key(s) (comma-separated)", value="sequence,target_sequence,amplicon,region,locus_seq,seq")
+    catalog_obj ="Sequence field key(s) (comma-separated)", value="sequence,target_sequence,amplicon,region,locus_seq,seq")
     entries = flatten_catalog_with_sequences(catalog_obj, seq_key_hints)
     st.metric("Catalog entries (raw)", 0 if catalog_obj is None else (len(catalog_obj) if hasattr(catalog_obj, "__len__") else "?"))
     st.metric("Entries with sequences", len(entries))
