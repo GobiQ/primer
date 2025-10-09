@@ -416,5 +416,9 @@ if run:
     st.download_button("Download manifest (CSV)", data=out.getvalue(), file_name="autoprimer5_multiplex_manifest.csv", mime="text/csv")
 
 st.markdown("---")
-st.caption("This version auto-loads catalog sequences and auto-assigns 15 targets to 3×5 Tm slots using a greedy global cost minimizer.
-For production: swap rough_amp_tm() for MELTING/UNAFold and add fuller dimer/hairpin scoring. Optionally replace greedy with a Hungarian solver for optimal assignment.")
+st.caption(
+    "This version auto-loads catalog sequences and auto-assigns 15 targets to 3×5 Tm slots "
+    "using a greedy global cost minimizer.\n"
+    "For production: swap rough_amp_tm() for MELTING/UNAFold and add fuller dimer/hairpin scoring. "
+    "Optionally replace greedy with a Hungarian solver for optimal assignment."
+)
