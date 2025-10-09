@@ -441,9 +441,11 @@ class ResilientNCBIConnector:
     def fetch_organism_sequences(self, organism_name: str, max_sequences: int = 10) -> List[Dict]:
         """Fetch multiple sequences for an organism with metadata using autoprimer5.py methodology"""
         if not HAVE_ENTREZ or not HAVE_BIO or not organism_name:
+            st.write(f"🔍 Debug: Cannot fetch for {organism_name} - HAVE_ENTREZ={HAVE_ENTREZ}, HAVE_BIO={HAVE_BIO}")
             return []
             
         try:
+            st.write(f"🔍 Debug: Starting fetch for {organism_name}")
             # Get gene targets for this organism
             suggestions = get_organism_suggestions_with_gene_targets()
             organism_targets = None
@@ -461,9 +463,13 @@ class ResilientNCBIConnector:
                                 'common_name': common_name,
                                 'gene_targets': gene_targets
                             }
+                            st.write(f"🔍 Debug: Found organism targets for {organism_name}")
                             break
                 if organism_targets:
                     break
+            
+            if not organism_targets:
+                st.write(f"🔍 Debug: No organism targets found for {organism_name}")
             
             sequences = []
             
@@ -486,11 +492,16 @@ class ResilientNCBIConnector:
                         seq_ids = []
                         for query in search_queries:
                             try:
+                                st.write(f"🔍 Debug: Searching with query: {query}")
                                 results = self.search_sequences(query, database="nucleotide", max_results=2)
                                 if results:
                                     seq_ids = results
+                                    st.write(f"🔍 Debug: Found {len(results)} sequence IDs")
                                     break
-                            except Exception:
+                                else:
+                                    st.write(f"🔍 Debug: No results for query: {query}")
+                            except Exception as e:
+                                st.write(f"🔍 Debug: Search error for {query}: {e}")
                                 continue
                         
                         # If no nucleotide hits, try protein-to-nucleotide linking
@@ -498,6 +509,7 @@ class ResilientNCBIConnector:
                             seq_ids = self._find_nuccore_via_protein(organism_name, [gene_name], max_results=2)
                         
                         for seq_id in seq_ids:
+                            st.write(f"🔍 Debug: Fetching sequence {seq_id}")
                             sequence = self.fetch_sequence(seq_id)
                             if sequence and len(sequence) > 100:
                                 # Clean sequence
@@ -510,8 +522,11 @@ class ResilientNCBIConnector:
                                         "sequence": clean_seq[:10000],  # Limit to 10kb like autoprimer5.py
                                         "label": f"{organism_name} — {gene_name}"
                                     })
+                                    st.write(f"🔍 Debug: Added sequence {seq_id} ({len(clean_seq)} bp)")
                                     if len(sequences) >= max_sequences:
                                         return sequences
+                            else:
+                                st.write(f"🔍 Debug: Sequence {seq_id} too short or invalid")
             else:
                 # Fallback: general organism search
                 search_query = f'"{organism_name}"[organism]'
@@ -808,12 +823,20 @@ for i, target_info in enumerate(selected_gene_targets):
 if (ncbi_email and ncbi_email != "your.email@example.com" and 
     ('ncbi_sequences' not in st.session_state or not st.session_state['ncbi_sequences'])):
     
+    # Debug info
+    st.info(f"🔍 Debug: Email='{ncbi_email}', NCBI sequences in session: {'ncbi_sequences' in st.session_state}")
+    
     # Check if we should auto-fetch (only if user hasn't explicitly fetched yet)
     if 'auto_fetch_attempted' not in st.session_state:
         st.session_state['auto_fetch_attempted'] = True
         
         with st.spinner("🔄 Auto-fetching sequences for all 15 targets..."):
             try:
+                # Check if BioPython is available
+                if not HAVE_ENTREZ or not HAVE_BIO:
+                    st.error("❌ BioPython not available. Please install: pip install biopython")
+                    st.stop()
+                
                 ncbi = ResilientNCBIConnector(ncbi_email, ncbi_api_key if ncbi_api_key else None)
                 
                 all_organisms_names = []
@@ -825,12 +848,17 @@ if (ncbi_email and ncbi_email != "your.email@example.com" and
                             all_organisms_names.append(scientific_name)
                 
                 all_organisms_names = all_organisms_names[:15]
+                st.write(f"🔍 Debug: Found {len(all_organisms_names)} organisms to fetch")
                 
                 all_ncbi_sequences = []
                 for i, organism_name in enumerate(all_organisms_names):
+                    st.write(f"Fetching sequences for {organism_name}...")
                     ncbi_sequences = ncbi.fetch_organism_sequences(organism_name, max_sequences=3)
                     if ncbi_sequences:
                         all_ncbi_sequences.extend(ncbi_sequences)
+                        st.write(f"✅ Found {len(ncbi_sequences)} sequences for {organism_name}")
+                    else:
+                        st.write(f"⚠️ No sequences found for {organism_name}")
                 
                 if all_ncbi_sequences:
                     st.session_state['ncbi_sequences'] = all_ncbi_sequences
@@ -840,6 +868,10 @@ if (ncbi_email and ncbi_email != "your.email@example.com" and
                     st.warning("⚠️ No sequences found during auto-fetch. Try manual fetch.")
             except Exception as e:
                 st.error(f"❌ Auto-fetch failed: {e}")
+                import traceback
+                st.error(f"Full error: {traceback.format_exc()}")
+    else:
+        st.info("🔄 Auto-fetch already attempted. Use 'Reset Auto-Fetch' button to retry.")
 
 # If NCBI sequences are available, use them to populate entries that don't have manual sequences
 if 'ncbi_sequences' in st.session_state and st.session_state['ncbi_sequences']:
