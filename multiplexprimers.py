@@ -59,7 +59,14 @@ LOCAL_CATALOG = {
 # Optional local override with actual sequences (used before NCBI)
 LOCAL_SEQUENCES = {
     # Example mapping: (scientific, target) -> DNA string
-    # ("Escherichia coli", "uidA"): "ATG...",
+    ("Escherichia coli", "uidA"): "ATGAAACGCAGAAAGCGTTGGGGCGCCTGATGCAGTGATGAAACGCATCGATACAGGTATGAACATGATTCCCAATATTATT",
+    ("Salmonella enterica", "invA"): "GTGAAATTATCGCCACGTTCGGGCAAATAGAAAATAGCAGCAATGCTGAATAGTAATATCAATTTGACCACTGCTGTG",
+    ("Listeria monocytogenes", "hlyA"): "CCTCCAGAGTGCTCGGATGTTTCCGCAAGAGATGCGAAGAGCTGCATCTAGATGCAGCCGCGTTAGAGGCCTCCATAA",
+    ("Influenza A virus", "M1"): "ATGAGTCTTCTAACCGAGGTCGAAACGTATGTTGCCTCTGGATTATCGCCGATGGTCTTACATATGGTACCAATCCTG",
+    ("Severe acute respiratory syndrome coronavirus 2", "N"): "ATGCTGCAATCGTGCTACAAATGAGATGCTATTGTGCTGCTATCAACATCTTTTGCACAGATCTTCTTGTTCCACGCCAT",
+    ("Respiratory syncytial virus", "N"): "ATGGCAAACAATACACAAATCTGCATCACAGTCATAATGTTGCACATGCCCCCAGATGCCGACCCAAAGTGGAATATGC",
+    ("Candida albicans", "ITS"): "TCCGTAGGTGAACCTGCGGAAGGATCATTACCGAGTGTCATTTCTTTCTCTCCACCTGTGCACCTTTTGTAGACCTG",
+    ("Aspergillus fumigatus", "ITS"): "TCCGTAGGTGAACCTGCGGAAGGATCATTACCGAGTGTCATTTCTTTCTCTCCACCTGTGCACCTTTTGTAGACCTG",
 }
 
 @st.cache_data
@@ -307,13 +314,13 @@ with st.sidebar:
                 grid[dye].append(st.number_input(f"{dye} s{i+1}", 70.0, 100.0, default_grid[dye][i], 0.1, key=f"{dye}_{i}"))
 
 st.markdown("### 1) Pick **15 catalog targets** (sequences auto-loaded)")
-labels = [e["label"] for e in entries] if entries else ["<none>"]
+labels = [e.get("label", "Unknown") for e in entries] if entries else ["<none>"]
 selected_labels = []
 for i in range(15):
     idx = min(i, max(0, len(labels)-1))
     selected_labels.append(st.selectbox(f"Select target {i+1}", labels, index=idx, key=f"sel_{i}"))
 
-selected = [next((e for e in entries if e["label"]==lbl), None) for lbl in selected_labels]
+selected = [next((e for e in entries if e.get("label")==lbl), None) for lbl in selected_labels]
 
 st.markdown("### 2) Primer design settings & constraints")
 colA, colB, colC = st.columns(3)
