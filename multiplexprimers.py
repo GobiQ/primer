@@ -282,7 +282,8 @@ st.title("AutoPrimer5 — Multiplex (15 targets • 3 channels × 5 Tm slots)")
 
 with st.sidebar:
     st.header("Catalog & Conditions")
-    catalog_obj = st.text_input("Sequence field key(s) (comma-separated)", value="sequence,target_sequence,amplicon,region,locus_seq,seq")
+    seq_key_hints = st.text_input("Sequence field key(s) (comma-separated)", value="sequence,target_sequence,amplicon,region,locus_seq,seq")
+    catalog_obj = load_catalog()
     entries = flatten_catalog_with_sequences(catalog_obj, seq_key_hints)
     st.metric("Catalog entries (raw)", 0 if catalog_obj is None else (len(catalog_obj) if hasattr(catalog_obj, "__len__") else "?"))
     st.metric("Entries with sequences", len(entries))
