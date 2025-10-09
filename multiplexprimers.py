@@ -33,41 +33,104 @@ except Exception:
 # -----------------------------
 
 # Local, built‑in sample entries (you can keep or replace)
-LOCAL_CATALOG = {
-    "Bacteria": {
-        "Pathogens": [
-            {"common": "Escherichia coli", "scientific": "Escherichia coli", "target": "uidA"},
-            {"common": "Salmonella enterica", "scientific": "Salmonella enterica", "target": "invA"},
-            {"common": "Listeria monocytogenes", "scientific": "Listeria monocytogenes", "target": "hlyA"},
-        ]
-    },
-    "Viruses": {
-        "Respiratory": [
-            {"common": "Influenza A", "scientific": "Influenza A virus", "target": "M1"},
-            {"common": "SARS-CoV-2", "scientific": "Severe acute respiratory syndrome coronavirus 2", "target": "N"},
-            {"common": "RSV", "scientific": "Respiratory syncytial virus", "target": "N"}
-        ]
-    },
-    "Fungi": {
-        "Clinical": [
-            {"common": "Candida albicans", "scientific": "Candida albicans", "target": "ITS"},
-            {"common": "Aspergillus fumigatus", "scientific": "Aspergillus fumigatus", "target": "ITS"}
+def get_organism_suggestions_with_gene_targets():
+    """Get the 14 specific organisms from the image as default selections"""
+    return {
+        "🦠 Viruses and Viroids": [
+            ("Hop Latent Viroid", "Hop Latent Viroid", {
+                "Essential genes": ["RNA polymerase", "ribozyme", "hammerhead ribozyme", "viroid-specific sequences"],
+                "Pathogenicity genes": ["replication factor", "movement protein", "host interaction factors"],
+                "Detection targets": ["viroid RNA", "replication intermediates", "host response genes"]
+            }),
+            ("Lettuce Chlorosis Virus", "Lettuce Chlorosis Virus", {
+                "Essential genes": ["RNA polymerase", "helicase", "protease", "replicase"],
+                "Structural genes": ["coat protein", "movement protein", "nucleocapsid protein"],
+                "Pathogenicity genes": ["silencing suppressor", "host range determinant", "symptom determinant"]
+            }),
+            ("Alfalfa Mosaic Virus", "Alfalfa Mosaic Virus", {
+                "Essential genes": ["RNA polymerase", "helicase", "protease", "replicase"],
+                "Structural genes": ["coat protein", "movement protein", "nucleocapsid protein"],
+                "Pathogenicity genes": ["silencing suppressor", "host range determinant", "symptom determinant"]
+            }),
+            ("Beet Curly Top Virus", "Beet Curly Top Virus", {
+                "Essential genes": ["replication protein", "capsid protein", "movement protein"],
+                "Pathogenicity genes": ["C4 protein", "V2 protein", "βC1 protein", "host interaction factors"],
+                "Detection targets": ["viral DNA", "replication intermediates", "host response genes"]
+            }),
+            ("Cannabis Cryptic Virus", "Cannabis Cryptic Virus", {
+                "Essential genes": ["RNA polymerase", "helicase", "protease", "replicase"],
+                "Structural genes": ["coat protein", "movement protein", "nucleocapsid protein"],
+                "Pathogenicity genes": ["silencing suppressor", "host range determinant", "symptom determinant"]
+            }),
+            ("Tomato Ring Spot Virus", "Tomato Ring Spot Virus", {
+                "Essential genes": ["RNA polymerase", "helicase", "protease", "replicase"],
+                "Structural genes": ["coat protein", "movement protein", "nucleocapsid protein"],
+                "Pathogenicity genes": ["silencing suppressor", "host range determinant", "symptom determinant"]
+            }),
+            ("Tobacco Mosaic Virus", "Tobacco Mosaic Virus", {
+                "Essential genes": ["RNA polymerase", "helicase", "protease", "replicase"],
+                "Structural genes": ["coat protein", "movement protein", "nucleocapsid protein"],
+                "Pathogenicity genes": ["silencing suppressor", "host range determinant", "symptom determinant"]
+            }),
+            ("Arabis Mosaic Virus", "Arabis Mosaic Virus", {
+                "Essential genes": ["RNA polymerase", "helicase", "protease", "replicase"],
+                "Structural genes": ["coat protein", "movement protein", "nucleocapsid protein"],
+                "Pathogenicity genes": ["silencing suppressor", "host range determinant", "symptom determinant"]
+            }),
+            ("Tomato Mosaic Virus", "Tomato Mosaic Virus", {
+                "Essential genes": ["RNA polymerase", "helicase", "protease", "replicase"],
+                "Structural genes": ["coat protein", "movement protein", "nucleocapsid protein"],
+                "Pathogenicity genes": ["silencing suppressor", "host range determinant", "symptom determinant"]
+            })
+        ],
+        
+        "🍄 Fungus and Pseudofungi": [
+            ("Gray mold", "Botrytis cinerea", {
+                "Essential genes": ["ACT1 (actin)", "TUB2 (tubulin)", "EF1A (elongation factor)", "RPB2 (RNA polymerase)", "HSP70 (heat shock protein)"],
+                "Pathogenicity genes": ["BCG1 (α-galactosidase)", "BMP1 (metalloprotease)", "BCP1 (cerato-platanin)", "BOA1 (botrydial)", "BCR1 (ABC transporter)"],
+                "Cell wall degrading": ["BcPG1-6 (polygalacturonases)", "BcPME1 (pectin methylesterase)", "BcXYL1 (xylanase)", "BcCEL1 (cellulase)", "BcCUT1 (cutinase)"],
+                "Secondary metabolites": ["BOT1-5 (botrydial cluster)", "DHN1 (1,8-dihydroxynaphthalene)", "PKS1-13 (polyketide synthases)", "NPS1-6 (nonribosomal peptide synthetases)"],
+                "Resistance mechanisms": ["ABC1-50 (ABC transporters)", "MFS1-20 (major facilitator superfamily)", "CYP1-20 (cytochrome P450s)", "GST1-10 (glutathione S-transferases)"]
+            }),
+            ("Pythium root rot", "Pythium myriotylum", {
+                "Essential genes": ["ACT1 (actin)", "TUB1 (tubulin)", "EF1A (elongation factor)", "RPB1 (RNA polymerase)", "COX1 (cytochrome oxidase)"],
+                "Pathogenicity genes": ["PmNEP1 (necrosis-inducing protein)", "PmPG1 (polygalacturonase)", "PmPME1 (pectin methylesterase)", "PmCUT1 (cutinase)", "PmCP1 (cysteine protease)"],
+                "Cell wall degrading": ["PmPG1-5 (polygalacturonases)", "PmPME1 (pectin methylesterase)", "PmXYL1 (xylanase)", "PmCEL1 (cellulase)", "PmCUT1 (cutinase)"],
+                "Secondary metabolites": ["PmPKS1-5 (polyketide synthases)", "PmNPS1-3 (nonribosomal peptide synthetases)", "PmTER1-2 (terpene synthases)"],
+                "Resistance mechanisms": ["PmCYP1-10 (cytochrome P450s)", "PmGST1-5 (glutathione S-transferases)", "PmABC1-20 (ABC transporters)"]
+            }),
+            ("Fusarium wilt", "Fusarium oxysporum", {
+                "Essential genes": ["ACT1 (actin)", "TUB2 (tubulin)", "EF1A (elongation factor)", "RPB2 (RNA polymerase)", "LSU (large subunit rRNA)"],
+                "Pathogenicity genes": ["SIX1-14 (secreted in xylem)", "FTF1 (transcription factor)", "FMK1 (MAPK)", "SGE1 (cutinase)", "PEL1 (pectate lyase)"],
+                "Secondary metabolite genes": ["FUM1 (fumonisin biosynthesis)", "TRI5 (trichothecene biosynthesis)", "PKS4 (polyketide synthase)", "BIK1 (bikaverin)", "FUS1 (fusarin)"],
+                "Cell wall genes": ["CHI1 (chitinase)", "GEL1 (β-1,3-glucanase)", "CHS1 (chitin synthase)", "FKS1 (β-1,3-glucan synthase)", "PMI1 (mannose-6-phosphate isomerase)"],
+                "Resistance targets": ["CYP51 (sterol 14α-demethylase)", "SDH (succinate dehydrogenase)", "QoI (cytochrome bc1)", "MBC (β-tubulin)", "DMI (sterol biosynthesis)"]
+            }),
+            ("Fusarium root rot", "Fusarium solani", {
+                "Essential genes": ["ACT1", "TUB2", "EF1A", "RPB2", "HSP70"],
+                "Pathogenicity factors": ["FSOL1-10 (F. solani specific)", "CUT1-5 (cutinases)", "PEL1-3 (pectate lyases)", "XYL1-2 (xylanases)", "CEL1-2 (cellulases)"],
+                "Secondary metabolites": ["FUM1-3 (fumonisin)", "TRI1-16 (trichothecene)", "ZEA1-2 (zearalenone)", "FUS1-5 (fusarin)", "BIK1-3 (bikaverin)"],
+                "Resistance mechanisms": ["CYP51A1-B1", "SDH1-4", "ABC1-20", "MFS1-15", "GST1-10"]
+            }),
+            ("Powdery mildew", "Golovinomyces ambrosiae", {
+                "Essential genes": ["ACT1", "TUB2", "EF1A", "RPB2", "ITS1-2"],
+                "Pathogenicity genes": ["GAH1 (haustorium formation)", "GAC1 (conidiophore development)", "GAS1 (spore germination)", "GAP1 (penetration)", "GAA1 (appressorium formation)"],
+                "Effectors": ["CSEP1-100 (candidate secreted effector proteins)", "GAE1-50 (G. ambrosiae effectors)", "AVR1-10 (avirulence candidates)", "HAU1-20 (haustorial expressed)"],
+                "Sterol biosynthesis": ["CYP51A1", "CYP51B1", "ERG1 (squalene epoxidase)", "ERG7 (lanosterol synthase)", "ERG11 (sterol 14α-demethylase)"]
+            }),
+            ("Fusarium ear rot", "Fusarium proliferatum", {
+                "Essential genes": ["ACT1", "TUB2", "EF1A", "RPB2", "ITS1-2"],
+                "Fumonisin biosynthesis": ["FUM1-21 (fumonisin cluster)", "FUM8 (polyketide synthase)", "FUM6 (aminotransferase)", "FUM3 (C-5 oxygenase)", "FUM19 (transporter)"],
+                "Pathogenicity": ["FPR1-10 (F. proliferatum specific)", "CUT1-3", "PEL1-2", "XYL1", "CEL1"],
+                "Host interaction": ["HOST1-5 (host-specific)", "ADH1-3 (adhesion)", "INV1-2 (invasion)", "COL1-3 (colonization)"]
+            })
         ]
     }
-}
 
-# Optional local override with actual sequences (used before NCBI)
-LOCAL_SEQUENCES = {
-    # Example mapping: (scientific, target) -> DNA string
-    ("Escherichia coli", "uidA"): "ATGAAACGCAGAAAGCGTTGGGGCGCCTGATGCAGTGATGAAACGCATCGATACAGGTATGAACATGATTCCCAATATTATT",
-    ("Salmonella enterica", "invA"): "GTGAAATTATCGCCACGTTCGGGCAAATAGAAAATAGCAGCAATGCTGAATAGTAATATCAATTTGACCACTGCTGTG",
-    ("Listeria monocytogenes", "hlyA"): "CCTCCAGAGTGCTCGGATGTTTCCGCAAGAGATGCGAAGAGCTGCATCTAGATGCAGCCGCGTTAGAGGCCTCCATAA",
-    ("Influenza A virus", "M1"): "ATGAGTCTTCTAACCGAGGTCGAAACGTATGTTGCCTCTGGATTATCGCCGATGGTCTTACATATGGTACCAATCCTG",
-    ("Severe acute respiratory syndrome coronavirus 2", "N"): "ATGCTGCAATCGTGCTACAAATGAGATGCTATTGTGCTGCTATCAACATCTTTTGCACAGATCTTCTTGTTCCACGCCAT",
-    ("Respiratory syncytial virus", "N"): "ATGGCAAACAATACACAAATCTGCATCACAGTCATAATGTTGCACATGCCCCCAGATGCCGACCCAAAGTGGAATATGC",
-    ("Candida albicans", "ITS"): "TCCGTAGGTGAACCTGCGGAAGGATCATTACCGAGTGTCATTTCTTTCTCTCCACCTGTGCACCTTTTGTAGACCTG",
-    ("Aspergillus fumigatus", "ITS"): "TCCGTAGGTGAACCTGCGGAAGGATCATTACCGAGTGTCATTTCTTTCTCTCCACCTGTGCACCTTTTGTAGACCTG",
-}
+LOCAL_CATALOG = get_organism_suggestions_with_gene_targets()
+
+# No hardcoded sequences - rely entirely on NCBI fetching like autoprimer5.py
+LOCAL_SEQUENCES = {}
 
 @st.cache_data
 def load_catalog() -> Any:
@@ -175,6 +238,20 @@ def flatten_catalog_with_sequences(catalog: Any, key_hints_csv: str, email: str 
     def walk(obj: Any, path: str = "$", category: Optional[str] = None, subcat: Optional[str] = None):
         if obj is None:
             return
+        
+        # Handle the new catalog structure: (common_name, scientific_name, gene_targets)
+        if isinstance(obj, (list, tuple)) and len(obj) == 3:
+            common_name, scientific_name, gene_targets = obj
+            if isinstance(gene_targets, dict):
+                # Create entries for each gene category
+                for gene_category, genes in gene_targets.items():
+                    for gene in genes:
+                        # Extract gene name (remove description in parentheses)
+                        gene_name = gene.split('(')[0].strip()
+                        label = f"{scientific_name} — {gene_name}"
+                        push_entry(scientific_name, gene_name, None, f"{path}.{gene_category}.{gene_name}", label)
+                return
+        
         # If this node has an explicit sequence, infer labels
         seq_here = find_seq_in_obj(obj, key_hints)
         if seq_here:
@@ -361,34 +438,128 @@ class ResilientNCBIConnector:
             return None
     
     def fetch_organism_sequences(self, organism_name: str, max_sequences: int = 10) -> List[Dict]:
-        """Fetch multiple sequences for an organism with metadata"""
+        """Fetch multiple sequences for an organism with metadata using autoprimer5.py methodology"""
         if not HAVE_ENTREZ or not organism_name:
             return []
             
         try:
-            search_query = f'"{organism_name}"[organism]'
-            seq_ids = self.search_sequences(
-                search_query, 
-                database="nucleotide", 
-                max_results=max_sequences
-            )
+            # Get gene targets for this organism
+            suggestions = get_organism_suggestions_with_gene_targets()
+            organism_targets = None
+            
+            # Find matching organism and extract gene targets
+            for category, organisms in suggestions.items():
+                for item in organisms:
+                    if len(item) == 3:
+                        common_name, scientific_name, gene_targets = item
+                        if (scientific_name.lower() == organism_name.lower() or 
+                            organism_name.lower() in scientific_name.lower() or
+                            scientific_name.lower() in organism_name.lower()):
+                            organism_targets = {
+                                'organism': scientific_name,
+                                'common_name': common_name,
+                                'gene_targets': gene_targets
+                            }
+                            break
+                if organism_targets:
+                    break
             
             sequences = []
-            for seq_id in seq_ids[:max_sequences]:
-                sequence = self.fetch_sequence(seq_id)
-                if sequence:
-                    sequences.append({
-                        "id": seq_id,
-                        "organism": organism_name,
-                        "target": f"sequence_{seq_id}",
-                        "sequence": sequence,
-                        "label": f"{organism_name} — sequence_{seq_id}"
-                    })
+            
+            if organism_targets:
+                # Fetch sequences for specific gene targets using enhanced search
+                gene_targets = organism_targets['gene_targets']
+                for gene_category, genes in gene_targets.items():
+                    for gene in genes[:2]:  # Limit to 2 genes per category
+                        gene_name = gene.split('(')[0].strip()
+                        
+                        # Enhanced search queries like autoprimer5.py
+                        search_queries = [
+                            f'"{organism_name}"[organism] AND {gene_name}[gene]',
+                            f'"{organism_name}"[organism] AND {gene_name}[title]',
+                            f'"{organism_name}"[organism] AND {gene_name}[All Fields]',
+                            f'"{organism_name}"[organism] AND {gene_name}[mRNA]',
+                            f'"{organism_name}"[organism] AND {gene_name}[CDS]'
+                        ]
+                        
+                        seq_ids = []
+                        for query in search_queries:
+                            try:
+                                results = self.search_sequences(query, database="nucleotide", max_results=2)
+                                if results:
+                                    seq_ids = results
+                                    break
+                            except Exception:
+                                continue
+                        
+                        # If no nucleotide hits, try protein-to-nucleotide linking
+                        if not seq_ids:
+                            seq_ids = self._find_nuccore_via_protein(organism_name, [gene_name], max_results=2)
+                        
+                        for seq_id in seq_ids:
+                            sequence = self.fetch_sequence(seq_id)
+                            if sequence and len(sequence) > 100:
+                                # Clean sequence
+                                clean_seq = re.sub(r'[^ATGCatgc]', '', sequence.upper())
+                                if len(clean_seq) >= 100:
+                                    sequences.append({
+                                        "id": seq_id,
+                                        "organism": organism_name,
+                                        "target": gene_name,
+                                        "sequence": clean_seq[:10000],  # Limit to 10kb like autoprimer5.py
+                                        "label": f"{organism_name} — {gene_name}"
+                                    })
+                                    if len(sequences) >= max_sequences:
+                                        return sequences
+            else:
+                # Fallback: general organism search
+                search_query = f'"{organism_name}"[organism]'
+                seq_ids = self.search_sequences(
+                    search_query, 
+                    database="nucleotide", 
+                    max_results=max_sequences
+                )
+                
+                for seq_id in seq_ids[:max_sequences]:
+                    sequence = self.fetch_sequence(seq_id)
+                    if sequence:
+                        clean_seq = re.sub(r'[^ATGCatgc]', '', sequence.upper())
+                        if len(clean_seq) >= 100:
+                            sequences.append({
+                                "id": seq_id,
+                                "organism": organism_name,
+                                "target": f"sequence_{seq_id}",
+                                "sequence": clean_seq[:10000],
+                                "label": f"{organism_name} — sequence_{seq_id}"
+                            })
             
             return sequences
             
         except Exception as e:
             st.error(f"Error fetching sequences: {e}")
+            return []
+    
+    def _find_nuccore_via_protein(self, organism_name: str, gene_variations: List[str], max_results: int = 5) -> List[str]:
+        """Find nucleotide sequences via protein database linking (from autoprimer5.py)"""
+        try:
+            ids = []
+            for gene_var in gene_variations:
+                q = f'"{organism_name}"[Organism] AND ({gene_var}[All Fields])'
+                handle = Entrez.esearch(db="protein", term=q, retmax=max_results)
+                rec = Entrez.read(handle)
+                handle.close()
+                if not rec.get("IdList"):
+                    continue
+                for pid in rec["IdList"]:
+                    link = Entrez.elink(dbfrom="protein", db="nuccore", id=pid)
+                    link_rec = Entrez.read(link)
+                    link.close()
+                    for lset in link_rec:
+                        for linksetdb in lset.get("LinkSetDb", []):
+                            if linksetdb.get("DbTo") == "nuccore":
+                                ids.extend([x["Id"] for x in linksetdb.get("Link", [])])
+            return ids[:max_results]
+        except Exception:
             return []
 
 # -----------------------------
@@ -403,7 +574,36 @@ with st.sidebar:
     ncbi_api_key = st.text_input("NCBI API Key (optional)", type="password", help="Optional API key for higher rate limits")
     
     st.header("Organism & Target Selection")
-    organism_name = st.text_input("Organism Name", placeholder="e.g., Escherichia coli, SARS-CoV-2", help="Enter the scientific name of the organism")
+    
+    # Organism selection buttons
+    st.subheader("Quick Select Organisms")
+    suggestions = get_organism_suggestions_with_gene_targets()
+    
+    # Create organism buttons organized by category
+    for category, organisms in suggestions.items():
+        with st.expander(f"{category}", expanded=True):  # Expanded by default to show all organisms
+            cols = st.columns(3)
+            for i, organism_item in enumerate(organisms):
+                if len(organism_item) == 3:
+                    common_name, scientific_name, gene_targets = organism_item
+                    col_idx = i % 3
+                    with cols[col_idx]:
+                        if st.button(
+                            f"{common_name}", 
+                            key=f"org_btn_{scientific_name.replace(' ', '_')}", 
+                            help=f"Select {scientific_name}",
+                            use_container_width=True
+                        ):
+                            st.session_state['selected_organism_name'] = scientific_name
+                            st.rerun()
+    
+    # Organism name input
+    default_organism = st.session_state.get('selected_organism_name', '')
+    organism_name = st.text_input("Organism Name", value=default_organism, placeholder="e.g., Hop Latent Viroid, Botrytis cinerea, Fusarium oxysporum", help="Enter the scientific name of the organism")
+    
+    # Clear the selected organism after setting it
+    if 'selected_organism_name' in st.session_state:
+        del st.session_state['selected_organism_name']
     
     # Add button to fetch sequences from NCBI
     if organism_name and ncbi_email and ncbi_email != "your.email@example.com":
