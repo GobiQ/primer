@@ -607,7 +607,11 @@ with st.sidebar:
     
     # Add button to fetch sequences from NCBI for all 15 targets
     if ncbi_email and ncbi_email != "your.email@example.com":
-        if st.button("Fetch Sequences for All 15 Targets", type="primary"):
+        if st.button("🔄 Fetch Sequences for All 15 Targets", type="primary"):
+            # Reset auto-fetch flag to allow manual fetching
+            if 'auto_fetch_attempted' in st.session_state:
+                del st.session_state['auto_fetch_attempted']
+            
             with st.spinner("Fetching sequences for all 15 target organisms..."):
                 try:
                     ncbi = ResilientNCBIConnector(ncbi_email, ncbi_api_key if ncbi_api_key else None)
@@ -638,10 +642,17 @@ with st.sidebar:
                         st.success(f"Successfully fetched {len(all_ncbi_sequences)} total sequences!")
                         # Store in session state for use in the main app
                         st.session_state['ncbi_sequences'] = all_ncbi_sequences
+                        st.rerun()
                     else:
                         st.warning("No sequences found for any organisms")
                 except Exception as e:
                     st.error(f"Error fetching sequences: {e}")
+    
+    # Add reset button to clear auto-fetch flag
+    if 'auto_fetch_attempted' in st.session_state:
+        if st.button("🔄 Reset Auto-Fetch", help="Clear auto-fetch flag to allow automatic fetching again"):
+            del st.session_state['auto_fetch_attempted']
+            st.rerun()
     
     st.header("Catalog & Conditions")
     seq_key_hints = st.text_input("Sequence field key(s) (comma-separated)", value="sequence,target_sequence,amplicon,region,locus_seq,seq")
@@ -761,6 +772,43 @@ for target_info in selected_gene_targets:
         "sequence": None,  # Will be fetched from NCBI
         "path": f"auto_target_{target_info['organism']['scientific_name']}"
     })
+
+# Auto-fetch sequences if email is provided and no sequences are available yet
+if (ncbi_email and ncbi_email != "your.email@example.com" and 
+    ('ncbi_sequences' not in st.session_state or not st.session_state['ncbi_sequences'])):
+    
+    # Check if we should auto-fetch (only if user hasn't explicitly fetched yet)
+    if 'auto_fetch_attempted' not in st.session_state:
+        st.session_state['auto_fetch_attempted'] = True
+        
+        with st.spinner("🔄 Auto-fetching sequences for all 15 targets..."):
+            try:
+                ncbi = ResilientNCBIConnector(ncbi_email, ncbi_api_key if ncbi_api_key else None)
+                
+                all_organisms_names = []
+                suggestions = get_organism_suggestions_with_gene_targets()
+                for category, organisms in suggestions.items():
+                    for item in organisms:
+                        if len(item) == 3:
+                            _, scientific_name, _ = item
+                            all_organisms_names.append(scientific_name)
+                
+                all_organisms_names = all_organisms_names[:15]
+                
+                all_ncbi_sequences = []
+                for i, organism_name in enumerate(all_organisms_names):
+                    ncbi_sequences = ncbi.fetch_organism_sequences(organism_name, max_sequences=3)
+                    if ncbi_sequences:
+                        all_ncbi_sequences.extend(ncbi_sequences)
+                
+                if all_ncbi_sequences:
+                    st.session_state['ncbi_sequences'] = all_ncbi_sequences
+                    st.success(f"✅ Auto-fetched {len(all_ncbi_sequences)} sequences!")
+                    st.rerun()
+                else:
+                    st.warning("⚠️ No sequences found during auto-fetch. Try manual fetch.")
+            except Exception as e:
+                st.error(f"❌ Auto-fetch failed: {e}")
 
 # If NCBI sequences are available, use them to populate the entries
 if 'ncbi_sequences' in st.session_state and st.session_state['ncbi_sequences']:
