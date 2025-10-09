@@ -24,6 +24,7 @@ except Exception:
 
 try:
     from Bio.Seq import Seq
+    from Bio import SeqIO
     HAVE_BIO = True
 except Exception:
     HAVE_BIO = False
@@ -397,7 +398,7 @@ class ResilientNCBIConnector:
     
     def search_sequences(self, query: str, database: str = "nucleotide", max_results: int = 100) -> List[str]:
         """Search with timeout and retry logic"""
-        if not HAVE_ENTREZ:
+        if not HAVE_ENTREZ or not HAVE_BIO:
             return []
         
         time.sleep(self.throttle_sec)
@@ -419,7 +420,7 @@ class ResilientNCBIConnector:
     @retry_with_backoff(max_retries=3, base_delay=0.34)
     def fetch_sequence(self, seq_id: str, database: str = "nucleotide") -> Optional[str]:
         """Fetch with timeout and retry logic"""
-        if not HAVE_ENTREZ:
+        if not HAVE_ENTREZ or not HAVE_BIO:
             return None
             
         try:
@@ -439,7 +440,7 @@ class ResilientNCBIConnector:
     
     def fetch_organism_sequences(self, organism_name: str, max_sequences: int = 10) -> List[Dict]:
         """Fetch multiple sequences for an organism with metadata using autoprimer5.py methodology"""
-        if not HAVE_ENTREZ or not organism_name:
+        if not HAVE_ENTREZ or not HAVE_BIO or not organism_name:
             return []
             
         try:
@@ -541,6 +542,8 @@ class ResilientNCBIConnector:
     
     def _find_nuccore_via_protein(self, organism_name: str, gene_variations: List[str], max_results: int = 5) -> List[str]:
         """Find nucleotide sequences via protein database linking (from autoprimer5.py)"""
+        if not HAVE_ENTREZ or not HAVE_BIO:
+            return []
         try:
             ids = []
             for gene_var in gene_variations:
@@ -760,17 +763,45 @@ for i in range(15):
             "label": f"{organism['scientific_name']} — General"
         })
     
+    # Manual sequence input option
+    st.markdown("**📝 Manual Sequence Input (Optional):**")
+    manual_sequence = st.text_area(
+        f"Enter nucleotide sequence for {organism['common_name']}:",
+        placeholder="ATCGATCGATCG... (leave empty to use NCBI sequences)",
+        key=f"manual_seq_{i}",
+        height=100,
+        help="Enter a custom nucleotide sequence. If provided, this will override NCBI sequences for this target."
+    )
+    
+    # Store manual sequence in session state for later use
+    if manual_sequence and manual_sequence.strip():
+        # Clean the sequence (remove whitespace, convert to uppercase)
+        clean_sequence = ''.join(manual_sequence.split()).upper()
+        # Validate that it contains only valid nucleotides
+        if all(c in 'ATCGN' for c in clean_sequence):
+            st.session_state[f'manual_sequence_{i}'] = clean_sequence
+            st.success(f"✅ Custom sequence saved for {organism['common_name']} ({len(clean_sequence)} bp)")
+        else:
+            st.error("❌ Invalid sequence. Only A, T, C, G, and N are allowed.")
+            st.session_state[f'manual_sequence_{i}'] = None
+    else:
+        st.session_state[f'manual_sequence_{i}'] = None
+    
     st.markdown("---")
 
 # Create entries for the rest of the app to use
 entries = []
-for target_info in selected_gene_targets:
+for i, target_info in enumerate(selected_gene_targets):
+    # Check if manual sequence is provided for this target
+    manual_seq = st.session_state.get(f'manual_sequence_{i}')
+    
     entries.append({
         "label": target_info["label"],
         "organism": target_info["organism"]["scientific_name"],
         "target": target_info["gene"].split('(')[0].strip(),
-        "sequence": None,  # Will be fetched from NCBI
-        "path": f"auto_target_{target_info['organism']['scientific_name']}"
+        "sequence": manual_seq,  # Use manual sequence if available, otherwise None (will be fetched from NCBI)
+        "path": f"auto_target_{target_info['organism']['scientific_name']}",
+        "source": "manual" if manual_seq else "ncbi"
     })
 
 # Auto-fetch sequences if email is provided and no sequences are available yet
@@ -810,12 +841,16 @@ if (ncbi_email and ncbi_email != "your.email@example.com" and
             except Exception as e:
                 st.error(f"❌ Auto-fetch failed: {e}")
 
-# If NCBI sequences are available, use them to populate the entries
+# If NCBI sequences are available, use them to populate entries that don't have manual sequences
 if 'ncbi_sequences' in st.session_state and st.session_state['ncbi_sequences']:
     ncbi_sequences = st.session_state['ncbi_sequences']
     
-    # Match NCBI sequences to our target organisms
+    # Match NCBI sequences to our target organisms (only for entries without manual sequences)
     for entry in entries:
+        # Skip if this entry already has a manual sequence
+        if entry.get("source") == "manual" and entry.get("sequence"):
+            continue
+            
         organism_name = entry["organism"]
         target_gene = entry["target"]
         
@@ -826,9 +861,27 @@ if 'ncbi_sequences' in st.session_state and st.session_state['ncbi_sequences']:
                 if target_gene.lower() in ncbi_seq.get("target", "").lower() or target_gene == "General":
                     entry["sequence"] = ncbi_seq.get("sequence")
                     entry["id"] = ncbi_seq.get("id")
+                    entry["source"] = "ncbi"
                     break
 
 selected = entries
+
+# Show sequence source summary
+st.markdown("### 📊 **Sequence Source Summary**")
+manual_count = sum(1 for entry in entries if entry.get("source") == "manual" and entry.get("sequence"))
+ncbi_count = sum(1 for entry in entries if entry.get("source") == "ncbi" and entry.get("sequence"))
+missing_count = sum(1 for entry in entries if not entry.get("sequence"))
+
+col1, col2, col3 = st.columns(3)
+with col1:
+    st.metric("📝 Manual Sequences", manual_count)
+with col2:
+    st.metric("🌐 NCBI Sequences", ncbi_count)
+with col3:
+    st.metric("❌ Missing Sequences", missing_count)
+
+if missing_count > 0:
+    st.warning(f"⚠️ {missing_count} targets still need sequences. Use manual input or fetch from NCBI.")
 
 st.markdown("### 2) Primer design settings & constraints")
 colA, colB, colC = st.columns(3)
