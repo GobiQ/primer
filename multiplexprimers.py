@@ -605,19 +605,41 @@ with st.sidebar:
     if 'selected_organism_name' in st.session_state:
         del st.session_state['selected_organism_name']
     
-    # Add button to fetch sequences from NCBI
-    if organism_name and ncbi_email and ncbi_email != "your.email@example.com":
-        if st.button("Fetch Sequences from NCBI", type="primary"):
-            with st.spinner(f"Fetching sequences for {organism_name}..."):
+    # Add button to fetch sequences from NCBI for all 15 targets
+    if ncbi_email and ncbi_email != "your.email@example.com":
+        if st.button("Fetch Sequences for All 15 Targets", type="primary"):
+            with st.spinner("Fetching sequences for all 15 target organisms..."):
                 try:
                     ncbi = ResilientNCBIConnector(ncbi_email, ncbi_api_key if ncbi_api_key else None)
-                    ncbi_sequences = ncbi.fetch_organism_sequences(organism_name, max_sequences=15)
-                    if ncbi_sequences:
-                        st.success(f"Found {len(ncbi_sequences)} sequences for {organism_name}")
+                    
+                    # Get all 15 organisms
+                    all_organisms = []
+                    suggestions = get_organism_suggestions_with_gene_targets()
+                    for category, organisms in suggestions.items():
+                        for item in organisms:
+                            if len(item) == 3:
+                                common_name, scientific_name, gene_targets = item
+                                all_organisms.append(scientific_name)
+                    
+                    all_organisms = all_organisms[:15]  # Take first 15
+                    
+                    # Fetch sequences for each organism
+                    all_ncbi_sequences = []
+                    for i, organism_name in enumerate(all_organisms):
+                        st.write(f"Fetching sequences for {organism_name}...")
+                        ncbi_sequences = ncbi.fetch_organism_sequences(organism_name, max_sequences=3)
+                        if ncbi_sequences:
+                            all_ncbi_sequences.extend(ncbi_sequences)
+                            st.success(f"Found {len(ncbi_sequences)} sequences for {organism_name}")
+                        else:
+                            st.warning(f"No sequences found for {organism_name}")
+                    
+                    if all_ncbi_sequences:
+                        st.success(f"Successfully fetched {len(all_ncbi_sequences)} total sequences!")
                         # Store in session state for use in the main app
-                        st.session_state['ncbi_sequences'] = ncbi_sequences
+                        st.session_state['ncbi_sequences'] = all_ncbi_sequences
                     else:
-                        st.warning(f"No sequences found for {organism_name}")
+                        st.warning("No sequences found for any organisms")
                 except Exception as e:
                     st.error(f"Error fetching sequences: {e}")
     
@@ -629,14 +651,11 @@ with st.sidebar:
     if 'ncbi_sequences' in st.session_state and st.session_state['ncbi_sequences']:
         entries = st.session_state['ncbi_sequences']
     else:
-        entries = flatten_catalog_with_sequences(catalog_obj, seq_key_hints, ncbi_email, ncbi_api_key, enable_ncbi=bool(organism_name))
+        entries = flatten_catalog_with_sequences(catalog_obj, seq_key_hints, ncbi_email, ncbi_api_key, enable_ncbi=True)
     st.metric("Catalog entries (raw)", 0 if catalog_obj is None else (len(catalog_obj) if hasattr(catalog_obj, "__len__") else "?"))
     st.metric("Entries with sequences", len(entries))
     if len(entries) == 0:
-        if organism_name:
-            st.warning("No sequences found. Try clicking 'Fetch Sequences from NCBI' to get sequences for your organism.")
-        else:
-            st.warning("No sequences found in catalog. Enter an organism name and fetch sequences from NCBI, or verify the local catalog has sequences.")
+        st.warning("No sequences found. Click 'Fetch Sequences for All 15 Targets' to get sequences from NCBI.")
     monovalent_mM = st.number_input("Monovalent salt (mM)", 10.0, 200.0, 50.0, 1.0)
     free_Mg_mM   = st.number_input("Free Mg²⁺ (mM)", 0.0, 6.0, 2.0, 0.1)
 
@@ -654,14 +673,96 @@ with st.sidebar:
             with col:
                 grid[dye].append(st.number_input(f"{dye} s{i+1}", 70.0, 100.0, default_grid[dye][i], 0.1, key=f"{dye}_{i}"))
 
-st.markdown("### 1) Pick **15 catalog targets** (sequences auto-loaded)")
-labels = [e.get("label", "Unknown") for e in entries] if entries else ["<none>"]
-selected_labels = []
-for i in range(15):
-    idx = min(i, max(0, len(labels)-1))
-    selected_labels.append(st.selectbox(f"Select target {i+1}", labels, index=idx, key=f"sel_{i}"))
+st.markdown("### 1) **15 Target Organisms** (automatically populated)")
 
-selected = [next((e for e in entries if e.get("label")==lbl), None) for lbl in selected_labels]
+# Get all 15 organisms from the catalog
+all_organisms = []
+suggestions = get_organism_suggestions_with_gene_targets()
+for category, organisms in suggestions.items():
+    for item in organisms:
+        if len(item) == 3:
+            common_name, scientific_name, gene_targets = item
+            all_organisms.append({
+                "common_name": common_name,
+                "scientific_name": scientific_name,
+                "gene_targets": gene_targets,
+                "label": f"{scientific_name} ({common_name})"
+            })
+
+# Ensure we have exactly 15 organisms
+if len(all_organisms) < 15:
+    st.error(f"Only {len(all_organisms)} organisms found, need 15")
+else:
+    all_organisms = all_organisms[:15]  # Take first 15
+
+# Create the target selection interface
+selected_organisms = []
+selected_gene_targets = []
+
+for i in range(15):
+    organism = all_organisms[i]
+    
+    # Organism selection (read-only, automatically assigned)
+    st.write(f"**Target {i+1}:** {organism['label']}")
+    
+    # Gene target category selection
+    gene_categories = list(organism['gene_targets'].keys())
+    if gene_categories:
+        selected_category = st.selectbox(
+            f"Gene target category for {organism['common_name']}:",
+            gene_categories,
+            key=f"gene_cat_{i}",
+            help=f"Select gene target category for {organism['scientific_name']}"
+        )
+        
+        # Gene selection within category
+        genes_in_category = organism['gene_targets'][selected_category]
+        if genes_in_category:
+            selected_gene = st.selectbox(
+                f"Specific gene target:",
+                genes_in_category,
+                key=f"gene_{i}",
+                help=f"Select specific gene from {selected_category}"
+            )
+            
+            selected_organisms.append(organism)
+            selected_gene_targets.append({
+                "organism": organism,
+                "category": selected_category,
+                "gene": selected_gene,
+                "label": f"{organism['scientific_name']} — {selected_gene.split('(')[0].strip()}"
+            })
+        else:
+            selected_organisms.append(organism)
+            selected_gene_targets.append({
+                "organism": organism,
+                "category": selected_category,
+                "gene": "General",
+                "label": f"{organism['scientific_name']} — General"
+            })
+    else:
+        selected_organisms.append(organism)
+        selected_gene_targets.append({
+            "organism": organism,
+            "category": "General",
+            "gene": "General",
+            "label": f"{organism['scientific_name']} — General"
+        })
+    
+    st.markdown("---")
+
+# Create entries for the rest of the app to use
+entries = []
+for target_info in selected_gene_targets:
+    entries.append({
+        "label": target_info["label"],
+        "organism": target_info["organism"]["scientific_name"],
+        "target": target_info["gene"].split('(')[0].strip(),
+        "sequence": None,  # Will be fetched from NCBI
+        "path": f"auto_target_{target_info['organism']['scientific_name']}"
+    })
+
+selected = entries
 
 st.markdown("### 2) Primer design settings & constraints")
 colA, colB, colC = st.columns(3)
