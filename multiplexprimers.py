@@ -1,17 +1,19 @@
-# AutoPrimer — Multiplex Mode (15 targets × 3 channels)
-# Minimal, self‑contained Streamlit app (integrated with your old catalog)
+# AutoPrimer5 — Multiplex Mode (15 targets × 3 channels)
+# Minimal Streamlit app (integrated with your autoprimer5.py catalog)
 # --------------------------------------------------------------
 # New in this version
-# • Automatically loads the **target sequences** tied to each pathogen/target from your existing app
-# • **Auto-optimizes assignment** of 15 targets to 3×5 Tm slots (no manual slot picking)
-# • Optimizes primer quality per target while ensuring at least one high‑quality design fits a slot
+# • Imports organism/target list directly from autoprimer5.py
+# • Auto-loads target nucleotide sequences from the catalog (no NCBI required)
+# • Robust catalog parsing with user-provided sequence key hints
+# • Auto-assigns 15 targets to 3×5 Tm slots while optimizing primer quality
+# • Debug panel to show why entries might appear as <none>
 # --------------------------------------------------------------
 
 import streamlit as st
 import pandas as pd
 import re, io, math
 from dataclasses import dataclass
-from typing import List, Dict, Tuple, Optional
+from typing import List, Dict, Tuple, Optional, Any
 
 # Optional libs
 try:
@@ -30,88 +32,143 @@ except Exception:
 # Catalog loader & sequence extractor
 # -----------------------------
 @st.cache_data
-def load_catalog() -> Dict:
-    """Load the pathogen/target catalog from the **existing app** if present.
-    It expects a function named `get_organism_suggestions_with_gene_targets()`
-    in `autoprimer5.py` (your old app file). Falls back to empty dict.
+def load_catalog() -> Any:
+    """Load the pathogen/target catalog from autoprimer5.py.
+    Tries a few common function/variable names for resilience.
     """
     try:
-        from autoprimer5 import get_organism_suggestions_with_gene_targets as catalog_fn
-        return catalog_fn()
+        import autoprimer5 as ap
     except Exception:
-        return {}
+        return None
+    # Try function names first
+    for fn_name in [
+        "get_organism_suggestions_with_gene_targets",
+        "get_organism_targets",
+        "get_targets",
+        "get_catalog",
+    ]:
+        fn = getattr(ap, fn_name, None)
+        if callable(fn):
+            try:
+                return fn()
+            except Exception:
+                pass
+    # Try variable names
+    for var_name in [
+        "ORGANISM_TARGETS",
+        "organism_targets",
+        "CATALOG",
+        "catalog",
+        "TARGETS",
+        "targets",
+    ]:
+        if hasattr(ap, var_name):
+            return getattr(ap, var_name)
+    return None
 
 
 def clean_seq(s: str) -> str:
     return re.sub(r"[^ACGTNacgtn]", "", s).upper().replace("U", "T")
 
 
-def _find_seq_in_item(item) -> Optional[str]:
-    """Attempt to locate a DNA sequence in a catalog item structure.
-    Supports keys like 'sequence', 'target_sequence', 'amplicon', etc., or
-    scans strings for long ACGT runs (≥60 bp). Returns cleaned seq or None.
+def find_seq_in_obj(obj: Any, key_hints: List[str]) -> Optional[str]:
+    """Search an arbitrary nested object for a plausible DNA sequence.
+    Honors user-provided key hints for field names that hold sequences.
     """
-    # Common explicit keys
-    if isinstance(item, dict):
-        for key in ["sequence", "target_sequence", "amplicon", "region", "locus_seq", "seq"]:
-            if key in item and isinstance(item[key], str):
-                s = clean_seq(item[key])
+    # direct string
+    if isinstance(obj, str):
+        s = clean_seq(obj)
+        if len(s) >= 60:
+            return s
+        return None
+    # dict with keys
+    if isinstance(obj, dict):
+        # priority: user hints
+        for k in key_hints:
+            if k in obj and isinstance(obj[k], str):
+                s = clean_seq(obj[k])
                 if len(s) >= 60:
                     return s
-        # search values for long strings
-        for v in item.values():
-            if isinstance(v, str):
-                s = clean_seq(v)
+        # common defaults
+        for k in ["sequence","target_sequence","amplicon","region","locus_seq","seq","reference_sequence","template","amplicon_template"]:
+            if k in obj and isinstance(obj[k], str):
+                s = clean_seq(obj[k])
                 if len(s) >= 60:
                     return s
-    # If it's a list/tuple, scan strings
-    if isinstance(item, (list, tuple)):
-        for v in item:
-            if isinstance(v, str):
-                s = clean_seq(v)
-                if len(s) >= 60:
-                    return s
+        # otherwise scan values
+        for v in obj.values():
+            s = find_seq_in_obj(v, key_hints)
+            if s:
+                return s
+        return None
+    # list/tuple -> scan items
+    if isinstance(obj, (list, tuple)):
+        for v in obj:
+            s = find_seq_in_obj(v, key_hints)
+            if s:
+                return s
     return None
 
 @st.cache_data
-def flatten_catalog_with_sequences(catalog: Dict) -> List[Dict]:
-    """Flatten your nested catalog into a list of dicts with organism, target name, and sequence.
-    Expected to work with the structures used in your old app; if a sequence is not present,
-    the entry is skipped (you can still paste custom sequences below if needed).
+def flatten_catalog_with_sequences(catalog: Any, key_hints_csv: str) -> List[Dict[str,str]]:
+    """Flatten a wide range of catalog shapes into a list of dicts with organism, target, and sequence.
+    key_hints_csv is a comma-separated string of preferred field names for sequences.
     """
-    result = []
-    if not isinstance(catalog, dict):
-        return result
-    for category, sub in catalog.items():
-        if not isinstance(sub, dict):
+    key_hints = [k.strip() for k in key_hints_csv.split(',') if k.strip()]
+    out: List[Dict[str,str]] = []
+
+    def push(label: str, organism: str, target: str, seq: str, path: str):
+        out.append({
+            "label": label,
+            "organism": organism or "Unknown",
+            "target": target or "Target",
+            "sequence": seq,
+            "path": path,
+        })
+
+    def walk(obj: Any, path: str = "$"):
+        if obj is None:
+            return
+        # If leaf has a sequence, try to infer organism/target names
+        seq = find_seq_in_obj(obj, key_hints)
+        if seq:
+            organism = None
+            target = None
+            label = None
+            if isinstance(obj, dict):
+                organism = obj.get("scientific") or obj.get("organism") or obj.get("species") or obj.get("name") or obj.get("common")
+                target = obj.get("target") or obj.get("gene") or obj.get("locus") or obj.get("amplicon_name")
+                label = obj.get("label") or obj.get("display")
+            if isinstance(obj, (list, tuple)) and len(obj) >= 3 and all(isinstance(x, str) for x in obj[:3]):
+                # Old pattern: [common, scientific, target, ...]
+                organism = obj[1] or organism
+                target = obj[2] or target
+                if not label:
+                    common = obj[0]
+                    label = f"{common} — {organism} — {target}"
+            if not label:
+                label = f"{organism or 'Unknown'} — {target or 'Target'}"
+            push(label, organism or "Unknown", target or "Target", seq, path)
+            return
+        # Recurse
+        if isinstance(obj, dict):
+            for k, v in obj.items():
+                walk(v, f"{path}.{k}")
+        elif isinstance(obj, (list, tuple)):
+            for i, v in enumerate(obj):
+                walk(v, f"{path}[{i}]")
+
+    walk(catalog)
+    # Deduplicate labels
+    seen = set()
+    dedup = []
+    for e in out:
+        key = (e["label"], e["organism"], e["target"], e["sequence"])
+        if key in seen:
             continue
-        for subcat, items in sub.items():
-            for it in items:
-                # Common old-app pattern: [common, scientific, target, ...]
-                common = None
-                scientific = None
-                target_name = None
-                if isinstance(it, (list, tuple)):
-                    if len(it) >= 2:
-                        common = it[0]
-                        scientific = it[1]
-                    if len(it) >= 3 and isinstance(it[2], str):
-                        target_name = it[2]
-                elif isinstance(it, dict):
-                    common = it.get("common") or it.get("name")
-                    scientific = it.get("scientific") or it.get("organism")
-                    target_name = it.get("target") or it.get("gene")
-                seq = _find_seq_in_item(it)
-                if seq:
-                    result.append({
-                        "category": category,
-                        "subcat": subcat,
-                        "label": f"{common or scientific or 'Unknown'} — {target_name or ''}".strip(),
-                        "organism": scientific or common or "Unknown",
-                        "target": target_name or "Target",
-                        "sequence": seq,
-                    })
-    return result
+        seen.add(key)
+        dedup.append(e)
+    return dedup
 
 # -----------------------------
 # Thermo + tuning helpers (coarse but fast)
@@ -124,7 +181,6 @@ def gc_content(seq: str) -> float:
 
 
 def rough_amp_tm(seq: str, monovalent_mM: float = 50.0, free_Mg_mM: float = 2.0) -> float:
-    """Very fast amplicon Tm estimate for placement (±2–4 °C typical)."""
     L = max(len(seq), 1)
     base = 69.3 + 0.41 * (gc_content(seq) * 100.0) - (650.0 / L)
     Na = max(monovalent_mM, 1e-3) / 1000.0
@@ -167,17 +223,18 @@ class PrimerPair:
 # -----------------------------
 # UI
 # -----------------------------
-st.set_page_config(page_title="AutoPrimer5 — Multiplex", layout="wide")
+st.set_page_config(page_title="AutoPrimer5 — Multiplex (multiplexprimers.py)", layout="wide")
 st.title("AutoPrimer5 — Multiplex (15 targets • 3 channels × 5 Tm slots)")
 
 with st.sidebar:
     st.header("Catalog & Conditions")
-    catalog = load_catalog()
-    entries = flatten_catalog_with_sequences(catalog)
-    if entries:
-        st.success(f"Loaded {len(entries)} catalog entries with sequences from autoprimer5.py")
-    else:
-        st.error("Could not find sequences in the built-in catalog. You can still paste custom sequences in the main panel.")
+    catalog_obj = load_catalog()
+    seq_key_hints = st.text_input("Sequence field key(s) (comma-separated)", value="sequence,target_sequence,amplicon,region,locus_seq,seq")
+    entries = flatten_catalog_with_sequences(catalog_obj, seq_key_hints)
+    st.metric("Catalog entries (raw)", 0 if catalog_obj is None else (len(catalog_obj) if hasattr(catalog_obj, "__len__") else "?"))
+    st.metric("Entries with sequences", len(entries))
+    if len(entries) == 0:
+        st.warning("No sequences found in catalog. Verify autoprimer5.py has embedded sequences in the fields above, or add the correct key name to 'Sequence field key(s)'.")
     monovalent_mM = st.number_input("Monovalent salt (mM)", 10.0, 200.0, 50.0, 1.0)
     free_Mg_mM   = st.number_input("Free Mg²⁺ (mM)", 0.0, 6.0, 2.0, 0.1)
 
@@ -196,13 +253,11 @@ with st.sidebar:
                 grid[dye].append(st.number_input(f"{dye} s{i+1}", 70.0, 100.0, default_grid[dye][i], 0.1, key=f"{dye}_{i}"))
 
 st.markdown("### 1) Pick **15 catalog targets** (sequences auto-loaded)")
-
-# Select 15 entries
-labels = [e["label"] for e in entries]
+labels = [e["label"] for e in entries] if entries else ["<none>"]
 selected_labels = []
 for i in range(15):
     idx = min(i, max(0, len(labels)-1))
-    selected_labels.append(st.selectbox(f"Select target {i+1}", labels if labels else ["<none>"], index=idx if labels else 0, key=f"sel_{i}"))
+    selected_labels.append(st.selectbox(f"Select target {i+1}", labels, index=idx, key=f"sel_{i}"))
 
 selected = [next((e for e in entries if e["label"]==lbl), None) for lbl in selected_labels]
 
@@ -221,7 +276,6 @@ with colC:
 
 st.markdown("### 3) Auto-assign to **3 channels × 5 Tm slots** and design")
 
-# Build 15 slots
 slot_list: List[Tuple[str,int,float]] = []  # (dye, slot_index, slot_tm)
 for dye in ["FAM","HEX","Cy5"]:
     for k in range(5):
@@ -255,7 +309,6 @@ def design_candidates(seq: str, n_return: int = 6) -> List[Candidate]:
                 rev = res.get(f"PRIMER_RIGHT_{idx}_SEQUENCE")
                 if not (fwd and rev):
                     continue
-                # crude amplicon reconstruction for Tm estimate
                 core = seq
                 if len(seq) > (len(fwd)+len(rev)):
                     core = seq[len(fwd):-(len(rev))]
@@ -274,12 +327,11 @@ def design_candidates(seq: str, n_return: int = 6) -> List[Candidate]:
 
 # Evaluate best choice of (candidate, tails) for a given slot
 
-def best_choice_for_slot(seq: str, slot_tm: float) -> Tuple[Candidate, AssignmentChoice]:
+def best_choice_for_slot(seq: str, slot_tm: float) -> Tuple[Optional[Candidate], Optional[AssignmentChoice]]:
     cands = design_candidates(seq)
     best: Optional[AssignmentChoice] = None
     best_cand: Optional[Candidate] = None
     for cand in cands:
-        # Build core amplicon once
         core = seq
         if len(seq) > (len(cand.fwd)+len(cand.rev)):
             core = seq[len(cand.fwd):-(len(cand.rev))]
@@ -299,39 +351,45 @@ run = st.button("Auto‑design & assign 15‑plex")
 
 results: List[PrimerPair] = []
 if run:
-    # Precompute best option for each (target, slot)
+    # Ensure we have 15 selected entries with sequences
     target_infos = []
     for i, entry in enumerate(selected):
         if not entry or not entry.get("sequence"):
-            st.error(f"Target {i+1}: missing sequence; please ensure catalog contains sequences for all selections.")
+            st.error(f"Target {i+1}: selected entry has no sequence. Adjust 'Sequence field key(s)' or pick a different target.")
             target_infos.append(None)
             continue
         target_infos.append(entry)
-
-    # If any missing, abort
     if any(t is None for t in target_infos):
         st.stop()
 
     # Compute choice grid
-    choices: List[List[AssignmentChoice]] = []
+    slot_list_local = slot_list.copy()
+    choices: List[List[Optional[AssignmentChoice]]] = []
     for i, entry in enumerate(target_infos):
-        row: List[AssignmentChoice] = []
-        for (dye, slot_idx, slot_tm) in slot_list:
+        row: List[Optional[AssignmentChoice]] = []
+        for (dye, slot_idx, slot_tm) in slot_list_local:
             _, choice = best_choice_for_slot(entry["sequence"], slot_tm)
             row.append(choice)
         choices.append(row)
 
-    # Greedy assignment (targets→slots) with tie-breaking by lowest incremental cost
-    nT, nS = len(choices), len(slot_list)
-    assert nT == 15 and nS == 15
+    # Greedy assignment (targets→slots)
+    nT, nS = len(choices), len(slot_list_local)
+    if nT != 15 or nS != 15:
+        st.error("Internal error: expected 15 targets and 15 slots.")
+        st.stop()
+
     assigned_slots = [-1]*nT
     taken = [False]*nS
-
-    # Sort all (i,j) by cost ascending and pick if both free
     flat = []
     for i in range(nT):
         for j in range(nS):
-            flat.append((choices[i][j].cost, i, j))
+            c = choices[i][j]
+            if c is None:
+                continue
+            flat.append((c.cost, i, j))
+    if not flat:
+        st.error("No viable primer/slot combinations were found. Try widening product length or primer Tm range.")
+        st.stop()
     flat.sort(key=lambda x: x[0])
 
     for _, i, j in flat:
@@ -345,7 +403,7 @@ if run:
         st.error("Could not complete a full 15×15 assignment with current constraints.")
         st.stop()
 
-    # Build final primer list and quick cross‑dimer warnings
+    # Cross-dimer checker
     def has_bad_3prime_dimer(a: str, b: str) -> bool:
         a3 = a[-5:]
         b3 = b[-5:]
@@ -355,17 +413,17 @@ if run:
     assigned_pairs: List[PrimerPair] = []
     for i, entry in enumerate(target_infos):
         j = assigned_slots[i]
-        dye, slot_idx, slot_tm = slot_list[j]
+        dye, slot_idx, slot_tm = slot_list_local[j]
         choice = choices[i][j]
         cand = choice.candidate
-        # reconstruct amplicon length roughly
         core = entry["sequence"]
         if len(core) > (len(cand.fwd)+len(cand.rev)):
             core_frag = core[len(cand.fwd):-(len(cand.rev))]
         else:
             core_frag = ""
         amp_len = len(choice.f_tail) + len(cand.fwd) + len(core_frag) + len(cand.rev) + len(choice.r_tail)
-        issues = []
+        issues: List[str] = []
+        # quick within-set cross-dimer marking added later
         assigned_pairs.append(
             PrimerPair(
                 fwd=choice.f_tail + cand.fwd,
@@ -390,7 +448,6 @@ if run:
                 assigned_pairs[a].issues.append(f"Potential 3' cross-dimer with {assigned_pairs[b].organism} ({assigned_pairs[b].channel} s{assigned_pairs[b].slot_index+1})")
                 assigned_pairs[b].issues.append(f"Potential 3' cross-dimer with {assigned_pairs[a].organism} ({assigned_pairs[a].channel} s{assigned_pairs[a].slot_index+1})")
 
-    # Output table
     df = pd.DataFrame([
         {
             "Channel": r.channel,
@@ -417,8 +474,6 @@ if run:
 
 st.markdown("---")
 st.caption(
-    "This version auto-loads catalog sequences and auto-assigns 15 targets to 3×5 Tm slots "
-    "using a greedy global cost minimizer.\n"
-    "For production: swap rough_amp_tm() for MELTING/UNAFold and add fuller dimer/hairpin scoring. "
-    "Optionally replace greedy with a Hungarian solver for optimal assignment."
+    "This version loads organisms/targets from autoprimer5.py, extracts embedded sequences with user-provided key hints, "
+    "and auto-assigns 15 targets to 3×5 Tm slots. No NCBI/network calls required."
 )
