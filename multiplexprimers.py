@@ -29,42 +29,38 @@ except Exception:
     HAVE_BIO = False
 
 # -----------------------------
-# Catalog loader & sequence extractor
+# Embedded catalog & sequence extractor (no external fetch)
 # -----------------------------
+
+# Edit this dict to include your 15+ targets with embedded sequences.
+# You can also paste/override via the sidebar JSON editor or upload a JSON file.
+LOCAL_CATALOG = {
+    "Bacteria": {
+        "Pathogens": [
+            {"common": "Escherichia coli", "scientific": "Escherichia coli", "target": "uidA", "sequence": "ATGCGTACGTAGCTAGCTAGCTGATCGATCGATGCTAGCTAGCTGATCGATCGATCGTAGCTAGCTAGCTAGCTAGCTAGCTAGCTAGC"},
+            {"common": "Salmonella enterica", "scientific": "Salmonella enterica", "target": "invA", "sequence": "ATGGCTAGCTAGCTAGCTAGCTAGCTAGGCTAGCTAGCTGATCGATCGATCGATGCTAGCTAGCTAGCTAGCTAGCTAGCTAGCTAAA"},
+            {"common": "Listeria monocytogenes", "scientific": "Listeria monocytogenes", "target": "hlyA", "sequence": "ATGAAAGCTAGCTAGCTAGCTAGCTAGCTAGCTTTGATCGATCGATCGATCGATCGTAGCTAGCTAGCTAGCTAGCTAGCTAGCTTGA"},
+        ]
+    },
+    "Viruses": {
+        "Respiratory": [
+            {"common": "Influenza A", "scientific": "Influenza A virus", "target": "M1", "sequence": "ATGGAGAAAAGCTAGCTAGCTAGCTAGCTGATCGATCGATCGATCGTTAGCTAGCTAGCTAGCTAGCTAGCTAGCTAGCTAGCTAGC"},
+            {"common": "SARS-CoV-2", "scientific": "Severe acute respiratory syndrome coronavirus 2", "target": "N", "sequence": "ATGCTGCTGCTGCTGCTGCTGCTGATCGATCGATCGATCGATCGATGCTGCTGCTGCTGCTGCTGCTGCTGCTGCTGCTGCTGCTAA"},
+            {"common": "RSV", "scientific": "Respiratory syncytial virus", "target": "N", "sequence": "ATGGCTGCTGCTGCTGCTGCTGATCGATCGATCGATCGATCGATCGCTGCTGCTGCTGCTGCTGCTGCTGCTGCTGCTGCTGCTA"}
+        ]
+    },
+    "Fungi": {
+        "Clinical": [
+            {"common": "Candida albicans", "scientific": "Candida albicans", "target": "ITS", "sequence": "ATGCTAGCTAGCTAGCTAGCTAGCTAGCTAGCTAGCTAGCTAGCTGATCGATCGATCGATCGATCGATCGATCGATCGATCGATC"},
+            {"common": "Aspergillus fumigatus", "scientific": "Aspergillus fumigatus", "target": "ITS", "sequence": "ATGGCTAGCTAGCTAGCTAGCTAGCTAGCTAGCTAGCTAGCTAGCTAGCTGATCGATCGATCGATCGATCGATCGATCGATCGA"}
+        ]
+    }
+}
+
 @st.cache_data
 def load_catalog() -> Any:
-    """Load the pathogen/target catalog from autoprimer5.py.
-    Tries a few common function/variable names for resilience.
-    """
-    try:
-        import autoprimer5 as ap
-    except Exception:
-        return None
-    # Try function names first
-    for fn_name in [
-        "get_organism_suggestions_with_gene_targets",
-        "get_organism_targets",
-        "get_targets",
-        "get_catalog",
-    ]:
-        fn = getattr(ap, fn_name, None)
-        if callable(fn):
-            try:
-                return fn()
-            except Exception:
-                pass
-    # Try variable names
-    for var_name in [
-        "ORGANISM_TARGETS",
-        "organism_targets",
-        "CATALOG",
-        "catalog",
-        "TARGETS",
-        "targets",
-    ]:
-        if hasattr(ap, var_name):
-            return getattr(ap, var_name)
-    return None
+    """Return the embedded local catalog by default (no imports, no network)."""
+    return LOCAL_CATALOG
 
 
 def clean_seq(s: str) -> str:
