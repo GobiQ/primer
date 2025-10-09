@@ -672,6 +672,73 @@ with st.sidebar:
             del st.session_state['auto_fetch_attempted']
             st.rerun()
     
+    # Auto-fetch sequences if email is provided and no sequences are available yet
+    if (ncbi_email and ncbi_email != "your.email@example.com" and 
+        ('ncbi_sequences' not in st.session_state or not st.session_state['ncbi_sequences'])):
+        
+        # Debug info
+        st.info(f"🔍 Debug: Email='{ncbi_email}', NCBI sequences in session: {'ncbi_sequences' in st.session_state}")
+        
+        # Check if we should auto-fetch (only if user hasn't explicitly fetched yet)
+        if 'auto_fetch_attempted' not in st.session_state:
+            st.session_state['auto_fetch_attempted'] = True
+            
+            with st.spinner("🔄 Auto-fetching sequences for all 15 targets..."):
+                try:
+                    # Check if BioPython is available
+                    if not HAVE_ENTREZ or not HAVE_BIO:
+                        st.error("❌ BioPython not available. Please install: pip install biopython")
+                        st.stop()
+                    
+                    # Test BioPython connection
+                    st.write("🔍 Debug: Testing BioPython connection...")
+                    try:
+                        from Bio import Entrez
+                        Entrez.email = ncbi_email
+                        test_handle = Entrez.esearch(db="nucleotide", term="test", retmax=1)
+                        test_result = Entrez.read(test_handle)
+                        test_handle.close()
+                        st.write("✅ BioPython connection test successful")
+                    except Exception as e:
+                        st.error(f"❌ BioPython connection test failed: {e}")
+                        st.stop()
+                    
+                    ncbi = ResilientNCBIConnector(ncbi_email, ncbi_api_key if ncbi_api_key else None)
+                    
+                    all_organisms_names = []
+                    suggestions = get_organism_suggestions_with_gene_targets()
+                    for category, organisms in suggestions.items():
+                        for item in organisms:
+                            if len(item) == 3:
+                                _, scientific_name, _ = item
+                                all_organisms_names.append(scientific_name)
+                    
+                    all_organisms_names = all_organisms_names[:15]
+                    st.write(f"🔍 Debug: Found {len(all_organisms_names)} organisms to fetch")
+                    
+                    all_ncbi_sequences = []
+                    for i, organism_name in enumerate(all_organisms_names):
+                        st.write(f"Fetching sequences for {organism_name}...")
+                        ncbi_sequences = ncbi.fetch_organism_sequences(organism_name, max_sequences=3)
+                        if ncbi_sequences:
+                            all_ncbi_sequences.extend(ncbi_sequences)
+                            st.write(f"✅ Found {len(ncbi_sequences)} sequences for {organism_name}")
+                        else:
+                            st.write(f"⚠️ No sequences found for {organism_name}")
+                    
+                    if all_ncbi_sequences:
+                        st.session_state['ncbi_sequences'] = all_ncbi_sequences
+                        st.success(f"✅ Auto-fetched {len(all_ncbi_sequences)} sequences!")
+                        st.rerun()
+                    else:
+                        st.warning("⚠️ No sequences found during auto-fetch. Try manual fetch.")
+                except Exception as e:
+                    st.error(f"❌ Auto-fetch failed: {e}")
+                    import traceback
+                    st.error(f"Full error: {traceback.format_exc()}")
+        else:
+            st.info("🔄 Auto-fetch already attempted. Use 'Reset Auto-Fetch' button to retry.")
+    
     st.header("Catalog & Conditions")
     seq_key_hints = st.text_input("Sequence field key(s) (comma-separated)", value="sequence,target_sequence,amplicon,region,locus_seq,seq")
     catalog_obj = load_catalog()
@@ -819,59 +886,7 @@ for i, target_info in enumerate(selected_gene_targets):
         "source": "manual" if manual_seq else "ncbi"
     })
 
-# Auto-fetch sequences if email is provided and no sequences are available yet
-if (ncbi_email and ncbi_email != "your.email@example.com" and 
-    ('ncbi_sequences' not in st.session_state or not st.session_state['ncbi_sequences'])):
-    
-    # Debug info
-    st.info(f"🔍 Debug: Email='{ncbi_email}', NCBI sequences in session: {'ncbi_sequences' in st.session_state}")
-    
-    # Check if we should auto-fetch (only if user hasn't explicitly fetched yet)
-    if 'auto_fetch_attempted' not in st.session_state:
-        st.session_state['auto_fetch_attempted'] = True
-        
-        with st.spinner("🔄 Auto-fetching sequences for all 15 targets..."):
-            try:
-                # Check if BioPython is available
-                if not HAVE_ENTREZ or not HAVE_BIO:
-                    st.error("❌ BioPython not available. Please install: pip install biopython")
-                    st.stop()
-                
-                ncbi = ResilientNCBIConnector(ncbi_email, ncbi_api_key if ncbi_api_key else None)
-                
-                all_organisms_names = []
-                suggestions = get_organism_suggestions_with_gene_targets()
-                for category, organisms in suggestions.items():
-                    for item in organisms:
-                        if len(item) == 3:
-                            _, scientific_name, _ = item
-                            all_organisms_names.append(scientific_name)
-                
-                all_organisms_names = all_organisms_names[:15]
-                st.write(f"🔍 Debug: Found {len(all_organisms_names)} organisms to fetch")
-                
-                all_ncbi_sequences = []
-                for i, organism_name in enumerate(all_organisms_names):
-                    st.write(f"Fetching sequences for {organism_name}...")
-                    ncbi_sequences = ncbi.fetch_organism_sequences(organism_name, max_sequences=3)
-                    if ncbi_sequences:
-                        all_ncbi_sequences.extend(ncbi_sequences)
-                        st.write(f"✅ Found {len(ncbi_sequences)} sequences for {organism_name}")
-                    else:
-                        st.write(f"⚠️ No sequences found for {organism_name}")
-                
-                if all_ncbi_sequences:
-                    st.session_state['ncbi_sequences'] = all_ncbi_sequences
-                    st.success(f"✅ Auto-fetched {len(all_ncbi_sequences)} sequences!")
-                    st.rerun()
-                else:
-                    st.warning("⚠️ No sequences found during auto-fetch. Try manual fetch.")
-            except Exception as e:
-                st.error(f"❌ Auto-fetch failed: {e}")
-                import traceback
-                st.error(f"Full error: {traceback.format_exc()}")
-    else:
-        st.info("🔄 Auto-fetch already attempted. Use 'Reset Auto-Fetch' button to retry.")
+# Auto-fetch logic will be handled in the sidebar section
 
 # If NCBI sequences are available, use them to populate entries that don't have manual sequences
 if 'ncbi_sequences' in st.session_state and st.session_state['ncbi_sequences']:
