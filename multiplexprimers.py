@@ -282,20 +282,161 @@ class PrimerPair:
     issues: List[str]
 
 # -----------------------------
+# NCBI Connector
+# -----------------------------
+import time
+from functools import wraps
+
+def retry_with_backoff(max_retries=3, base_delay=0.34):
+    """Decorator for retrying functions with exponential backoff"""
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            for attempt in range(max_retries):
+                try:
+                    return func(*args, **kwargs)
+                except Exception as e:
+                    if attempt == max_retries - 1:
+                        raise e
+                    delay = base_delay * (2 ** attempt)
+                    time.sleep(delay)
+            return None
+        return wrapper
+    return decorator
+
+class ResilientNCBIConnector:
+    """Resilient NCBI connector with exponential backoff and retry logic"""
+    
+    def __init__(self, email: str, api_key: Optional[str] = None):
+        if HAVE_ENTREZ:
+            Entrez.email = email
+            Entrez.tool = "autoprimertm"
+            if api_key:
+                Entrez.api_key = api_key
+        self.base_delay = 0.34 if not api_key else 0.1
+        self.max_retries = 3
+        self.timeout = 30
+        self.throttle_sec = 0.34
+    
+    def search_sequences(self, query: str, database: str = "nucleotide", max_results: int = 100) -> List[str]:
+        """Search with timeout and retry logic"""
+        if not HAVE_ENTREZ:
+            return []
+        
+        time.sleep(self.throttle_sec)
+        
+        try:
+            handle = Entrez.esearch(
+                db=database, 
+                term=query, 
+                retmax=max_results,
+                timeout=self.timeout
+            )
+            search_results = Entrez.read(handle)
+            handle.close()
+            return search_results["IdList"]
+        except Exception as e:
+            st.error(f"NCBI search error: {e}")
+            return []
+    
+    @retry_with_backoff(max_retries=3, base_delay=0.34)
+    def fetch_sequence(self, seq_id: str, database: str = "nucleotide") -> Optional[str]:
+        """Fetch with timeout and retry logic"""
+        if not HAVE_ENTREZ:
+            return None
+            
+        try:
+            handle = Entrez.efetch(
+                db=database, 
+                id=seq_id, 
+                rettype="fasta", 
+                retmode="text",
+                timeout=self.timeout
+            )
+            record = SeqIO.read(handle, "fasta")
+            handle.close()
+            return str(record.seq)
+        except Exception as e:
+            st.error(f"NCBI fetch error: {e}")
+            return None
+    
+    def fetch_organism_sequences(self, organism_name: str, max_sequences: int = 10) -> List[Dict]:
+        """Fetch multiple sequences for an organism with metadata"""
+        if not HAVE_ENTREZ or not organism_name:
+            return []
+            
+        try:
+            search_query = f'"{organism_name}"[organism]'
+            seq_ids = self.search_sequences(
+                search_query, 
+                database="nucleotide", 
+                max_results=max_sequences
+            )
+            
+            sequences = []
+            for seq_id in seq_ids[:max_sequences]:
+                sequence = self.fetch_sequence(seq_id)
+                if sequence:
+                    sequences.append({
+                        "id": seq_id,
+                        "organism": organism_name,
+                        "target": f"sequence_{seq_id}",
+                        "sequence": sequence,
+                        "label": f"{organism_name} — sequence_{seq_id}"
+                    })
+            
+            return sequences
+            
+        except Exception as e:
+            st.error(f"Error fetching sequences: {e}")
+            return []
+
+# -----------------------------
 # UI
 # -----------------------------
 st.set_page_config(page_title="AutoPrimer5 — Multiplex (multiplexprimers.py)", layout="wide")
 st.title("AutoPrimer5 — Multiplex (15 targets • 3 channels × 5 Tm slots)")
 
 with st.sidebar:
+    st.header("NCBI Configuration")
+    ncbi_email = st.text_input("NCBI Email", value="your.email@example.com", help="Required for NCBI API access")
+    ncbi_api_key = st.text_input("NCBI API Key (optional)", type="password", help="Optional API key for higher rate limits")
+    
+    st.header("Organism & Target Selection")
+    organism_name = st.text_input("Organism Name", placeholder="e.g., Escherichia coli, SARS-CoV-2", help="Enter the scientific name of the organism")
+    
+    # Add button to fetch sequences from NCBI
+    if organism_name and ncbi_email and ncbi_email != "your.email@example.com":
+        if st.button("Fetch Sequences from NCBI", type="primary"):
+            with st.spinner(f"Fetching sequences for {organism_name}..."):
+                try:
+                    ncbi = ResilientNCBIConnector(ncbi_email, ncbi_api_key if ncbi_api_key else None)
+                    ncbi_sequences = ncbi.fetch_organism_sequences(organism_name, max_sequences=15)
+                    if ncbi_sequences:
+                        st.success(f"Found {len(ncbi_sequences)} sequences for {organism_name}")
+                        # Store in session state for use in the main app
+                        st.session_state['ncbi_sequences'] = ncbi_sequences
+                    else:
+                        st.warning(f"No sequences found for {organism_name}")
+                except Exception as e:
+                    st.error(f"Error fetching sequences: {e}")
+    
     st.header("Catalog & Conditions")
     seq_key_hints = st.text_input("Sequence field key(s) (comma-separated)", value="sequence,target_sequence,amplicon,region,locus_seq,seq")
     catalog_obj = load_catalog()
-    entries = flatten_catalog_with_sequences(catalog_obj, seq_key_hints)
+    
+    # Use NCBI sequences if available, otherwise use local catalog
+    if 'ncbi_sequences' in st.session_state and st.session_state['ncbi_sequences']:
+        entries = st.session_state['ncbi_sequences']
+    else:
+        entries = flatten_catalog_with_sequences(catalog_obj, seq_key_hints, ncbi_email, ncbi_api_key, enable_ncbi=bool(organism_name))
     st.metric("Catalog entries (raw)", 0 if catalog_obj is None else (len(catalog_obj) if hasattr(catalog_obj, "__len__") else "?"))
     st.metric("Entries with sequences", len(entries))
     if len(entries) == 0:
-        st.warning("No sequences found in catalog. Verify autoprimer5.py has embedded sequences in the fields above, or add the correct key name to 'Sequence field key(s)'.")
+        if organism_name:
+            st.warning("No sequences found. Try clicking 'Fetch Sequences from NCBI' to get sequences for your organism.")
+        else:
+            st.warning("No sequences found in catalog. Enter an organism name and fetch sequences from NCBI, or verify the local catalog has sequences.")
     monovalent_mM = st.number_input("Monovalent salt (mM)", 10.0, 200.0, 50.0, 1.0)
     free_Mg_mM   = st.number_input("Free Mg²⁺ (mM)", 0.0, 6.0, 2.0, 0.1)
 
