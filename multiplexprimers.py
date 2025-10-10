@@ -921,19 +921,43 @@ for i in range(15):
     st.markdown("---")
 
 # Create entries for the rest of the app to use
+# IMPORTANT: Ensure only one organism per target slot for multiplex PCR
 entries = []
+seen_organisms = set()
+
 for i, target_info in enumerate(selected_gene_targets):
+    organism_name = target_info["organism"]["scientific_name"]
+    
+    # Skip if we've already seen this organism (one organism per slot)
+    if organism_name in seen_organisms:
+        st.write(f"🔧 Debug: Skipping duplicate organism '{organism_name}' - already assigned to a slot")
+        continue
+    
     # Check if manual sequence is provided for this target
     manual_seq = st.session_state.get(f'manual_sequence_{i}')
     
     entries.append({
         "label": target_info["label"],
-        "organism": target_info["organism"]["scientific_name"],
+        "organism": organism_name,
         "target": target_info["gene"].split('(')[0].strip(),
         "sequence": manual_seq,  # Use manual sequence if available, otherwise None (will be fetched from NCBI)
-        "path": f"auto_target_{target_info['organism']['scientific_name']}",
+        "path": f"auto_target_{organism_name}",
         "source": "manual" if manual_seq else "ncbi"
     })
+    
+    # Mark this organism as seen
+    seen_organisms.add(organism_name)
+
+# Show organism deduplication summary
+st.write(f"🔧 Debug: Organism deduplication complete - {len(entries)} unique organisms selected from {len(selected_gene_targets)} total targets")
+st.write(f"🔧 Debug: Selected organisms: {list(seen_organisms)}")
+
+# Check if we have enough unique organisms for 15 slots
+if len(entries) < 15:
+    st.warning(f"⚠️ **Only {len(entries)} unique organisms available for 15 slots. Consider selecting more diverse organisms.**")
+elif len(entries) > 15:
+    st.info(f"ℹ️ **{len(entries)} unique organisms available, will use first 15 for multiplex design.**")
+    entries = entries[:15]  # Limit to 15 for multiplex design
 
 # Auto-fetch logic will be handled in the sidebar section
 
