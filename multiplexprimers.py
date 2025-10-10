@@ -1049,6 +1049,13 @@ with colC:
 
 st.markdown("### 3) Auto-assign to **3 channels × 5 Tm slots** and design")
 
+# Define the temperature grid for 3 channels × 5 slots
+grid = {
+    "FAM": [79.5, 83.0, 86.5, 90.0, 93.5],    # Channel 1: 79.5°C to 93.5°C
+    "HEX": [80.0, 83.5, 87.0, 90.5, 94.0],    # Channel 2: 80.0°C to 94.0°C  
+    "Cy5": [80.5, 84.0, 87.5, 91.0, 94.5]     # Channel 3: 80.5°C to 94.5°C
+}
+
 slot_list: List[Tuple[str,int,float]] = []  # (dye, slot_index, slot_tm)
 for dye in ["FAM","HEX","Cy5"]:
     for k in range(5):
