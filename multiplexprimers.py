@@ -1273,6 +1273,21 @@ if run:
     # Sort by cost (best first) - THIS IS CRITICAL for proper assignment
     flat.sort(key=lambda x: x[0])
     
+    # TARGET BALANCING: Ensure diversity across targets by limiting candidates per target
+    # This prevents one target from dominating the top of the list
+    balanced_flat = []
+    target_counts = {}
+    max_per_target = max(1, len(flat) // nT)  # Distribute candidates evenly across targets
+    
+    for cost, target_idx, slot_idx, choice in flat:
+        target_counts[target_idx] = target_counts.get(target_idx, 0) + 1
+        if target_counts[target_idx] <= max_per_target:
+            balanced_flat.append((cost, target_idx, slot_idx, choice))
+    
+    # Use the balanced flat list instead of the original
+    flat = balanced_flat
+    st.write(f"🔧 Debug: Target balancing applied - {len(flat)} candidates selected from {len(flat) + sum(target_counts.values()) - len(flat)} total, max {max_per_target} per target")
+    
     # Debug first few entries after sorting
     if debug_mode:
         for i in range(min(5, len(flat))):
