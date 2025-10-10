@@ -39,29 +39,39 @@ def get_organism_suggestions_with_gene_targets():
     return {
         "🦠 Viruses and Viroids": [
             ("Hop Latent Viroid", "Hop Latent Viroid", {
-                "Essential genes": ["RNA polymerase", "ribozyme", "hammerhead ribozyme", "viroid-specific sequences"],
-                "Pathogenicity genes": ["replication factor", "movement protein", "host interaction factors"],
-                "Detection targets": ["viroid RNA", "replication intermediates", "host response genes"]
+                "Structural domains": ["P (pathogenicity)", "C (central)", "V (variable)", "T1 (terminal left)", "T2 (terminal right)"],
+                "Secondary structure": ["rod-like structure", "base-pairing", "hairpin loops", "bulges", "thermodynamic stability"],
+                "Variants": ["HLVd variants", "sequence diversity", "geographic strains", "hop cultivar adaptation"],
+                "Pathogenicity": ["latent infection", "hop stunt", "yield reduction", "brewing quality", "bitter compound"],
+                "Detection": ["RT-PCR", "northern blot", "dot blot", "in situ hybridization", "high-throughput sequencing"]
             }),
-            ("Lettuce Chlorosis Virus", "Lettuce Chlorosis Virus", {
-                "Essential genes": ["RNA polymerase", "helicase", "protease", "replicase"],
-                "Structural genes": ["coat protein", "movement protein", "nucleocapsid protein"],
-                "Pathogenicity genes": ["silencing suppressor", "host range determinant", "symptom determinant"]
+            ("Lettuce Chlorosis Virus", "Lettuce chlorosis virus", {
+                "Essential genes": ["RNA1 (replication)", "RNA2 (movement)", "P1 (replicase)", "P2 (helicase)", "P3 (polymerase)", "MP (movement protein)", "CP (coat protein)"],
+                "Crinivirus features": ["bipartite RNA genome", "whitefly transmission", "phloem-limited", "long flexuous particles", "genome activation"],
+                "Host range": ["lettuce", "tomato", "pepper", "cucumber", "melon", "squash", "bean"],
+                "Vector transmission": ["whitefly transmission", "Bemisia tabaci", "Trialeurodes vaporariorum", "semi-persistent", "circulative"],
+                "Pathogenicity": ["chlorosis", "yellowing", "stunting", "phloem necrosis", "yield reduction"]
             }),
-            ("Alfalfa Mosaic Virus", "Alfalfa Mosaic Virus", {
-                "Essential genes": ["RNA polymerase", "helicase", "protease", "replicase"],
-                "Structural genes": ["coat protein", "movement protein", "nucleocapsid protein"],
-                "Pathogenicity genes": ["silencing suppressor", "host range determinant", "symptom determinant"]
+            ("Alfalfa Mosaic Virus", "Alfalfa mosaic virus", {
+                "Essential genes": ["RNA1 (P1, P2)", "RNA2 (P3)", "RNA3 (MP, CP)", "P1 (replicase)", "P2 (helicase)", "P3 (polymerase)", "MP (movement protein)", "CP (coat protein)"],
+                "Alfamovirus features": ["tripartite RNA genome", "bacilliform particles", "coat protein requirement", "genome activation", "replication"],
+                "Host range": ["alfalfa", "tobacco", "tomato", "pepper", "bean", "cucumber", "lettuce"],
+                "Vector transmission": ["aphid transmission", "non-persistent", "stylet-borne", "Myzus persicae", "Aphis gossypii"],
+                "Pathogenicity": ["mosaic symptoms", "yellowing", "stunting", "systemic infection", "yield reduction"]
             }),
-            ("Beet Curly Top Virus", "Beet Curly Top Virus", {
-                "Essential genes": ["replication protein", "capsid protein", "movement protein"],
-                "Pathogenicity genes": ["C4 protein", "V2 protein", "βC1 protein", "host interaction factors"],
-                "Detection targets": ["viral DNA", "replication intermediates", "host response genes"]
+            ("Beet Curly Top Virus", "Beet curly top virus", {
+                "Essential genes": ["C1 (replication initiator)", "C2 (transcription activator)", "C3 (replication enhancer)", "C4 (pathogenicity)", "V1 (coat protein)", "V2 (movement protein)"],
+                "Geminivirus features": ["circular ssDNA", "bipartite genome", "rolling circle replication", "transcription activation", "silencing suppression"],
+                "Host range": ["beet", "tomato", "pepper", "bean", "spinach", "squash", "cucumber"],
+                "Vector transmission": ["beet leafhopper", "Circulifer tenellus", "persistent transmission", "propagative transmission"],
+                "Pathogenicity factors": ["C4 (symptom determinant)", "C2 (transcription activator)", "V2 (movement protein)", "silencing suppression", "host range determination"]
             }),
-            ("Cannabis Cryptic Virus", "Cannabis Cryptic Virus", {
-                "Essential genes": ["RNA polymerase", "helicase", "protease", "replicase"],
-                "Structural genes": ["coat protein", "movement protein", "nucleocapsid protein"],
-                "Pathogenicity genes": ["silencing suppressor", "host range determinant", "symptom determinant"]
+            ("Cannabis Cryptic Virus", "Cannabis cryptic virus", {
+                "Essential genes": ["RNA1 (RdRp)", "RNA2 (CP)", "RdRp (RNA-dependent RNA polymerase)", "CP (coat protein)", "MP (movement protein)"],
+                "Cryptic virus features": ["persistent infection", "latent infection", "no symptoms", "vertical transmission", "seed transmission"],
+                "Host specificity": ["Cannabis sativa", "hemp", "marijuana", "endophytic", "systemic infection"],
+                "Transmission": ["seed transmission", "pollen transmission", "no vector", "vertical transmission", "graft transmission"],
+                "Molecular features": ["dsRNA genome", "icosahedral particles", "persistent infection", "no cell-to-cell movement", "replication in cytoplasm"]
             }),
             ("Tomato Ring Spot Virus", "Tomato Ring Spot Virus", {
                 "Essential genes": ["RNA polymerase", "helicase", "protease", "replicase"],
@@ -105,7 +115,10 @@ def get_organism_suggestions_with_gene_targets():
                 "Pathogenicity genes": ["SIX1-14 (secreted in xylem)", "FTF1 (transcription factor)", "FMK1 (MAPK)", "SGE1 (cutinase)", "PEL1 (pectate lyase)"],
                 "Secondary metabolite genes": ["FUM1 (fumonisin biosynthesis)", "TRI5 (trichothecene biosynthesis)", "PKS4 (polyketide synthase)", "BIK1 (bikaverin)", "FUS1 (fusarin)"],
                 "Cell wall genes": ["CHI1 (chitinase)", "GEL1 (β-1,3-glucanase)", "CHS1 (chitin synthase)", "FKS1 (β-1,3-glucan synthase)", "PMI1 (mannose-6-phosphate isomerase)"],
-                "Resistance targets": ["CYP51 (sterol 14α-demethylase)", "SDH (succinate dehydrogenase)", "QoI (cytochrome bc1)", "MBC (β-tubulin)", "DMI (sterol biosynthesis)"]
+                "Resistance targets": ["CYP51 (sterol 14α-demethylase)", "SDH (succinate dehydrogenase)", "QoI (cytochrome bc1)", "MBC (β-tubulin)", "DMI (sterol biosynthesis)"],
+                "Formae speciales": ["f.sp. lycopersici (tomato)", "f.sp. cubense (banana)", "f.sp. vasinfectum (cotton)", "f.sp. melonis (melon)", "f.sp. niveum (watermelon)"],
+                "Virulence factors": ["Fmk1 (MAPK)", "Ste12 (transcription factor)", "PacC (pH response)", "AreA (nitrogen regulation)", "CreA (carbon catabolite)"],
+                "Host interaction": ["adhesion proteins", "penetration enzymes", "colonization factors", "host defense suppression", "nutrient acquisition"]
             }),
             ("Fusarium root rot", "Fusarium solani", {
                 "Essential genes": ["ACT1", "TUB2", "EF1A", "RPB2", "HSP70"],
@@ -124,6 +137,23 @@ def get_organism_suggestions_with_gene_targets():
                 "Fumonisin biosynthesis": ["FUM1-21 (fumonisin cluster)", "FUM8 (polyketide synthase)", "FUM6 (aminotransferase)", "FUM3 (C-5 oxygenase)", "FUM19 (transporter)"],
                 "Pathogenicity": ["FPR1-10 (F. proliferatum specific)", "CUT1-3", "PEL1-2", "XYL1", "CEL1"],
                 "Host interaction": ["HOST1-5 (host-specific)", "ADH1-3 (adhesion)", "INV1-2 (invasion)", "COL1-3 (colonization)"]
+            })
+        ],
+        
+        "🐛 Insect Pests": [
+            ("Two-spotted spider mite", "Tetranychus urticae", {
+                "Essential genes": ["ACT1 (actin)", "TUB1 (tubulin)", "EF1A (elongation factor)", "RPL32 (ribosomal protein L32)", "RPS3 (ribosomal protein S3)"],
+                "Detoxification genes": ["CYP1-100 (cytochrome P450s)", "GST1-30 (glutathione S-transferases)", "EST1-20 (esterases)", "UGT1-15 (UDP-glucuronosyltransferases)", "ABC1-50 (ABC transporters)"],
+                "Acaricide resistance": ["AChE (acetylcholinesterase)", "VGSC (voltage-gated sodium channel)", "RDL (GABA receptor)", "nAChR (nicotinic acetylcholine receptor)", "GluCl (glutamate-gated chloride channel)"],
+                "Development genes": ["JH1-3 (juvenile hormone)", "ECR (ecdysone receptor)", "USP (ultraspiracle)", "E74 (ecdysone response)", "BR-C (broad complex)"],
+                "Reproduction genes": ["VIT1-6 (vitellogenin)", "VTG1-3 (vitellogenin)", "CHR (chorion)", "EGG1-5 (egg development)", "EMB1-10 (embryogenesis)"]
+            }),
+            ("Silverleaf whitefly", "Bemisia tabaci", {
+                "Essential genes": ["ACT1", "TUB1", "EF1A", "COI", "16S rRNA"],
+                "Insecticide resistance": ["CYP6CM1", "CYP4C64", "CYP4G61", "CYP4G70", "GST1-15", "EST1-10", "ABC1-30", "nAChR (nicotinic receptor)", "VGSC (sodium channel)"],
+                "Biotype markers": ["mtCOI (mitochondrial COI)", "ITS1", "16S rRNA", "28S rRNA", "RAPD markers"],
+                "Virus transmission": ["GroEL (endosymbiont)", "HSP70", "cyclophilin", "importin-α", "karyopherin", "VP1-4 (viral proteins)"],
+                "Endosymbiont genes": ["Portiera (P-endosymbiont)", "Hamiltonella", "Arsenophonus", "Cardinium", "Wolbachia", "Rickettsia"]
             })
         ]
     }
@@ -1064,7 +1094,7 @@ def best_choice_for_slot(seq: str, slot_tm: float) -> Tuple[Optional[Candidate],
 
 # Build cost table for assignment (targets × slots)
 total_targets = len(selected)
-run = st.button(f"Auto‑design & assign {total_targets}‑plex")
+run = st.button("Auto‑design & assign 15‑plex")
 
 results: List[PrimerPair] = []
 if run:
@@ -1079,65 +1109,167 @@ if run:
         st.write("3. Once sequences are loaded, you can run the primer design")
         st.stop()
     
-    # Ensure we have selected entries with sequences
+    # Filter to only targets with sequences
     target_infos = []
     missing_sequences = []
     for i, entry in enumerate(selected):
         if not entry or not entry.get("sequence"):
             missing_sequences.append(f"Target {i+1}: {entry.get('label', 'Unknown') if entry else 'No entry'}")
-            target_infos.append(None)
             continue
         target_infos.append(entry)
     
-    if any(t is None for t in target_infos):
-        st.error("❌ **Some targets are missing sequences:**")
-        for missing in missing_sequences:
-            st.write(f"• {missing}")
+    if not target_infos:
+        st.error("❌ **No targets have sequences available!**")
         st.info("💡 **Solution:** Click 'Fetch Sequences for All 15 Targets' in the sidebar to get sequences from NCBI")
         st.stop()
     
+    # Limit to exactly 15 targets for multiplex design
+    if len(target_infos) > 15:
+        st.warning(f"⚠️ **Found {len(target_infos)} targets with sequences. Using first 15 for multiplex design.**")
+        target_infos = target_infos[:15]
+    elif len(target_infos) < 15:
+        st.warning(f"⚠️ **Only {len(target_infos)} targets have sequences. Proceeding with available targets.**")
+    
+    if missing_sequences:
+        st.info(f"📋 **{len(missing_sequences)} targets missing sequences (will be skipped):**")
+        for missing in missing_sequences[:5]:  # Show first 5
+            st.write(f"• {missing}")
+        if len(missing_sequences) > 5:
+            st.write(f"• ... and {len(missing_sequences) - 5} more")
+    
     st.info(f"🎯 **Designing primers for {len(target_infos)} targets**")
 
-    # Compute choice grid
+    # Generate multiple primer candidates per target for better optimization
+    st.info("🔬 **Generating multiple primer candidates per target...**")
+    
     slot_list_local = slot_list.copy()
-    choices: List[List[Optional[AssignmentChoice]]] = []
+    all_candidates_per_target = []
+    
     for i, entry in enumerate(target_infos):
-        row: List[Optional[AssignmentChoice]] = []
-        for (dye, slot_idx, slot_tm) in slot_list_local:
-            _, choice = best_choice_for_slot(entry["sequence"], slot_tm)
-            row.append(choice)
-        choices.append(row)
+        if entry is None:
+            all_candidates_per_target.append([])
+            continue
+            
+        # Generate many candidates for this target
+        candidates = design_candidates(entry["sequence"])
+        
+        # Show progress for first few targets
+        if i < 5:
+            st.write(f"Target {i+1} ({entry['organism']}): Generated {len(candidates)} primer candidates")
+        elif i == 5:
+            st.write("... (generating candidates for remaining targets)")
+        
+        # Create assignment choices for all candidates × all slots
+        target_choices = []
+        for cand in candidates:
+            for (dye, slot_idx, slot_tm) in slot_list_local:
+                # Calculate cost for this candidate-slot combination
+                core = entry["sequence"]
+                if len(core) > (len(cand.fwd)+len(cand.rev)):
+                    core = core[len(cand.fwd):-(len(cand.rev))]
+                else:
+                    core = ""
+                
+                # Try different tail combinations
+                for tF in GC_TAILS + AT_TAILS:
+                    for tR in GC_TAILS + AT_TAILS:
+                        amp = f"{tF}{cand.fwd}{core}{cand.rev}{tR}"
+                        tm = rough_amp_tm(amp, monovalent_mM, free_Mg_mM)
+                        cost = delta_penalty*abs(tm - slot_tm) + tail_penalty*(len(tF)+len(tR))
+                        
+                        choice = AssignmentChoice(
+                            candidate=cand, 
+                            f_tail=tF, 
+                            r_tail=tR, 
+                            tm_after=tm, 
+                            cost=cost
+                        )
+                        target_choices.append((choice, slot_idx))
+        
+        # Sort by cost and keep top candidates
+        target_choices.sort(key=lambda x: x[0].cost)
+        all_candidates_per_target.append(target_choices[:100])  # Keep top 100 candidates per target
+    
+    st.info(f"✅ **Generated {sum(len(candidates) for candidates in all_candidates_per_target)} total candidate-slot combinations**")
 
-    # Greedy assignment (targets→slots)
-    nT, nS = len(choices), len(slot_list_local)
-    if nT != 15 or nS != 15:
-        st.error("Internal error: expected 15 targets and 15 slots.")
+    # Ensure we have exactly 15 targets for multiplex design
+    if len(all_candidates_per_target) < 15:
+        # Pad with empty targets if we have fewer than 15
+        while len(all_candidates_per_target) < 15:
+            all_candidates_per_target.append([])
+        while len(target_infos) < 15:
+            target_infos.append(None)
+    elif len(all_candidates_per_target) > 15:
+        # Truncate if we have more than 15
+        all_candidates_per_target = all_candidates_per_target[:15]
+        target_infos = target_infos[:15]
+    
+    nT = 15  # Always work with exactly 15 targets
+    nS = len(slot_list_local)
+    
+    if nS != 15:
+        st.error("Internal error: expected 15 slots.")
         st.stop()
 
+    # Greedy assignment with multiple candidates per target
+    st.info("🎯 **Optimizing target-slot assignments...**")
+    
     assigned_slots = [-1]*nT
     taken = [False]*nS
     flat = []
+    
+    # Create flat list of all candidate-slot combinations
     for i in range(nT):
-        for j in range(nS):
-            c = choices[i][j]
-            if c is None:
-                continue
-            flat.append((c.cost, i, j))
+        for choice, slot_idx in all_candidates_per_target[i]:
+            flat.append((choice.cost, i, slot_idx, choice))
+    
     if not flat:
         st.error("No viable primer/slot combinations were found. Try widening product length or primer Tm range.")
         st.stop()
+    
+    # Sort by cost (best first)
     flat.sort(key=lambda x: x[0])
-
-    for _, i, j in flat:
-        if assigned_slots[i] == -1 and not taken[j]:
-            assigned_slots[i] = j
-            taken[j] = True
+    
+    # Greedy assignment with cross-dimer consideration
+    assigned_choices = {}  # target_idx -> choice
+    
+    for _, target_idx, slot_idx, choice in flat:
+        if assigned_slots[target_idx] == -1 and not taken[slot_idx]:
+            # Check for cross-dimer conflicts with already assigned primers
+            has_conflict = False
+            for assigned_target, assigned_choice in assigned_choices.items():
+                if has_bad_3prime_dimer(choice.f_tail + choice.candidate.fwd, 
+                                      assigned_choice.f_tail + assigned_choice.candidate.fwd) or \
+                   has_bad_3prime_dimer(choice.candidate.rev + choice.r_tail, 
+                                      assigned_choice.candidate.rev + assigned_choice.r_tail):
+                    has_conflict = True
+                    break
+            
+            if not has_conflict:
+                assigned_slots[target_idx] = slot_idx
+                taken[slot_idx] = True
+                assigned_choices[target_idx] = choice
+                # Store the choice for later use
+                if not hasattr(choice, '_assigned_target'):
+                    choice._assigned_target = target_idx
+                    choice._assigned_slot = slot_idx
+                    
         if all(a != -1 for a in assigned_slots):
             break
 
-    if any(a == -1 for a in assigned_slots):
-        st.error("Could not complete a full 15×15 assignment with current constraints.")
+    # Count successful assignments
+    successful_assignments = sum(1 for a in assigned_slots if a != -1)
+    if successful_assignments == 0:
+        st.error("Could not assign any targets to slots with current constraints.")
         st.stop()
+    elif successful_assignments < 15:
+        st.warning(f"⚠️ **Successfully assigned {successful_assignments} out of 15 targets.**")
+        st.info("💡 **Tip:** Try adjusting primer design parameters or fetch more sequences to improve assignment.")
+    
+    # Show optimization statistics
+    if successful_assignments > 0:
+        total_candidates = sum(len(candidates) for candidates in all_candidates_per_target)
+        st.info(f"📊 **Optimization Stats:** Evaluated {total_candidates} candidate-slot combinations, selected {successful_assignments} optimal assignments")
 
     # Cross-dimer checker
     def has_bad_3prime_dimer(a: str, b: str) -> bool:
@@ -1148,30 +1280,39 @@ if run:
 
     assigned_pairs: List[PrimerPair] = []
     for i, entry in enumerate(target_infos):
+        if entry is None:  # Skip empty targets
+            continue
         j = assigned_slots[i]
+        if j == -1:  # Skip unassigned targets
+            continue
+        
+        # Get the assigned choice for this target
+        assigned_choice = assigned_choices.get(i)
+        if assigned_choice is None:  # Skip targets without viable primers
+            continue
+            
         dye, slot_idx, slot_tm = slot_list_local[j]
-        choice = choices[i][j]
-        cand = choice.candidate
+        cand = assigned_choice.candidate
         core = entry["sequence"]
         if len(core) > (len(cand.fwd)+len(cand.rev)):
             core_frag = core[len(cand.fwd):-(len(cand.rev))]
         else:
             core_frag = ""
-        amp_len = len(choice.f_tail) + len(cand.fwd) + len(core_frag) + len(cand.rev) + len(choice.r_tail)
+        amp_len = len(assigned_choice.f_tail) + len(cand.fwd) + len(core_frag) + len(cand.rev) + len(assigned_choice.r_tail)
         issues: List[str] = []
         # quick within-set cross-dimer marking added later
         assigned_pairs.append(
             PrimerPair(
-                fwd=choice.f_tail + cand.fwd,
-                rev=cand.rev + choice.r_tail,
+                fwd=assigned_choice.f_tail + cand.fwd,
+                rev=cand.rev + assigned_choice.r_tail,
                 product_len=amp_len,
-                product_tm=choice.tm_after,
+                product_tm=assigned_choice.tm_after,
                 channel=dye,
                 slot_tm=slot_tm,
                 slot_index=slot_idx,
                 organism=entry["organism"],
                 target_name=entry["target"],
-                tails=(choice.f_tail, choice.r_tail),
+                tails=(assigned_choice.f_tail, assigned_choice.r_tail),
                 issues=issues,
             )
         )
@@ -1201,7 +1342,7 @@ if run:
         } for r in assigned_pairs
     ]).sort_values(["Channel","Slot"]).reset_index(drop=True)
 
-    st.success("Auto-assignment complete.")
+    st.success(f"✅ **Auto-assignment complete!** Successfully designed primers for {len(assigned_pairs)} targets.")
     st.dataframe(df, use_container_width=True)
 
     out = io.BytesIO()
