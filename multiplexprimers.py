@@ -758,6 +758,9 @@ with st.sidebar:
     seq_key_hints = st.text_input("Sequence field key(s) (comma-separated)", value="sequence,target_sequence,amplicon,region,locus_seq,seq")
     catalog_obj = load_catalog()
     
+    st.header("Debug Options")
+    debug_mode = st.checkbox("Enable Debug Output", value=False, help="Show detailed debug information during primer design")
+    
     # Use NCBI sequences if available, otherwise use local catalog
     if 'ncbi_sequences' in st.session_state and st.session_state['ncbi_sequences']:
         entries = st.session_state['ncbi_sequences']
@@ -1143,7 +1146,8 @@ if run:
     st.info("🔬 **Generating multiple primer candidates per target...**")
     
     slot_list_local = slot_list.copy()
-    st.write(f"🔧 Debug: slot_list_local has {len(slot_list_local)} slots: {slot_list_local[:3]}...")
+    if debug_mode:
+        st.write(f"🔧 Debug: slot_list_local has {len(slot_list_local)} slots: {slot_list_local[:3]}...")
     all_candidates_per_target = []
     
     for i, entry in enumerate(target_infos):
@@ -1164,11 +1168,11 @@ if run:
         
         # Create assignment choices for all candidates × all slots
         target_choices = []
-        if i == 0:  # Debug for first target only
+        if debug_mode and i == 0:  # Debug for first target only
             st.write(f"🔧 Debug: Processing {len(candidates)} candidates for {len(slot_list_local)} slots")
         for cand_idx, cand in enumerate(candidates):
             for slot_idx, (dye, slot_idx_val, slot_tm) in enumerate(slot_list_local):
-                if i == 0 and cand_idx == 0 and slot_idx < 5:  # Debug first candidate, first 5 slots
+                if debug_mode and i == 0 and cand_idx == 0 and slot_idx < 5:  # Debug first candidate, first 5 slots
                     st.write(f"🔧 Debug: Candidate {cand_idx}, Slot {slot_idx} -> slot_idx_val {slot_idx_val} (dye: {dye}, tm: {slot_tm})")
                 # Calculate cost for this candidate-slot combination
                 core = entry["sequence"]
@@ -1247,60 +1251,86 @@ if run:
     flat.sort(key=lambda x: x[0])
     
     # Debug: show some information about the flat list
-    st.write(f"🔧 Debug: Flat list has {len(flat)} combinations")
-    if len(flat) > 0:
-        st.write(f"🔧 Debug: Best cost: {flat[0][0]:.2f}, Worst cost: {flat[-1][0]:.2f}")
-        st.write(f"🔧 Debug: First few combinations: {flat[:3]}")
-    
-    # Debug: check target_infos structure
-    valid_targets = sum(1 for t in target_infos if t is not None)
-    st.write(f"🔧 Debug: {valid_targets} valid targets out of {len(target_infos)} total targets")
-    for i, target in enumerate(target_infos[:5]):
-        if target is not None:
-            st.write(f"🔧 Debug: Target {i}: {target['organism']} - {target.get('target', 'Unknown')}")
-        else:
-            st.write(f"🔧 Debug: Target {i}: None")
+    if debug_mode:
+        st.write(f"🔧 Debug: Flat list has {len(flat)} combinations")
+        if len(flat) > 0:
+            st.write(f"🔧 Debug: Best cost: {flat[0][0]:.2f}, Worst cost: {flat[-1][0]:.2f}")
+            st.write(f"🔧 Debug: First few combinations: {flat[:3]}")
+        
+        # Debug: check target_infos structure
+        valid_targets = sum(1 for t in target_infos if t is not None)
+        st.write(f"🔧 Debug: {valid_targets} valid targets out of {len(target_infos)} total targets")
+        for i, target in enumerate(target_infos[:5]):
+            if target is not None:
+                st.write(f"🔧 Debug: Target {i}: {target['organism']} - {target.get('target', 'Unknown')}")
+            else:
+                st.write(f"🔧 Debug: Target {i}: None")
     
     # Greedy assignment with optional cross-dimer consideration
     assigned_choices = {}  # target_idx -> choice
     conflicts_avoided = 0
     assignments_made = 0
+    debug_count = 0  # Limit debug output
+    max_iterations = min(len(flat), 1000)  # Safety limit to prevent infinite loops
+    iteration_count = 0
+    
+    # Early termination: if we have fewer valid targets than slots, we can stop early
+    valid_targets = sum(1 for t in target_infos if t is not None)
+    max_possible_assignments = min(valid_targets, nS)
     
     for cost, target_idx, slot_idx, choice in flat:
-        # Debug: show why assignments are being skipped
-        if assignments_made < 3:  # Only show first few attempts
+        iteration_count += 1
+        if iteration_count > max_iterations:
+            st.warning(f"⚠️ **Reached maximum iteration limit ({max_iterations}). Stopping assignment.**")
+            break
+            
+        # Early termination if we've assigned all possible targets
+        if assignments_made >= max_possible_assignments:
+            break
+            
+        # Debug: show why assignments are being skipped (limit output)
+        if debug_mode and debug_count < 10:  # Only show first 10 attempts
             target_already_assigned = assigned_slots[target_idx] != -1
             slot_already_taken = taken[slot_idx]
             st.write(f"🔧 Debug: Trying target {target_idx}, slot {slot_idx} - Target assigned: {target_already_assigned}, Slot taken: {slot_already_taken}")
+            debug_count += 1
         
-        if assigned_slots[target_idx] == -1 and not taken[slot_idx]:
-            # Check for cross-dimer conflicts with already assigned primers
-            has_conflict = False
-            for assigned_target, assigned_choice in assigned_choices.items():
-                if has_bad_3prime_dimer(choice.f_tail + choice.candidate.fwd, 
-                                      assigned_choice.f_tail + assigned_choice.candidate.fwd) or \
-                   has_bad_3prime_dimer(choice.candidate.rev + choice.r_tail, 
-                                      assigned_choice.candidate.rev + assigned_choice.r_tail):
-                    has_conflict = True
-                    conflicts_avoided += 1
-                    break
+        # Skip if target is already assigned or slot is taken
+        if assigned_slots[target_idx] != -1 or taken[slot_idx]:
+            continue
             
-            if not has_conflict:
-                assigned_slots[target_idx] = slot_idx
-                taken[slot_idx] = True
-                assigned_choices[target_idx] = choice
-                assignments_made += 1
-                # Store the choice for later use
-                if not hasattr(choice, '_assigned_target'):
-                    choice._assigned_target = target_idx
-                    choice._assigned_slot = slot_idx
+        # Skip if target doesn't exist (None)
+        if target_idx >= len(target_infos) or target_infos[target_idx] is None:
+            continue
+        
+        # Check for cross-dimer conflicts with already assigned primers
+        has_conflict = False
+        for assigned_target, assigned_choice in assigned_choices.items():
+            if has_bad_3prime_dimer(choice.f_tail + choice.candidate.fwd, 
+                                  assigned_choice.f_tail + assigned_choice.candidate.fwd) or \
+               has_bad_3prime_dimer(choice.candidate.rev + choice.r_tail, 
+                                  assigned_choice.candidate.rev + assigned_choice.r_tail):
+                has_conflict = True
+                conflicts_avoided += 1
+                break
+        
+        if not has_conflict:
+            assigned_slots[target_idx] = slot_idx
+            taken[slot_idx] = True
+            assigned_choices[target_idx] = choice
+            assignments_made += 1
+            # Store the choice for later use
+            if not hasattr(choice, '_assigned_target'):
+                choice._assigned_target = target_idx
+                choice._assigned_slot = slot_idx
+            
+            # Debug: show first few assignments
+            if debug_mode and assignments_made <= 3:
+                st.write(f"🔧 Debug: Assigned target {target_idx} to slot {slot_idx} (cost: {cost:.2f})")
                 
-                # Debug: show first few assignments
-                if assignments_made <= 3:
-                    st.write(f"🔧 Debug: Assigned target {target_idx} to slot {slot_idx} (cost: {cost:.2f})")
-                    
-        if all(a != -1 for a in assigned_slots):
-            break
+            # Check if all targets are assigned
+            if all(a != -1 for a in assigned_slots):
+                break
     
     # If we have very few assignments due to conflicts, try a more lenient approach
     if assignments_made < 5 and len(flat) > 0:
@@ -1311,22 +1341,40 @@ if run:
         taken = [False]*nS
         assigned_choices = {}
         assignments_made = 0
+        iteration_count = 0
         
         for cost, target_idx, slot_idx, choice in flat:
-            if assigned_slots[target_idx] == -1 and not taken[slot_idx]:
-                assigned_slots[target_idx] = slot_idx
-                taken[slot_idx] = True
-                assigned_choices[target_idx] = choice
-                assignments_made += 1
-                # Store the choice for later use
-                if not hasattr(choice, '_assigned_target'):
-                    choice._assigned_target = target_idx
-                    choice._assigned_slot = slot_idx
+            iteration_count += 1
+            if iteration_count > max_iterations:
+                st.warning(f"⚠️ **Reached maximum iteration limit ({max_iterations}) in lenient assignment. Stopping.**")
+                break
                 
-                # Debug: show first few assignments
-                if assignments_made <= 3:
-                    st.write(f"🔧 Debug: Assigned target {target_idx} to slot {slot_idx} (cost: {cost:.2f})")
-                    
+            # Early termination if we've assigned all possible targets
+            if assignments_made >= max_possible_assignments:
+                break
+                
+            # Skip if target is already assigned or slot is taken
+            if assigned_slots[target_idx] != -1 or taken[slot_idx]:
+                continue
+                
+            # Skip if target doesn't exist (None)
+            if target_idx >= len(target_infos) or target_infos[target_idx] is None:
+                continue
+                
+            assigned_slots[target_idx] = slot_idx
+            taken[slot_idx] = True
+            assigned_choices[target_idx] = choice
+            assignments_made += 1
+            # Store the choice for later use
+            if not hasattr(choice, '_assigned_target'):
+                choice._assigned_target = target_idx
+                choice._assigned_slot = slot_idx
+            
+            # Debug: show first few assignments
+            if debug_mode and assignments_made <= 3:
+                st.write(f"🔧 Debug: Assigned target {target_idx} to slot {slot_idx} (cost: {cost:.2f})")
+                
+            # Check if all targets are assigned
             if all(a != -1 for a in assigned_slots):
                 break
 
