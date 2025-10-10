@@ -1307,6 +1307,18 @@ if run:
         cost, target_idx, slot_idx, choice = flat[i]
         st.write(f"  Entry {i+1}: target {target_idx}, slot {slot_idx}, cost {cost:.2f}")
     
+    # Show slot distribution in first 20 entries
+    slot_counts = {}
+    for cost, target_idx, slot_idx, choice in flat[:20]:
+        slot_counts[slot_idx] = slot_counts.get(slot_idx, 0) + 1
+    st.write(f"🔧 Debug: Slot distribution in first 20 entries: {dict(sorted(slot_counts.items()))}")
+    
+    # Show target distribution in first 20 entries
+    target_counts = {}
+    for cost, target_idx, slot_idx, choice in flat[:20]:
+        target_counts[target_idx] = target_counts.get(target_idx, 0) + 1
+    st.write(f"🔧 Debug: Target distribution in first 20 entries: {dict(sorted(target_counts.items()))}")
+    
     # Debug: show some information about the flat list
     if debug_mode:
         st.write(f"🔧 Debug: Flat list has {len(flat)} combinations")
