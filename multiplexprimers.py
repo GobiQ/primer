@@ -1166,10 +1166,10 @@ if run:
         target_choices = []
         if i == 0:  # Debug for first target only
             st.write(f"🔧 Debug: Processing {len(candidates)} candidates for {len(slot_list_local)} slots")
-        for cand in candidates:
-            for (dye, slot_idx, slot_tm) in slot_list_local:
-                if i == 0 and len(target_choices) < 3:  # Debug first few combinations
-                    st.write(f"🔧 Debug: Candidate {len(target_choices)} -> slot {slot_idx} (dye: {dye}, tm: {slot_tm})")
+        for cand_idx, cand in enumerate(candidates):
+            for slot_idx, (dye, slot_idx_val, slot_tm) in enumerate(slot_list_local):
+                if i == 0 and cand_idx == 0 and slot_idx < 5:  # Debug first candidate, first 5 slots
+                    st.write(f"🔧 Debug: Candidate {cand_idx}, Slot {slot_idx} -> slot_idx_val {slot_idx_val} (dye: {dye}, tm: {slot_tm})")
                 # Calculate cost for this candidate-slot combination
                 core = entry["sequence"]
                 if len(core) > (len(cand.fwd)+len(cand.rev)):
@@ -1191,7 +1191,7 @@ if run:
                             tm_after=tm, 
                             cost=cost
                         )
-                        target_choices.append((choice, slot_idx))
+                        target_choices.append((choice, slot_idx_val))
         
         # Sort by cost and keep top candidates
         target_choices.sort(key=lambda x: x[0].cost)
