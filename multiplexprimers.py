@@ -829,17 +829,17 @@ for i in range(15):
             st.session_state[organism_key] = default_categories
         
         # Use organism-specific stored selection
+        default_categories = st.session_state.get(organism_key, [])
+        
         selected_categories = st.multiselect(
             f"Choose gene categories for {organism['common_name']}:",
             gene_categories,
-            default=st.session_state.get(organism_key, []),
-            help=f"Select which gene categories to target for {organism['scientific_name']}. Essential genes are recommended for reliable detection.",
-            key=f"gene_category_selector_{i}"
+            default=default_categories,
+            help=f"Select which gene categories to target for {organism['scientific_name']}. Essential genes are recommended for reliable detection."
         )
         
-        # Update organism-specific session state only if selection changed
-        if selected_categories != st.session_state.get(organism_key, []):
-            st.session_state[organism_key] = selected_categories
+        # Update organism-specific session state
+        st.session_state[organism_key] = selected_categories
         
         if selected_categories:
             # Display selection summary
