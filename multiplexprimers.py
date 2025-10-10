@@ -1320,10 +1320,20 @@ if run:
         
         # Skip if target is already assigned or slot is taken
         if assigned_slots[target_idx] != -1 or taken[slot_idx]:
+            # Debug: show why we're skipping (first 20 skips)
+            if iteration_count <= 20:
+                reason = []
+                if assigned_slots[target_idx] != -1:
+                    reason.append(f"target {target_idx} already assigned to slot {assigned_slots[target_idx]}")
+                if taken[slot_idx]:
+                    reason.append(f"slot {slot_idx} already taken")
+                st.write(f"🔧 Debug: Skip iteration {iteration_count} - {', '.join(reason)}")
             continue
             
         # Skip if target doesn't exist (None)
         if target_idx >= len(target_infos) or target_infos[target_idx] is None:
+            if iteration_count <= 20:
+                st.write(f"🔧 Debug: Skip iteration {iteration_count} - target {target_idx} doesn't exist")
             continue
             
         # Debug: show when we find a viable assignment
@@ -1339,6 +1349,9 @@ if run:
                                   assigned_choice.candidate.rev + assigned_choice.r_tail):
                 has_conflict = True
                 conflicts_avoided += 1
+                # Debug: show cross-dimer conflicts (first 10)
+                if conflicts_avoided <= 10:
+                    st.write(f"🔧 Debug: Cross-dimer conflict - target {target_idx} conflicts with assigned target {assigned_target}")
                 break
         
         if not has_conflict:
