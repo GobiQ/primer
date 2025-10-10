@@ -1195,7 +1195,7 @@ if run:
                             tm_after=tm, 
                             cost=cost
                         )
-                        target_choices.append((choice, slot_idx_val))
+                        target_choices.append((choice, slot_idx))  # Use global slot index, not slot_idx_val
         
         # Sort by cost and keep top candidates
         target_choices.sort(key=lambda x: x[0].cost)
@@ -1256,6 +1256,15 @@ if run:
         if len(flat) > 0:
             st.write(f"🔧 Debug: Best cost: {flat[0][0]:.2f}, Worst cost: {flat[-1][0]:.2f}")
             st.write(f"🔧 Debug: First few combinations: {flat[:3]}")
+            
+            # Show slot distribution in first 20 entries
+            slot_counts = {}
+            target_counts = {}
+            for cost, target_idx, slot_idx, choice in flat[:20]:
+                slot_counts[slot_idx] = slot_counts.get(slot_idx, 0) + 1
+                target_counts[target_idx] = target_counts.get(target_idx, 0) + 1
+            st.write(f"🔧 Debug: Slot distribution in first 20 entries: {dict(sorted(slot_counts.items()))}")
+            st.write(f"🔧 Debug: Target distribution in first 20 entries: {dict(sorted(target_counts.items()))}")
         
         # Debug: check target_infos structure
         valid_targets = sum(1 for t in target_infos if t is not None)
