@@ -1270,23 +1270,30 @@ if run:
         comp = str.maketrans("ACGT", "TGCA")
         return a3 == b3.translate(comp)[::-1]
     
-    # Sort by cost (best first) - THIS IS CRITICAL for proper assignment
-    flat.sort(key=lambda x: x[0])
-    
-    # TARGET BALANCING: Ensure diversity across targets by limiting candidates per target
-    # This prevents one target from dominating the top of the list
-    balanced_flat = []
-    target_counts = {}
-    max_per_target = max(1, len(flat) // nT)  # Distribute candidates evenly across targets
-    
+    # ROUND-ROBIN TARGET BALANCING: Ensure diversity across targets
+    # Sort candidates within each target first, then use round-robin selection
+    target_candidates = {}
     for cost, target_idx, slot_idx, choice in flat:
-        target_counts[target_idx] = target_counts.get(target_idx, 0) + 1
-        if target_counts[target_idx] <= max_per_target:
-            balanced_flat.append((cost, target_idx, slot_idx, choice))
+        if target_idx not in target_candidates:
+            target_candidates[target_idx] = []
+        target_candidates[target_idx].append((cost, target_idx, slot_idx, choice))
+    
+    # Sort candidates within each target by cost
+    for target_idx in target_candidates:
+        target_candidates[target_idx].sort(key=lambda x: x[0])
+    
+    # Round-robin selection: take best candidate from each target in turn
+    balanced_flat = []
+    max_rounds = max(len(candidates) for candidates in target_candidates.values()) if target_candidates else 0
+    
+    for round_num in range(max_rounds):
+        for target_idx in sorted(target_candidates.keys()):
+            if round_num < len(target_candidates[target_idx]):
+                balanced_flat.append(target_candidates[target_idx][round_num])
     
     # Use the balanced flat list instead of the original
     flat = balanced_flat
-    st.write(f"🔧 Debug: Target balancing applied - {len(flat)} candidates selected from {len(flat) + sum(target_counts.values()) - len(flat)} total, max {max_per_target} per target")
+    st.write(f"🔧 Debug: Round-robin target balancing applied - {len(flat)} candidates selected from {len(flat)} total, {len(target_candidates)} targets")
     
     # Debug first few entries after sorting
     if debug_mode:
