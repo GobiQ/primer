@@ -1233,8 +1233,6 @@ if run:
     for i in range(nT):
         for choice, slot_idx in all_candidates_per_target[i]:
             flat.append((choice.cost, i, slot_idx, choice))
-            if len(flat) <= 5:  # Debug first few entries
-                st.write(f"🔧 Debug: Flat entry {len(flat)}: target {i}, slot {slot_idx}, cost {choice.cost:.2f}")
     
     if not flat:
         st.error("No viable primer/slot combinations were found. Try widening product length or primer Tm range.")
@@ -1247,8 +1245,14 @@ if run:
         comp = str.maketrans("ACGT", "TGCA")
         return a3 == b3.translate(comp)[::-1]
     
-    # Sort by cost (best first)
+    # Sort by cost (best first) - THIS IS CRITICAL for proper assignment
     flat.sort(key=lambda x: x[0])
+    
+    # Debug first few entries after sorting
+    if debug_mode:
+        for i in range(min(5, len(flat))):
+            cost, target_idx, slot_idx, choice = flat[i]
+            st.write(f"🔧 Debug: Flat entry {i+1}: target {target_idx}, slot {slot_idx}, cost {cost:.2f}")
     
     # Debug: show some information about the flat list
     if debug_mode:
@@ -1265,6 +1269,12 @@ if run:
                 target_counts[target_idx] = target_counts.get(target_idx, 0) + 1
             st.write(f"🔧 Debug: Slot distribution in first 20 entries: {dict(sorted(slot_counts.items()))}")
             st.write(f"🔧 Debug: Target distribution in first 20 entries: {dict(sorted(target_counts.items()))}")
+            
+            # Show target diversity in first 50 entries
+            unique_targets = set()
+            for cost, target_idx, slot_idx, choice in flat[:50]:
+                unique_targets.add(target_idx)
+            st.write(f"🔧 Debug: Unique targets in first 50 entries: {sorted(unique_targets)} (total: {len(unique_targets)})")
         
         # Debug: check target_infos structure
         valid_targets = sum(1 for t in target_infos if t is not None)
