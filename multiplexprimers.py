@@ -1156,6 +1156,8 @@ if run:
         # Show progress for first few targets
         if i < 5:
             st.write(f"Target {i+1} ({entry['organism']}): Generated {len(candidates)} primer candidates")
+            if len(candidates) == 0:
+                st.warning(f"⚠️ No primer candidates generated for {entry['organism']} - sequence may be too short or invalid")
         elif i == 5:
             st.write("... (generating candidates for remaining targets)")
         
@@ -1227,13 +1229,22 @@ if run:
         st.error("No viable primer/slot combinations were found. Try widening product length or primer Tm range.")
         st.stop()
     
+    # Cross-dimer checker function
+    def has_bad_3prime_dimer(a: str, b: str) -> bool:
+        a3 = a[-5:]
+        b3 = b[-5:]
+        comp = str.maketrans("ACGT", "TGCA")
+        return a3 == b3.translate(comp)[::-1]
+    
     # Sort by cost (best first)
     flat.sort(key=lambda x: x[0])
     
-    # Greedy assignment with cross-dimer consideration
+    # Greedy assignment with optional cross-dimer consideration
     assigned_choices = {}  # target_idx -> choice
+    conflicts_avoided = 0
+    assignments_made = 0
     
-    for _, target_idx, slot_idx, choice in flat:
+    for cost, target_idx, slot_idx, choice in flat:
         if assigned_slots[target_idx] == -1 and not taken[slot_idx]:
             # Check for cross-dimer conflicts with already assigned primers
             has_conflict = False
@@ -1243,12 +1254,14 @@ if run:
                    has_bad_3prime_dimer(choice.candidate.rev + choice.r_tail, 
                                       assigned_choice.candidate.rev + assigned_choice.r_tail):
                     has_conflict = True
+                    conflicts_avoided += 1
                     break
             
             if not has_conflict:
                 assigned_slots[target_idx] = slot_idx
                 taken[slot_idx] = True
                 assigned_choices[target_idx] = choice
+                assignments_made += 1
                 # Store the choice for later use
                 if not hasattr(choice, '_assigned_target'):
                     choice._assigned_target = target_idx
@@ -1256,6 +1269,30 @@ if run:
                     
         if all(a != -1 for a in assigned_slots):
             break
+    
+    # If we have very few assignments due to conflicts, try a more lenient approach
+    if assignments_made < 5 and len(flat) > 0:
+        st.warning(f"⚠️ **Cross-dimer conflicts prevented {conflicts_avoided} assignments. Trying more lenient assignment...**")
+        
+        # Reset and try without cross-dimer checking
+        assigned_slots = [-1]*nT
+        taken = [False]*nS
+        assigned_choices = {}
+        assignments_made = 0
+        
+        for cost, target_idx, slot_idx, choice in flat:
+            if assigned_slots[target_idx] == -1 and not taken[slot_idx]:
+                assigned_slots[target_idx] = slot_idx
+                taken[slot_idx] = True
+                assigned_choices[target_idx] = choice
+                assignments_made += 1
+                # Store the choice for later use
+                if not hasattr(choice, '_assigned_target'):
+                    choice._assigned_target = target_idx
+                    choice._assigned_slot = slot_idx
+                    
+            if all(a != -1 for a in assigned_slots):
+                break
 
     # Count successful assignments
     successful_assignments = sum(1 for a in assigned_slots if a != -1)
@@ -1270,13 +1307,21 @@ if run:
     if successful_assignments > 0:
         total_candidates = sum(len(candidates) for candidates in all_candidates_per_target)
         st.info(f"📊 **Optimization Stats:** Evaluated {total_candidates} candidate-slot combinations, selected {successful_assignments} optimal assignments")
-
-    # Cross-dimer checker
-    def has_bad_3prime_dimer(a: str, b: str) -> bool:
-        a3 = a[-5:]
-        b3 = b[-5:]
-        comp = str.maketrans("ACGT", "TGCA")
-        return a3 == b3.translate(comp)[::-1]
+        
+        # Show assignment details
+        if 'conflicts_avoided' in locals():
+            st.info(f"🔍 **Assignment Details:** Avoided {conflicts_avoided} cross-dimer conflicts, made {assignments_made} assignments")
+        
+        # Show which targets were successfully assigned
+        assigned_targets = []
+        for i, slot in enumerate(assigned_slots):
+            if slot != -1 and i < len(target_infos) and target_infos[i] is not None:
+                assigned_targets.append(f"Target {i+1}: {target_infos[i]['organism']}")
+        
+        if assigned_targets:
+            with st.expander("✅ Successfully Assigned Targets", expanded=False):
+                for target in assigned_targets:
+                    st.write(f"• {target}")
 
     assigned_pairs: List[PrimerPair] = []
     for i, entry in enumerate(target_infos):
