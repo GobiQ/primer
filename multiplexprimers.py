@@ -1297,6 +1297,9 @@ if run:
     valid_targets = sum(1 for t in target_infos if t is not None)
     max_possible_assignments = min(valid_targets, nS)
     
+    # Always show some basic info about the assignment process
+    st.write(f"🔧 Debug: Starting assignment with {valid_targets} valid targets, {nS} slots, {len(flat)} total combinations")
+    
     for cost, target_idx, slot_idx, choice in flat:
         iteration_count += 1
         if iteration_count > max_iterations:
@@ -1305,6 +1308,7 @@ if run:
             
         # Early termination if we've assigned all possible targets
         if assignments_made >= max_possible_assignments:
+            st.write(f"🔧 Debug: Early termination - assigned {assignments_made} targets, max possible: {max_possible_assignments}")
             break
             
         # Debug: show why assignments are being skipped (limit output)
@@ -1321,6 +1325,10 @@ if run:
         # Skip if target doesn't exist (None)
         if target_idx >= len(target_infos) or target_infos[target_idx] is None:
             continue
+            
+        # Debug: show when we find a viable assignment
+        if assignments_made < 5:  # Show first 5 assignments
+            st.write(f"🔧 Debug: Found viable assignment - target {target_idx}, slot {slot_idx}, cost {cost:.2f}")
         
         # Check for cross-dimer conflicts with already assigned primers
         has_conflict = False
@@ -1399,6 +1407,12 @@ if run:
 
     # Count successful assignments
     successful_assignments = sum(1 for a in assigned_slots if a != -1)
+    
+    # Debug: show assignment status
+    st.write(f"🔧 Debug: Assignment complete - {successful_assignments} targets assigned, {assignments_made} assignments made, {conflicts_avoided} conflicts avoided")
+    st.write(f"🔧 Debug: Assigned slots: {[i for i, slot in enumerate(assigned_slots) if slot != -1]}")
+    st.write(f"🔧 Debug: Taken slots: {[i for i, taken_flag in enumerate(taken) if taken_flag]}")
+    
     if successful_assignments == 0:
         st.error("Could not assign any targets to slots with current constraints.")
         st.stop()
