@@ -1223,7 +1223,8 @@ if run:
         
         # Sort by cost and keep top candidates
         target_choices.sort(key=lambda x: x[0].cost)
-        all_candidates_per_target.append(target_choices[:100])  # Keep top 100 candidates per target
+        # Limit to top 20 candidates per target to ensure diversity across targets
+        all_candidates_per_target.append(target_choices[:20])
     
     st.info(f"✅ **Generated {sum(len(candidates) for candidates in all_candidates_per_target)} total candidate-slot combinations**")
 
@@ -1277,6 +1278,12 @@ if run:
         for i in range(min(5, len(flat))):
             cost, target_idx, slot_idx, choice = flat[i]
             st.write(f"🔧 Debug: Flat entry {i+1}: target {target_idx}, slot {slot_idx}, cost {cost:.2f}")
+    
+    # Always show first 10 entries to understand the distribution
+    st.write("🔧 Debug: First 10 entries in sorted flat list:")
+    for i in range(min(10, len(flat))):
+        cost, target_idx, slot_idx, choice = flat[i]
+        st.write(f"  Entry {i+1}: target {target_idx}, slot {slot_idx}, cost {cost:.2f}")
     
     # Debug: show some information about the flat list
     if debug_mode:
