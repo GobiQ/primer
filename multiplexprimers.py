@@ -1239,12 +1239,33 @@ if run:
     # Sort by cost (best first)
     flat.sort(key=lambda x: x[0])
     
+    # Debug: show some information about the flat list
+    st.write(f"🔧 Debug: Flat list has {len(flat)} combinations")
+    if len(flat) > 0:
+        st.write(f"🔧 Debug: Best cost: {flat[0][0]:.2f}, Worst cost: {flat[-1][0]:.2f}")
+        st.write(f"🔧 Debug: First few combinations: {flat[:3]}")
+    
+    # Debug: check target_infos structure
+    valid_targets = sum(1 for t in target_infos if t is not None)
+    st.write(f"🔧 Debug: {valid_targets} valid targets out of {len(target_infos)} total targets")
+    for i, target in enumerate(target_infos[:5]):
+        if target is not None:
+            st.write(f"🔧 Debug: Target {i}: {target['organism']} - {target.get('target', 'Unknown')}")
+        else:
+            st.write(f"🔧 Debug: Target {i}: None")
+    
     # Greedy assignment with optional cross-dimer consideration
     assigned_choices = {}  # target_idx -> choice
     conflicts_avoided = 0
     assignments_made = 0
     
     for cost, target_idx, slot_idx, choice in flat:
+        # Debug: show why assignments are being skipped
+        if assignments_made < 3:  # Only show first few attempts
+            target_already_assigned = assigned_slots[target_idx] != -1
+            slot_already_taken = taken[slot_idx]
+            st.write(f"🔧 Debug: Trying target {target_idx}, slot {slot_idx} - Target assigned: {target_already_assigned}, Slot taken: {slot_already_taken}")
+        
         if assigned_slots[target_idx] == -1 and not taken[slot_idx]:
             # Check for cross-dimer conflicts with already assigned primers
             has_conflict = False
@@ -1266,6 +1287,10 @@ if run:
                 if not hasattr(choice, '_assigned_target'):
                     choice._assigned_target = target_idx
                     choice._assigned_slot = slot_idx
+                
+                # Debug: show first few assignments
+                if assignments_made <= 3:
+                    st.write(f"🔧 Debug: Assigned target {target_idx} to slot {slot_idx} (cost: {cost:.2f})")
                     
         if all(a != -1 for a in assigned_slots):
             break
@@ -1290,6 +1315,10 @@ if run:
                 if not hasattr(choice, '_assigned_target'):
                     choice._assigned_target = target_idx
                     choice._assigned_slot = slot_idx
+                
+                # Debug: show first few assignments
+                if assignments_made <= 3:
+                    st.write(f"🔧 Debug: Assigned target {target_idx} to slot {slot_idx} (cost: {cost:.2f})")
                     
             if all(a != -1 for a in assigned_slots):
                 break
