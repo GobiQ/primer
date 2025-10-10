@@ -1143,6 +1143,7 @@ if run:
     st.info("🔬 **Generating multiple primer candidates per target...**")
     
     slot_list_local = slot_list.copy()
+    st.write(f"🔧 Debug: slot_list_local has {len(slot_list_local)} slots: {slot_list_local[:3]}...")
     all_candidates_per_target = []
     
     for i, entry in enumerate(target_infos):
@@ -1163,8 +1164,12 @@ if run:
         
         # Create assignment choices for all candidates × all slots
         target_choices = []
+        if i == 0:  # Debug for first target only
+            st.write(f"🔧 Debug: Processing {len(candidates)} candidates for {len(slot_list_local)} slots")
         for cand in candidates:
             for (dye, slot_idx, slot_tm) in slot_list_local:
+                if i == 0 and len(target_choices) < 3:  # Debug first few combinations
+                    st.write(f"🔧 Debug: Candidate {len(target_choices)} -> slot {slot_idx} (dye: {dye}, tm: {slot_tm})")
                 # Calculate cost for this candidate-slot combination
                 core = entry["sequence"]
                 if len(core) > (len(cand.fwd)+len(cand.rev)):
@@ -1224,6 +1229,8 @@ if run:
     for i in range(nT):
         for choice, slot_idx in all_candidates_per_target[i]:
             flat.append((choice.cost, i, slot_idx, choice))
+            if len(flat) <= 5:  # Debug first few entries
+                st.write(f"🔧 Debug: Flat entry {len(flat)}: target {i}, slot {slot_idx}, cost {choice.cost:.2f}")
     
     if not flat:
         st.error("No viable primer/slot combinations were found. Try widening product length or primer Tm range.")
