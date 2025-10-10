@@ -1227,6 +1227,10 @@ if run:
                             cost=cost
                         )
                         target_choices.append((choice, slot_idx))  # Use global slot index, not slot_idx_val
+                        
+                        # Debug: Show cost calculation for first few candidates
+                        if debug_mode and i == 0 and cand_idx == 0 and slot_idx < 3:
+                            st.write(f"🔧 Debug: Target {i}, Candidate {cand_idx}, Slot {slot_idx} (Tm={slot_tm:.1f}°C): amp_tm={tm:.1f}°C, cost={cost:.2f}")
         
         # Sort by cost and keep top candidates
         target_choices.sort(key=lambda x: x[0].cost)
@@ -1325,6 +1329,12 @@ if run:
     for cost, target_idx, slot_idx, choice in flat[:20]:
         target_counts[target_idx] = target_counts.get(target_idx, 0) + 1
     st.write(f"🔧 Debug: Target distribution in first 20 entries: {dict(sorted(target_counts.items()))}")
+    
+    # Show temperature analysis for first 20 entries
+    st.write("🔧 Debug: Temperature analysis for first 20 entries:")
+    for i, (cost, target_idx, slot_idx, choice) in enumerate(flat[:20]):
+        slot_tm = slot_list[slot_idx][2]  # Get slot temperature
+        st.write(f"  Entry {i+1}: target {target_idx}, slot {slot_idx} (Tm={slot_tm:.1f}°C), amp_tm={choice.tm_after:.1f}°C, cost={cost:.2f}")
     
     # Debug: show some information about the flat list
     if debug_mode:
